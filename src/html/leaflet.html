@@ -1,0 +1,128 @@
+<!DOCTYPE HTML>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <style>
+      html, body {
+        height: 100%;
+        padding: 0;
+        margin: 0;
+      }
+      #map {
+        /* Size of the map */
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      var osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
+      });
+
+      var arcgis = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}.png', {
+        maxZoom: 21,
+        attribution: '&copy; Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community</a>'
+      });
+
+      var graph = L.tileLayer('http://localhost:8080/tiles/graph/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var louvain = L.tileLayer('http://localhost:8080/tiles/louvain/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var route = L.tileLayer('http://localhost:8080/tiles/route/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var astar_route = L.tileLayer('http://localhost:8080/tiles/astar_route/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var ALL = L.tileLayer('http://localhost:8080/tiles/ALL/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var CH = L.tileLayer('http://localhost:8080/tiles/CH/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var DE = L.tileLayer('http://localhost:8080/tiles/DE/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var IL = L.tileLayer('http://localhost:8080/tiles/IL/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var JO = L.tileLayer('http://localhost:8080/tiles/JO/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var UA = L.tileLayer('http://localhost:8080/tiles/UA/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var RU = L.tileLayer('http://localhost:8080/tiles/RU/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var cross = L.tileLayer('http://localhost:8080/tiles/cross/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+      });
+
+      var map = L.map('map', {
+        center: [46.78566, 8.1596],
+        zoom: 9,
+        layers: [osm, graph]
+      });
+
+      var baseMaps = {
+      };
+
+      var overlayMaps = {
+        "OpenStreetMap": osm,
+        "ArcGis": arcgis,
+        "Graph": graph,
+        "Louvain": louvain,
+        "Route": route,
+        "A*-Route": astar_route,
+        "Länder": ALL,
+        "Schweiz": CH,
+        "Deutschland": DE,
+        "Israel": IL,
+        "Jordanien": JO,
+        "Ukraine": UA,
+        "Russland": RU,
+        "Cross-Country Edges": cross
+      };
+
+      var layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);
+
+      // show the scale bar on the lower left corner
+      L.control.scale({imperial: true, metric: true}).addTo(map);
+
+    </script>
+  </body>
+</html>
