@@ -19,7 +19,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 4. Support per-country defaults such as maxspeed and access. This uses a text config file, see [routing.cfg](./config/routing.cfg).
 5. Find **dead end roads** and their associated bridges (see algorithm in [tarjan.h](./src/algos/tarjan.h)). Removing a bridge disconnects the graph at the bridge. The smaller of the two disconnected components is called dead end. Knowing dead ends is valuable, because they can be ignored for routing, unless the start or target nodes are in a dead end. See an example road network with some dead ends below (blue=road red=bridge green=dead end): ![Routing Network with Dead ends](./docs/pictures/example_deadend.png)
 6. Implement standard routing algorithms. Currently, uni-directional versions of [Dijkstra](./src/algos/dijkstra.h) and [A*](./src/algos/astar.h) exist.
-7. **Visualization** is an important aspect when working with graph algorithms. The [tile server](https://switch2osm.org/using-tiles/) (see [tile_server.cpp](./src/bin/tile_server.cpp)) adds overlay images to standard osm graphs in the browser.
+7. **Visualization** is an important aspect when working with graph algorithms. The [tile server](https://switch2osm.org/using-tiles/) (see [tile_server.cpp](./src/bin/tile_server.cpp)) adds overlay images to standard osm graphs in the browser, see [leaflet.html](./src/html/leaflet.html).
 8. Basic Stuff:
    * Use multiple threads ([thread_pool.h](./src/base/thread_pool.h))
    * Command line parsing ([argli.h](./src/base/argli.h))
