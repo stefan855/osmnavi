@@ -667,7 +667,6 @@ void TestStrings() {
   TestString("1234567890");
 }
 
-
 void TestNodeList(const std::vector<std::uint64_t> ids1) {
   WriteBuff buff;
 
@@ -772,7 +771,6 @@ void TestLineClipping() {
 
   LOG_S(INFO) << "TestLineClipping() finished";
 }
-
 
 void TestFastPolygonContains() {
   LOG_S(INFO) << "TestFastPolygonContains() started";

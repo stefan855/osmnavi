@@ -424,8 +424,8 @@ void SortGWays(MetaData* meta) {
             [](const GWay& a, const GWay& b) { return a.id < b.id; });
 }
 
-void AddBasicGNodes(MetaData* meta) {
-  FuncTimer timer("Add basic gnodes");
+void AllocateGNodes(MetaData* meta) {
+  FuncTimer timer("AllocateGNodes");
   meta->graph.nodes.reserve(meta->way_nodes_needed.CountBits());
   NodeBuilder::GlobalNodeIter iter(meta->nodes);
   const NodeBuilder::VNode* node;
@@ -483,15 +483,14 @@ void ComputeEdgeCounts(MetaData* meta) {
   FuncTimer timer("Compute edge counts");
   std::mutex mut;
   const size_t unit_length = 25000;
-  ThreadPool<size_t> pool(
-      [meta, &mut, unit_length](int thread_idx, size_t start_pos) {
-        const size_t stop_pos =
-            std::min(start_pos + unit_length, meta->graph.ways.size());
-        ComputeEdgeCountsWorker(start_pos, stop_pos, meta, mut);
-      });
+  ThreadPool pool;
   for (size_t start_pos = 0; start_pos < meta->graph.ways.size();
        start_pos += unit_length) {
-    pool.AddWorkUnit(start_pos);
+    pool.AddWork([meta, &mut, start_pos, unit_length](int thread_idx) {
+      const size_t stop_pos =
+          std::min(start_pos + unit_length, meta->graph.ways.size());
+      ComputeEdgeCountsWorker(start_pos, stop_pos, meta, mut);
+    });
   }
   pool.Start(meta->n_threads);
   pool.WaitAllFinished();
@@ -605,15 +604,14 @@ void PopulateEdgeArrays(MetaData* meta) {
   FuncTimer timer("PopulateEdgeArrays()");
   std::mutex mut;
   const size_t unit_length = 25000;
-  ThreadPool<size_t> pool(
-      [meta, &mut, unit_length](int thread_idx, size_t start_pos) {
-        const size_t stop_pos =
-            std::min(start_pos + unit_length, meta->graph.ways.size());
-        PopulateEdgeArraysWorker(start_pos, stop_pos, meta, mut);
-      });
+  ThreadPool pool;
   for (size_t start_pos = 0; start_pos < meta->graph.ways.size();
        start_pos += unit_length) {
-    pool.AddWorkUnit(start_pos);
+    pool.AddWork([meta, &mut, start_pos, unit_length](int thread_idx) {
+      const size_t stop_pos =
+          std::min(start_pos + unit_length, meta->graph.ways.size());
+      PopulateEdgeArraysWorker(start_pos, stop_pos, meta, mut);
+    });
   }
   pool.Start(meta->n_threads);
   pool.WaitAllFinished();
@@ -678,7 +676,7 @@ void AnalizeLouvainGraph(
   uint64_t table_size = 0;
   double sum_nodes = 0;
   double sum_border_nodes = 0;
-  double sum_in = 0;  // Within-cluster edges, each edge is counted twice.
+  double sum_in = 0;   // Within-cluster edges, each edge is counted twice.
   double sum_out = 0;  // Outgoing edges, each edge is counted twice.
   uint32_t max_nodes = 0;
   uint32_t max_border_nodes = 0;
@@ -929,25 +927,25 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   const Graph& graph = meta.graph;
   LOG_S(INFO) << "=========== Pbf Stats ============";
   LOG_S(INFO) << absl::StrFormat(
-      "Nodes:             %12lld",
+      "Nodes:              %12lld",
       reader.CountEntries(OsmPbfReader::ContentNodes));
   LOG_S(INFO) << absl::StrFormat(
-      "Ways:              %12lld",
+      "Ways:               %12lld",
       reader.CountEntries(OsmPbfReader::ContentWays));
   LOG_S(INFO) << absl::StrFormat(
-      "Relations:         %12lld",
+      "Relations:          %12lld",
       reader.CountEntries(OsmPbfReader::ContentRelations));
 
   LOG_S(INFO) << "========= Various Stats ==========";
-  LOG_S(INFO) << absl::StrFormat("Num var-nodes:     %12lld",
+  LOG_S(INFO) << absl::StrFormat("Num var-nodes:      %12lld",
                                  meta.nodes.total_records());
   LOG_S(INFO) << absl::StrFormat(
-      "  bytes/var-node:  %12.2f",
+      "  bytes/var-node:   %12.2f",
       static_cast<double>(meta.nodes.mem_allocated()) /
           meta.nodes.total_records());
-  LOG_S(INFO) << absl::StrFormat("Num turn restricts:%12lld",
+  LOG_S(INFO) << absl::StrFormat("Num turn restricts: %12lld",
                                  meta.turn_restrictions.size());
-  LOG_S(INFO) << absl::StrFormat("Num turn restr errors:%9lld",
+  LOG_S(INFO) << absl::StrFormat("Num turn restr errors:%10lld",
                                  meta.hlp.num_turn_restriction_errors);
 
   LOG_S(INFO) << "========= Graph Stats ============";
@@ -976,26 +974,26 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
     num_oneway += w.dir_dontuse == DIR_BOTH ? 0 : 1;
   }
 
-  LOG_S(INFO) << absl::StrFormat("Num nodes:         %12lld",
+  LOG_S(INFO) << absl::StrFormat("Num nodes:          %12lld",
                                  graph.nodes.size());
-  LOG_S(INFO) << absl::StrFormat("  Num edges out:   %12lld", num_edges_out);
-  LOG_S(INFO) << absl::StrFormat("  Num edges in:    %12lld", num_edges_in);
+  LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld", num_edges_out);
+  LOG_S(INFO) << absl::StrFormat("  Num edges in:     %12lld", num_edges_in);
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node   %12.2f",
       static_cast<double>(num_edges_in + num_edges_out) / graph.nodes.size());
-  LOG_S(INFO) << absl::StrFormat("  Max edges out:   %12lld", max_edges_out);
-  LOG_S(INFO) << absl::StrFormat("  Max edges in:    %12lld", max_edges_in);
-  LOG_S(INFO) << absl::StrFormat("  Cross country edges:%9lld",
+  LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld", max_edges_out);
+  LOG_S(INFO) << absl::StrFormat("  Max edges in:     %12lld", max_edges_in);
+  LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  meta.hlp.num_cross_country_edges);
 
-  LOG_S(INFO) << absl::StrFormat("  Deadend nodes:   %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  meta.hlp.num_dead_end_nodes);
 
   std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
   std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
-  LOG_S(INFO) << absl::StrFormat("  Bytes per node   %12.2f",
+  LOG_S(INFO) << absl::StrFormat("  Bytes per node    %12.2f",
                                  (double)node_bytes / graph.nodes.size());
-  LOG_S(INFO) << absl::StrFormat("  Added per node   %12.2f",
+  LOG_S(INFO) << absl::StrFormat("  Added per node    %12.2f",
                                  (double)node_added_bytes / graph.nodes.size());
 
   std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
@@ -1073,19 +1071,32 @@ void PrintWayTagStats(const MetaData& meta) {
 void DoIt(const Argli& argli) {
   const std::string in_bpf = argli.GetString("pbf");
   const std::string admin_pattern = argli.GetString("admin_pattern");
+  const std::string routing_config = argli.GetString("routing_config");
 
   MetaData meta;
   meta.hlp.way_tag_stats = argli.GetBool("way_tag_stats");
   meta.hlp.log_turn_restrictions = argli.GetBool("log_turn_restrictions");
 
   OsmPbfReader reader(in_bpf, meta.n_threads);
-  reader.ReadFileStructure();
 
-  meta.tiler = new TiledCountryLookup(
-      admin_pattern,
-      /*tile_size=*/TiledCountryLookup::kDegreeUnits / 5);
-
-  meta.per_country_config.ReadConfig(argli.GetString("routing_config"));
+  // Combine a few setup operations that can be done in parallel.
+  {
+    ThreadPool pool;
+    // Read file structure of pbf file.
+    pool.AddWork([&reader](int thread_idx) { reader.ReadFileStructure(); });
+    // Read country polygons and initialise tiler.
+    pool.AddWork([&meta, &admin_pattern](int thread_idx) {
+      meta.tiler = new TiledCountryLookup(
+          admin_pattern,
+          /*tile_size=*/TiledCountryLookup::kDegreeUnits / 5);
+    });
+    // Read routing config.
+    pool.AddWork([&meta, &routing_config](int) {
+      meta.per_country_config.ReadConfig(routing_config);
+    });
+    pool.Start(std::min(meta.n_threads, 3));
+    pool.WaitAllFinished();
+  }
 
   LoadNodeCoordinates(&reader, &meta.nodes);
 
@@ -1101,7 +1112,7 @@ void DoIt(const Argli& argli) {
               std::mutex& mut) { ConsumeRelation(tagh, osm_rel, mut, &meta); });
   */
 
-  AddBasicGNodes(&meta);
+  AllocateGNodes(&meta);
 
   // Now we know exactly which ways we have and which nodes are needed.
   // Creade edges.

@@ -158,13 +158,12 @@ class OsmPbfReader {
   void ReadRelations(RelationWorkerFunc worker_func) {
     FuncTimer timer("ReadRelations()");
     std::mutex mut;
-    ThreadPool<BlobMeta*> pool(
-        [this, &worker_func, &mut](int thread_idx, BlobMeta* meta) {
-          this->HandleRelationBlob(thread_idx, meta, worker_func, mut);
-        });
+    ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
       if (meta.type == ContentRelations) {
-        pool.AddWorkUnit(&meta);
+        pool.AddWork([this, &worker_func, &meta, &mut](int thread_idx) {
+          this->HandleRelationBlob(thread_idx, worker_func, &meta, mut);
+        });
       }
     }
     pool.Start(n_threads_);
@@ -178,13 +177,12 @@ class OsmPbfReader {
   void ReadWays(WayWorkerFunc worker_func) {
     FuncTimer timer("ReadWays()");
     std::mutex mut;
-    ThreadPool<BlobMeta*> pool(
-        [this, &worker_func, &mut](int thread_idx, BlobMeta* meta) {
-          this->HandleWayBlob(thread_idx, meta, worker_func, mut);
-        });
+    ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
       if (meta.type == ContentWays) {
-        pool.AddWorkUnit(&meta);
+        pool.AddWork([this, &worker_func, &meta, &mut](int thread_idx) {
+          this->HandleWayBlob(thread_idx, worker_func, &meta, mut);
+        });
       }
     }
     pool.Start(n_threads_);
@@ -198,13 +196,12 @@ class OsmPbfReader {
   void ReadNodes(NodeWorkerFunc worker_func) {
     FuncTimer timer("ReadNodes()");
     std::mutex mut;
-    ThreadPool<BlobMeta*> pool(
-        [this, &worker_func, &mut](int thread_idx, BlobMeta* meta) {
-          this->HandleNodeBlob(thread_idx, meta, worker_func, mut);
-        });
+    ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
       if (meta.type == ContentNodes) {
-        pool.AddWorkUnit(&meta);
+        pool.AddWork([this, &worker_func, &meta, &mut](int thread_idx) {
+          this->HandleNodeBlob(thread_idx, worker_func, &meta, mut);
+        });
       }
     }
     pool.Start(n_threads_);
@@ -219,13 +216,12 @@ class OsmPbfReader {
     FuncTimer timer(absl::StrFormat("ReadBlobs(type=%s) started",
                                     BlobContentTypeToStr(type)));
     std::mutex mut;
-    ThreadPool<BlobMeta*> pool(
-        [this, &worker_func, &mut](int thread_idx, BlobMeta* meta) {
-          this->HandleBlob(thread_idx, meta, worker_func, mut);
-        });
+    ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
       if (meta.type == type) {
-        pool.AddWorkUnit(&meta);
+        pool.AddWork([this, &worker_func, &meta, &mut](int thread_idx) {
+          this->HandleBlob(thread_idx, worker_func, &meta, mut);
+        });
       }
     }
     pool.Start(n_threads_);
@@ -443,8 +439,8 @@ class OsmPbfReader {
                                    content_start[ContentUnknown] - 1);
   }
 
-  void HandleRelationBlob(int thread_idx, BlobMeta* meta,
-                          RelationWorkerFunc worker_func, std::mutex& mut) {
+  void HandleRelationBlob(int thread_idx, RelationWorkerFunc worker_func,
+                          BlobMeta* meta, std::mutex& mut) {
     CHECK_EQ_S(meta->type, ContentRelations);
     OSMPBF::PrimitiveBlock primblock;
     ReadBlob(file_handles_.at(thread_idx), meta, &primblock);
@@ -462,7 +458,7 @@ class OsmPbfReader {
     }
   }
 
-  void HandleWayBlob(int thread_idx, BlobMeta* meta, WayWorkerFunc worker_func,
+  void HandleWayBlob(int thread_idx, WayWorkerFunc worker_func, BlobMeta* meta,
                      std::mutex& mut) {
     CHECK_EQ_S(meta->type, ContentWays);
     OSMPBF::PrimitiveBlock primblock;
@@ -481,8 +477,8 @@ class OsmPbfReader {
     }
   }
 
-  void HandleNodeBlob(int thread_idx, BlobMeta* meta,
-                      NodeWorkerFunc worker_func, std::mutex& mut) {
+  void HandleNodeBlob(int thread_idx, NodeWorkerFunc worker_func,
+                      BlobMeta* meta, std::mutex& mut) {
     CHECK_EQ_S(meta->type, ContentNodes);
     OSMPBF::PrimitiveBlock primblock;
     ReadBlob(file_handles_.at(thread_idx), meta, &primblock);
@@ -503,7 +499,7 @@ class OsmPbfReader {
     }
   }
 
-  void HandleBlob(int thread_idx, BlobMeta* meta, BlobWorkerFunc worker_func,
+  void HandleBlob(int thread_idx, BlobWorkerFunc worker_func, BlobMeta* meta,
                   std::mutex& mut) {
     OSMPBF::PrimitiveBlock primblock;
     ReadBlob(file_handles_.at(thread_idx), meta, &primblock);

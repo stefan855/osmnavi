@@ -7,53 +7,53 @@
 #include <mutex>
 
 /*
-  Code Example.
+  ** Code Example:
+  ThreadPool pool;
+  for (int i = 0; i < 4; ++i) {
+    // See C++ lambda expressions on how to pass more parameters from context.
+    pool.AddWork([i](int thread_idx) {
+      usleep(i * 10000);
+      std::cerr << "Work" << i << " Thread" << thread_idx << std::endl;
+    });
+ 
+  pool.Start(2);  // Start with two threads.
+  pool.WaitAllFinished();
 
-  // Callback function that receives the unit of work
-  void MyRealWorkerFunc(int thread_idx, int* unit) {
-    // .... Do something with 'unit' ....
-    usleep(10000);
-  }
-
-  void UseThreadPool() {
-    std::vector<int> units;  // Data for each unit of work.
-    {
-      ThreadPool<int> pool(MyRealWorkerFunc);
-      for (int i = 0; i < 1000; ++i) {
-        units.push_back(i);
-      }
-      for (std::size_t i = 0; i < units.size(); ++i) {
-        pool.AddWorkUnit(&units[i]);
-      }
-      pool.Start(20);
-      pool.WaitAllFinished();
-    }
-  }
+  ** Output:
+  Work0 Thread0
+  Work1 Thread1
+  Work2 Thread0
+  Work3 Thread1
 */
 
-template <typename TWorkUnit>
 class ThreadPool {
  public:
-  // worker_func is the callback functuion for each unit of work.
-  // It is called with parameters
-  //   thread_idx: Identifies the thread, i.e. in the range [0..n_threads-1]
-  //   worker_unit*: A pointer to the data for this work unit.
-  ThreadPool(std::function<void(int, TWorkUnit)> worker_func)
-      : worker_func_(worker_func), wait_all_finished_(false) {}
+  // A function that does a piece of work. It has one argument (the thread
+  // index 0..n_threads), and no return value. Additional arguments may be
+  // stored in the function object, for instance by using a lambda expression.
+  using TWorkerFunc = std::function<void(int thread_idx)>;
+
+  ThreadPool() : wait_all_finished_(false) {}
 
   ~ThreadPool() {
     // Need to call WaitAllFinished() before destroying ThreadPool.
-    assert(wait_all_finished_ == true);
+    assert(threads_.empty() || wait_all_finished_);
   }
 
-  void AddWorkUnit(TWorkUnit work_unit) {
+  // Add one piece of work.
+  // Note that work will be started when Start() is called. Can only be called
+  // before Start().
+  void AddWork(TWorkerFunc worker_func) {
+    assert(threads_.empty());
     {
       std::unique_lock<std::mutex> l(mutex_);
-      queue_.push_back(work_unit);
+      queue_.push_back(worker_func);
     }
     cond_var_.notify_one();
   }
 
+  // Start work with 'n_threads' threads.
+  // Note that it is not allowed to call AddWork() after Start().
   void Start(int n_threads) {
     assert(threads_.empty());
     assert(n_threads > 0);
@@ -75,16 +75,15 @@ class ThreadPool {
   }
 
  private:
-  const std::function<void(int, TWorkUnit)> worker_func_;
   bool wait_all_finished_;
   std::mutex mutex_;
   std::condition_variable cond_var_;
   std::vector<std::thread> threads_;
-  std::deque<TWorkUnit> queue_;
+  std::deque<TWorkerFunc> queue_;
 
   static void worker_loop(ThreadPool& tp, int thread_idx) {
     while (true) {
-      TWorkUnit work_unit;
+      TWorkerFunc worker_func;
       {
         std::unique_lock<std::mutex> l(tp.mutex_);
         if (tp.queue_.empty()) {
@@ -101,10 +100,10 @@ class ThreadPool {
             }
           }
         }
-        work_unit = tp.queue_.front();
+        worker_func = tp.queue_.front();
         tp.queue_.pop_front();
       }
-      tp.worker_func_(thread_idx, work_unit);
+      worker_func(thread_idx);
     }
   }
 };
