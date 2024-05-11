@@ -40,5 +40,10 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 4. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 6. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
 7. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
-9. Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are useful only for the user experience during navigation.
+9. Support lanes. It isn't currentlycpp-httplib clear to me if lanes are needed for routing, or if they are useful only for the user experience during navigation.
 8. Experiment with SIMD parallelization primitives available on modern processors, especially for cluster node travel time computation.
+
+## Installation hints
+1. Code is developed on a 64-bit PC (AMD64) using Ubuntu Linux. I haven't tried compiling or running it on any other operating system or platform.
+1. The libraries abseil-cpp and cpp-httplib are imported as submodules. Run submodule update --init --recursive after cloning.
+1. The libraries libgd-dev, libosmpbf-dev and zlib1g-dev have to be installed.
