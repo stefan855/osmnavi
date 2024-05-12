@@ -12,10 +12,10 @@
  *   supports both "--name=aha and "--name aha"
  *   supports string, int, bool and double types.
  *   required string arguments can't have empty values.
- *   numeric values (int, bool, double) are type-checked at creation.
+ *   numeric values (int, bool, double) are type-checked when being parsed.
  *   supports --bool_flag without value and --bool_flag=true|false|1|0.
- *   supports positional arguments, such as '--verbose <filename>'
- *   does not support concatenation of argument names as in "ls -la"
+ *   supports positional arguments, such as '<filename> --verbose'
+ *   does not support concatenation of arguments as in "ls -la"
  *   does not support lists of values (but it would be simple to add).
  *   needs C++20 or newer.
  *

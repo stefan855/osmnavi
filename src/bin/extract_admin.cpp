@@ -1,5 +1,5 @@
 // Extract country polygons to /tmp/admin/ directory:
-//   ./extract_admin ../../data/planet-230814.osm.pbf /tmp/admin
+//   ./extract_admin ../../data/planet-240408.osm.pbf /tmp/admin
 // You will find files with "err" in the name if there are errors (and the total
 // number of errors is reported in this end). The files are in .csv format.
 //
@@ -182,8 +182,8 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  LOG_S(INFO) << "Written " << count << " polygon files "
-              << " with " << errors << " error(s)";
+  LOG_S(INFO) << "Written " << count << " polygon files with "
+              << errors << " error(s)";
   LOG_S(INFO) << "Finished.";
   return 0;
 }

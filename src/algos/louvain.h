@@ -208,7 +208,6 @@ struct LouvainGraph {
   // in_w:  weight sum of edges within cluster, counted per node, i.e. 2x.
   // tot_w: weight sum of edges of all nodes in cluster, counted per node.
   inline double Modularity(uint32_t in_w, uint32_t tot_w) const {
-    // constexpr double two_m = 20000000.0;
     const double in_part = in_w / two_m_;
     const double tot_part = tot_w / two_m_;
     return in_part - resolution_ * tot_part * tot_part;
@@ -316,20 +315,13 @@ struct LouvainGraph {
         // Detect target clusters that show up more than once.
         const double delta = DeltaQualityRemove(node_pos) +
                              DeltaQualityAdd(node_pos, e.other_node_pos);
-        /*
-        LOG_S(INFO) << absl::StrFormat("  Node:%d to-node:%d delta:%f",
-                                       node_pos, e.other_node_pos, delta);
-        LOG_S(INFO) << "    delta-rm:" << DeltaQualityRemove(node_pos)
-                    << " delta-add:"
-                    << DeltaQualityAdd(node_pos, e.other_node_pos);
-        */
         if (delta > best_delta) {
           best_delta = delta;
           best_edge = i;
         }
       }
     }
-    if (best_delta > 0) {
+    if (best_delta > 0.000000001) {
       MoveToNewCluster(node_pos, edges.at(best_edge).other_node_pos);
       return true;
     }

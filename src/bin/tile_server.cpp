@@ -13,7 +13,6 @@
 #include "cpp-httplib/httplib.h"
 #include "gd.h"
 #include "geometry/line_clipping.h"
-#include "json-c/json.h"
 
 namespace {
 

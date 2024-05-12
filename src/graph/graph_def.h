@@ -111,6 +111,9 @@ struct GEdge {
   // way's direction.
   // Important for example when selecting forward/backward speed.
   std::uint64_t contra_way : 1;
+  // 1 iff edge connects two points in different countries, 0 if both points
+  // belong to the same country.
+  std::uint64_t cross_country : 1;
 };
 
 struct Graph {

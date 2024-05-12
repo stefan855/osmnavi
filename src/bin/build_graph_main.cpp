@@ -53,6 +53,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
       edges[pos].unique_other = 0;
       edges[pos].bridge = 0;
       edges[pos].contra_way = contra_way ? 1 : 0;
+      edges[pos].cross_country = 0;
       return;
     }
   }
@@ -780,7 +781,7 @@ void WriteLouvainGraph(
 // Experimental.
 void ExecuteLouvain(MetaData* meta) {
   FuncTimer timer("ExecuteLouvain()");
-  constexpr double dfl_total_edge_weight = 5000000;
+  constexpr int64_t dfl_total_edge_weight = 1000000;
 
   // Nodes that are eligible because they are in country, not in dead end, etc.
   HugeBitset eligible_nodes;
