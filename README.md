@@ -30,18 +30,18 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
    * Distance between points on the earth, using the [haversine formula](https://en.wikipedia.org/wiki/Haversine_formula), see [distance.h](./src/geometry/distance.h).
 
 ## Current Tasks
-* Cluster the routing graph at the lowest level and for each cluster, precompute the cluster-internal routes between outside-connecting nodes. The user routing then runs on the much smaller graph induced by the clusters and the cluster-connecting edges. Precomputation of routes within clusters is done whenever needed and preferably on the user-device. Experimentation starts with the [Louvain method](https://en.wikipedia.org/wiki/Louvain_method), see experimental code in [louvain.h](./src/algos/louvain.h). 
+* Cluster the routing graph at the lowest level and for each cluster, precompute the cluster-internal routes between outside-connecting nodes. The user routing then runs on the much smaller graph induced by the clusters and the cluster-connecting edges. Precomputation of routes within clusters is done whenever needed and preferably on the user-device. Experimentation starts with the [Louvain method](https://en.wikipedia.org/wiki/Louvain_method), see  code in [louvain.h](./src/algos/louvain.h). 
 
 ## Tasks ahead
-1. Store the routing graph in a file. Currently, the import of OSM data is re-done every time the routing graph is needed (see [build_graph_main.cpp](./src/bin/build_graph_main.cpp)).
-2. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
-2. Add routing configs for more countries (see [routing.cfg](config/routing.cfg)).
-3. Support turn restrictions.
-4. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
-6. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
-7. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
-9. Support lanes. It isn't currentlycpp-httplib clear to me if lanes are needed for routing, or if they are useful only for the user experience during navigation.
-8. Experiment with SIMD parallelization primitives available on modern processors, especially for cluster node travel time computation.
+1. Store the routing graph in a file. Currently, the import of OSM data is re-done from scratch every time the routing graph is needed (see [build_graph_main.cpp](./src/bin/build_graph_main.cpp)).
+1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
+1. Add routing configs for more countries (see [routing.cfg](config/routing.cfg)).
+1. Support turn restrictions.
+1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
+1. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
+1. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
+1. Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are only useful for the user experience during navigation.
+1. Experiment with SIMD parallelization primitives available on modern processors, especially for cluster node travel time computation.
 
 ## Installation hints
 1. Code is developed on a 64-bit PC (AMD64) using Ubuntu Linux. I haven't tried compiling or running it on any other operating system or platform.
