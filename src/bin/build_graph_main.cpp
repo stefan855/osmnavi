@@ -31,9 +31,9 @@
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
-#include "osm-util/admin_boundary.h"
-#include "osm-util/osm_helpers.h"
-#include "osm-util/read_osm_pbf.h"
+#include "osm/admin_boundary.h"
+#include "osm/osm_helpers.h"
+#include "osm/read_osm_pbf.h"
 
 namespace build_graph {
 
@@ -626,11 +626,6 @@ void MarkUniqueEdges(MetaData* meta) {
 }
 
 namespace {
-bool SelectNodeForLouvain(const MetaData& meta, const GNode& n) {
-  return n.dead_end == 0 && n.large_component == 1;
-  // && meta.tiler->GetCountryNum(n.lon, n.lat) == NCC_DE;
-}
-
 void AnalizeLouvainGraph(
     const Graph& g,
     const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec) {
@@ -763,7 +758,7 @@ void WriteLouvainGraph(
         color = colors[cluster_0 % kMaxColor];
       }
 
-      if (&n0 >= &n1) continue;  // Ignore half of the edges.
+      if (&n0 >= &n1) continue;  // Ignore half the edges (don't paint twice).
       const GNode& gn0 = g.nodes.at(n0.back_ref);
       const GNode& gn1 = g.nodes.at(n1.back_ref);
       myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, gn0.lat,
@@ -776,6 +771,11 @@ void WriteLouvainGraph(
   LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
 }
 
+bool EligibleNodeForLouvain(const MetaData& meta, const GNode& n) {
+  return n.dead_end == 0 && n.large_component == 1;
+  // && meta.tiler->GetCountryNum(n.lon, n.lat) == NCC_DE;
+}
+
 }  // namespace
 
 // Experimental.
@@ -783,10 +783,11 @@ void ExecuteLouvain(MetaData* meta) {
   FuncTimer timer("ExecuteLouvain()");
   constexpr int64_t dfl_total_edge_weight = 1000000;
 
-  // Nodes that are eligible because they are in country, not in dead end, etc.
+  // Nodes that are eligible because they are not in dead end, etc.
+  // TODO: This bitset can be removed if the test function is sufficiently fast.
   HugeBitset eligible_nodes;
   for (uint32_t np = 0; np < meta->graph.nodes.size(); ++np) {
-    if (SelectNodeForLouvain(*meta, meta->graph.nodes.at(np))) {
+    if (EligibleNodeForLouvain(*meta, meta->graph.nodes.at(np))) {
       eligible_nodes.SetBit(np, true);
     }
   }
@@ -796,7 +797,7 @@ void ExecuteLouvain(MetaData* meta) {
   // The map is sorted by key and ascending order, and by construction, the
   // pointed to values are also sorted.
   //
-  // Keys are only inserted  for eligible nodes that have at least one edge to
+  // Keys are only inserted for eligible nodes that have at least one edge to
   // another eligible node.
   //
   // Note that when iterating, the keys *and* the values will appear in

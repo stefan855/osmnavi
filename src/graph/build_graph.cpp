@@ -12,8 +12,8 @@
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
-#include "osm-util/key_bits.h"
-#include "osm-util/osm_helpers.h"
+#include "osm/key_bits.h"
+#include "osm/osm_helpers.h"
 
 namespace build_graph {
 
@@ -429,7 +429,7 @@ std::string CreateWayTagSignature(const OSMTagHelper& tagh,
     //       absl::StrCat("highway=", tagh.GetValue(osm_way, tagh.highway_)));
     std::sort(tagvals.begin(), tagvals.end());
     for (const std::string& s : tagvals) {
-      absl::StrAppend(&res, s, " :: ");
+      absl::StrAppend(&res, s, " ## ");
     }
   }
   return res;

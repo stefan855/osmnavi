@@ -550,8 +550,8 @@ void RemoveEmptyClusters(LouvainGraph* g) {
 }
 
 // From a given Louvain graph with clusters, create a contracted graph with
-// the input clusters as nodes. The new nodes have the same positions as the
-// source clusters. Check-fails if there are empty clusters, i.e. call
+// the input clusters as nodes. The new nodes have the same in-vector positions
+// as the source clusters. Check-fails if there are empty clusters, i.e. call
 // RemoveEmptyClusters() before calling this function.
 void CreateClusterGraph(const LouvainGraph& input, LouvainGraph* result) {
   LOG_S(INFO) << absl::StrFormat(

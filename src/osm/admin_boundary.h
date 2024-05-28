@@ -18,8 +18,8 @@
 
 #include "absl/strings/str_split.h"
 #include "base/util.h"
-#include "osm-util/osm_helpers.h"
-#include "osm-util/read_osm_pbf.h"
+#include "osm/osm_helpers.h"
+#include "osm/read_osm_pbf.h"
 
 struct WayData {
   int64_t id;

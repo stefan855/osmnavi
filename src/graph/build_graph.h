@@ -9,7 +9,7 @@
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
-#include "osm-util/osm_helpers.h"
+#include "osm/osm_helpers.h"
 
 namespace build_graph {
 

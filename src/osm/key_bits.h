@@ -4,6 +4,9 @@
 
 #include "absl/strings/str_cat.h"
 
+// A key in a OSM key-value pair is a combination of key parts below, as in
+// 'maxspeed:forward'. Note that other keys exist, but we're not interested in
+// them.
 constexpr const std::string_view kKeyParts[] = {
     "access",        "advisory",  "backward",    "bicycle",       "both",
     "both_ways",     "bridge",    "bus",         "change",        "conditional",

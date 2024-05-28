@@ -2,8 +2,8 @@
 
 #include "base/argli.h"
 #include "base/util.h"
-#include "osm-util/osm_helpers.h"
-#include "osm-util/read_osm_pbf.h"
+#include "osm/osm_helpers.h"
+#include "osm/read_osm_pbf.h"
 
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);

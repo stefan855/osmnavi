@@ -19,9 +19,9 @@
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/routing_config.h"
-#include "osm-util/admin_boundary.h"
-#include "osm-util/key_bits.h"
-#include "osm-util/osm_helpers.h"
+#include "osm/admin_boundary.h"
+#include "osm/key_bits.h"
+#include "osm/osm_helpers.h"
 
 struct OsmWayWrapper {
   std::unique_ptr<OSMPBF::StringTable> t;

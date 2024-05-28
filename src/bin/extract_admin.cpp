@@ -16,8 +16,8 @@
 #include "absl/strings/str_format.h"
 #include "base/argli.h"
 #include "base/util.h"
-#include "osm-util/admin_boundary.h"
-#include "osm-util/read_osm_pbf.h"
+#include "osm/admin_boundary.h"
+#include "osm/read_osm_pbf.h"
 
 namespace {
 OsmPbfReader::Node FindNode(
