@@ -1,11 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <vector>
-
-#include "absl/strings/str_format.h"
-#include "graph/graph_def.h"
-
 // OSM contains Relations with lists of ways/nodes. These lists sometimes are
 // connected by node_ids. In this module, we call such a list a IdChain.
 //
@@ -15,7 +9,13 @@
 // When building an IdChain from such a relation, two problems have to be
 // solved. A way may need to be reversed to properly connect to the previous way
 // or node in the chain, and when the chain can't be connected properly, then an
-// error has to be detected.
+// error has to be issued.
+
+#include <cstdint>
+#include <vector>
+
+#include "absl/strings/str_format.h"
+#include "graph/graph_def.h"
 
 class IdChain {
  public:

@@ -564,7 +564,7 @@ bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
 
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, MetaData* meta) {
-  if (meta->hlp.way_tag_stats &&
+  if (meta->hlp.log_way_tag_stats &&
       !tagh.GetValue(osm_way, tagh.highway_).empty()) {
     std::string statkey = CreateWayTagSignature(tagh, osm_way);
     if (!statkey.empty()) {

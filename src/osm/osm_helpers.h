@@ -320,7 +320,7 @@ bool TurnRestrictionCollectIds(const OSMTagHelper& tagh,
 //       https://www.openstreetmap.org/relation/15824717.
 inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
                                     const OSMPBF::Relation& relation,
-                                    TurnRestriction* tr) {
+                                    bool logging_on, TurnRestriction* tr) {
   if (tagh.GetValue(relation, tagh.type_) != "restriction") {
     return ResType::Ignore;  // not a restriction.
   }
@@ -329,8 +329,10 @@ inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
     restriction = tagh.GetValue(relation, tagh.restriction_motorcar_);
   }
   if (restriction.empty()) {
-    LOG_S(INFO) << absl::StrFormat(
-        "TR: Can't get 'restriction' tag in relation %llu", relation.id());
+    if (logging_on) {
+      LOG_S(INFO) << absl::StrFormat(
+          "TR: Can't get 'restriction' tag in relation %llu", relation.id());
+    }
     return ResType::Error;
   }
 
@@ -342,9 +344,11 @@ inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
     restriction = restriction.substr(3);
   } else {
     if (!restriction.empty()) {
-      LOG_S(INFO) << absl::StrFormat(
-          "TR: Unknown restriction <%s> in relation %llu",
-          std::string(restriction).c_str(), relation.id());
+      if (logging_on) {
+        LOG_S(INFO) << absl::StrFormat(
+            "TR: Unknown restriction <%s> in relation %llu",
+            std::string(restriction).c_str(), relation.id());
+      }
     }
     return ResType::Error;
   }
@@ -357,9 +361,11 @@ inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
   } else if (restriction == "u_turn") {
     tr->direction = TurnDirection::UTurn;
   } else {
-    LOG_S(INFO) << absl::StrFormat(
-        "TR: Unknown direction <%s> in relation %llu",
-        std::string(restriction).c_str(), relation.id());
+    if (logging_on) {
+      LOG_S(INFO) << absl::StrFormat(
+          "TR: Unknown direction <%s> in relation %llu",
+          std::string(restriction).c_str(), relation.id());
+    }
     return ResType::Error;
   }
 
@@ -373,10 +379,12 @@ inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
   }
   if (from_ids.size() != 1 || to_ids.size() != 1 || via_ids.empty() ||
       (via_type == OSMPBF::Relation::NODE && via_ids.size() != 1)) {
-    LOG_S(INFO) << absl::StrFormat(
-        "TR: Can't handle from|via|to: %u|%u|%u via-type:%s relation_id:%lld",
-        from_ids.size(), via_ids.size(), to_ids.size(), TypeToString(via_type),
-        relation.id());
+    if (logging_on) {
+      LOG_S(INFO) << absl::StrFormat(
+          "TR: Can't handle from|via|to: %u|%u|%u via-type:%s relation_id:%lld",
+          from_ids.size(), via_ids.size(), to_ids.size(),
+          TypeToString(via_type), relation.id());
+    }
     return ResType::Error;
   }
 

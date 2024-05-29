@@ -142,6 +142,14 @@ struct Graph {
     }
   }
 
+  const GWay* FindWay(std::int64_t way_id) const {
+    size_t idx = FindWayIndex(way_id);
+    if (idx >= ways.size()) {
+      return nullptr;
+    }
+    return &(ways.at(idx));
+  }
+
   std::size_t FindNodeIndex(std::int64_t node_id) const {
     auto it = std::lower_bound(
         nodes.begin(), nodes.end(), node_id,

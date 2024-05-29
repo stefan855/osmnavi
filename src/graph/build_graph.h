@@ -32,7 +32,7 @@ struct HelperData {
 
   int64_t num_dead_end_nodes = 0;
 
-  bool way_tag_stats = false;
+  bool log_way_tag_stats = false;
   std::map<std::string, WayTagStat> way_tag_statmap;
 
   bool log_turn_restrictions = false;

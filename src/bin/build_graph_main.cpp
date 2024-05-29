@@ -32,6 +32,7 @@
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
 #include "osm/admin_boundary.h"
+#include "osm/id_chain.h"
 #include "osm/osm_helpers.h"
 #include "osm/read_osm_pbf.h"
 
@@ -208,153 +209,67 @@ void TestRoute(const Graph& g) {
 }
 
 namespace {
-struct IdPair {
-  enum Code { Free, Normal, Reversed, Error };
-  int64_t id1;
-  int64_t id2;
-  Code code = Free;
-  void SetCode(Code new_code) {
-    CHECK_NE_S(new_code, Free);
-    code = new_code;
-    if (new_code == Reversed) {
-      std::swap(id1, id2);
-    }
-  }
-};
-
-void GetFrontAndBackNodeId(const GWay& w, int64_t* front_id, int64_t* back_id) {
-  std::vector<uint64_t> ids = Graph::GetGWayNodeIds(w);
-  CHECK_GE_S(ids.size(), 2);
-  *front_id = ids.front();
-  *back_id = ids.back();
-}
-
-bool CreateIdPair(const Graph& g, int64_t way_id, IdPair* pair) {
-  size_t idx = g.FindWayIndex(way_id);
-  if (idx >= g.ways.size()) {
-    return false;
-  }
-  const GWay& way = g.ways.at(idx);
-  GetFrontAndBackNodeId(way, &pair->id1, &pair->id2);
-  return true;
-}
-
-// Find out if pair can be chained to predecessor_id.
-// Return IdPair::Normal or IdPair::Reversed if pair can be connected, or
-// IdPair::Error if it can't be connected.
-IdPair::Code TryAddIdPair(int64_t predecessor_id, const IdPair& pair) {
-  CHECK_EQ_S(pair.code, IdPair::Free);
-  if (pair.id1 == predecessor_id) {
-    return IdPair::Normal;
-  } else if (pair.id2 == predecessor_id) {
-    return IdPair::Reversed;
-  }
-  return IdPair::Error;
-}
-
-// Add a new pair to an existing chain. Return true if the new element could be
-// added without error, false if there was an error.
-bool AddIdPairToChain(const IdPair& p, std::vector<IdPair>* chain) {
-  if (chain->empty() || chain->back().code == IdPair::Error) {
-    chain->push_back(p);  // Leave in state 'Free'.
-    return true;
-  }
-  IdPair::Code code = TryAddIdPair(chain->back().id2, p);
-  if (chain->back().code == IdPair::Free) {
-    chain->back().SetCode(IdPair::Normal);
-    if (code == IdPair::Error) {
-      code = TryAddIdPair(chain->back().id1, p);
-      if (code != IdPair::Error) {
-        chain->back().SetCode(IdPair::Reversed);
-      }
-    }
-  }
-  chain->push_back(p);
-  chain->back().SetCode(code);
-  return code != IdPair::Error;
-}
-
-bool FinalizeChain(std::vector<IdPair>* chain) {
-  if (!chain->empty() && chain->back().code == IdPair::Free) {
-    chain->back().SetCode(IdPair::Normal);
-  }
-  bool res = true;
-  for (const IdPair& p : *chain) {
-    CHECK_NE_S(p.code, IdPair::Free);
-    res = res && (p.code != IdPair::Error);
-  }
-  return res;
-}
-
-std::string GetChainCodeString(const std::vector<IdPair>& chain) {
-  std::string res;
-  for (const IdPair& p : chain) {
-    CHECK_NE_S(p.code, IdPair::Free);
-    absl::StrAppend(&res, p.code == IdPair::Error    ? "X"
-                          : p.code == IdPair::Normal ? "N"
-                                                     : "R");
-  }
-  return res;
-}
-
 void LogMissingWay(std::string_view type, int64_t way_id, int64_t rel_id) {
   LOG_S(INFO) << absl::StrFormat("TR: '%s' way %lld in rel %lld not found",
                                  type, way_id, rel_id);
 }
 
 bool ConnectTurnRestriction(const MetaData& meta, TurnRestriction* tr) {
-  IdPair from;
-  if (!CreateIdPair(meta.graph, tr->from_way_id, &from)) {
+  IdChain chain;
+  IdChain::IdPair from;
+  if (!chain.CreateIdPair(meta.graph, tr->from_way_id, &from)) {
     if (meta.hlp.log_turn_restrictions) {
       LogMissingWay("from", tr->from_way_id, tr->relation_id);
     }
     return false;
   }
-  std::vector<IdPair> chain;
-  AddIdPairToChain(from, &chain);
+  chain.AddIdPair(from);
   if (tr->via_is_node) {
-    AddIdPairToChain({.id1 = tr->via_ids.at(0), .id2 = tr->via_ids.at(0)},
-                     &chain);
+    chain.AddIdPair({.id1 = tr->via_ids.at(0), .id2 = tr->via_ids.at(0)});
   } else {
     for (int64_t id : tr->via_ids) {
-      IdPair via;
-      if (!CreateIdPair(meta.graph, id, &via)) {
+      IdChain::IdPair via;
+      if (!chain.CreateIdPair(meta.graph, id, &via)) {
         if (meta.hlp.log_turn_restrictions) {
           LogMissingWay("via", id, tr->relation_id);
         }
         return false;
       }
-      AddIdPairToChain(via, &chain);
+      chain.AddIdPair(via);
     }
   }
 
-  IdPair to;
-  if (!CreateIdPair(meta.graph, tr->to_way_id, &to)) {
+  IdChain::IdPair to;
+  if (!chain.CreateIdPair(meta.graph, tr->to_way_id, &to)) {
     if (meta.hlp.log_turn_restrictions) {
       LogMissingWay("to", tr->to_way_id, tr->relation_id);
     }
     return false;
   }
-  AddIdPairToChain(to, &chain);
-  bool res = FinalizeChain(&chain);
+  chain.AddIdPair(to);
+  bool success = chain.success();
   if (meta.hlp.log_turn_restrictions) {
     LOG_S(INFO) << absl::StrFormat("TR: %u %s: %s match in relation %lld",
-                                   chain.size(), res ? "success" : "error",
-                                   GetChainCodeString(chain), tr->relation_id);
+                                   chain.get_chain().size(),
+                                   success ? "success" : "error",
+                                   chain.GetChainCodeString(), tr->relation_id);
   }
-  return res;
+  return success;
 }
 }  // namespace
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
                      std::mutex& mut, MetaData* meta) {
+  // TODO: Handle turn restrictions (currently we're only reading them).
   TurnRestriction tr;
-  ResType rt = ParseTurnRestriction(tagh, osm_rel, &tr);
-  if (rt == ResType::Success) {
-    ConnectTurnRestriction(*meta, &tr);
+  ResType rt =
+      ParseTurnRestriction(tagh, osm_rel, meta->hlp.log_turn_restrictions, &tr);
+  if (rt == ResType::Ignore) return;
+
+  if (rt == ResType::Success && ConnectTurnRestriction(*meta, &tr)) {
     std::unique_lock<std::mutex> l(mut);
     meta->turn_restrictions.push_back(tr);
-  } else if (rt == ResType::Error) {
+  } else {
     std::unique_lock<std::mutex> l(mut);
     meta->hlp.num_turn_restriction_errors++;
   }
@@ -945,7 +860,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
       "  bytes/var-node:   %12.2f",
       static_cast<double>(meta.nodes.mem_allocated()) /
           meta.nodes.total_records());
-  LOG_S(INFO) << absl::StrFormat("Num turn restricts: %12lld",
+  LOG_S(INFO) << absl::StrFormat("Num turn restrictions:%10lld",
                                  meta.turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num turn restr errors:%10lld",
                                  meta.hlp.num_turn_restriction_errors);
@@ -981,7 +896,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld", num_edges_out);
   LOG_S(INFO) << absl::StrFormat("  Num edges in:     %12lld", num_edges_in);
   LOG_S(INFO) << absl::StrFormat(
-      "  Num edges/node   %12.2f",
+      "  Num edges/node:   %12.2f",
       static_cast<double>(num_edges_in + num_edges_out) / graph.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld", max_edges_out);
   LOG_S(INFO) << absl::StrFormat("  Max edges in:     %12lld", max_edges_in);
@@ -1051,12 +966,11 @@ void PrintWayTagStats(const MetaData& meta) {
     const WayTagStat& stat = v.at(i).first;
     char cc[3] = "nw";
     {
-      size_t idx = meta.graph.FindWayIndex(stat.example_way_id);
-      if (idx < meta.graph.ways.size()) {
+      const GWay* way = meta.graph.FindWay(stat.example_way_id);
+      if (way != nullptr) {
         strcpy(cc, "--");
-        const GWay& way = meta.graph.ways.at(idx);
-        if (way.uniform_country) {
-          CountryNumToTwoLetter(way.ncc, cc);
+        if (way->uniform_country) {
+          CountryNumToTwoLetter(way->ncc, cc);
         }
       }
     }
@@ -1076,7 +990,7 @@ void DoIt(const Argli& argli) {
   const std::string routing_config = argli.GetString("routing_config");
 
   MetaData meta;
-  meta.hlp.way_tag_stats = argli.GetBool("way_tag_stats");
+  meta.hlp.log_way_tag_stats = argli.GetBool("log_way_tag_stats");
   meta.hlp.log_turn_restrictions = argli.GetBool("log_turn_restrictions");
 
   OsmPbfReader reader(in_bpf, meta.n_threads);
@@ -1107,12 +1021,10 @@ void DoIt(const Argli& argli) {
               std::mutex& mut) { ConsumeWayWorker(tagh, way, mut, &meta); });
   SortGWays(&meta);
 
-  /*
   // TurnRestriction currently not used.
   reader.ReadRelations(
       [&meta](const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
               std::mutex& mut) { ConsumeRelation(tagh, osm_rel, mut, &meta); });
-  */
 
   AllocateGNodes(&meta);
 
@@ -1140,7 +1052,7 @@ void DoIt(const Argli& argli) {
   ExecuteLouvain(&meta);
 
   // Output.
-  if (meta.hlp.way_tag_stats) {
+  if (meta.hlp.log_way_tag_stats) {
     PrintWayTagStats(meta);
   }
   WriteGraphToCSV(meta.graph, "/tmp/graph.csv");
@@ -1164,18 +1076,22 @@ int main(int argc, char* argv[]) {
            .positional = true,
            .required = true,
            .desc = "Input OSM pbf file (such as planet file)."},
+
           {.name = "admin_pattern",
            .type = "string",
            .dflt = "../../data/admin/??_*.csv",
            .desc = "Location of country boundary files."},
+
           {.name = "routing_config",
            .type = "string",
            .dflt = "../config/routing.cfg",
            .desc = "Location of routing config file."},
-          {.name = "way_tag_stats",
+
+          {.name = "log_way_tag_stats",
            .type = "bool",
            .desc = "Collect and print the way-tag-stats found in the data, "
                    "sorted by decreasing frequency."},
+
           {.name = "log_turn_restrictions",
            .type = "bool",
            .desc = "Log information about turn restrictions."},
