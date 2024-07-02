@@ -5,11 +5,13 @@
 #include <iostream>
 #include <vector>
 
+#include "absl/container/btree_map.h"
+#include "absl/strings/str_format.h"
 #include "algos/louvain.h"
 #include "graph/graph_def.h"
 #include "logging/loguru.h"
 
-namespace build_graph {
+namespace build_clusters {
 
 // Store the cluster information in Graph g.
 void StoreClusterInformation(
@@ -190,4 +192,134 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
   LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
 }
 
-}  // namespace build_graph
+namespace {
+
+bool EligibleNodeForLouvain(const GNode& n) {
+  return n.dead_end == 0 && n.large_component == 1;
+}
+
+}  // namespace
+
+// Experimental.
+std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
+    const Graph& graph) {
+  FuncTimer timer("ExecuteLouvain()");
+  constexpr int64_t dfl_total_edge_weight = 1000000;
+
+  // Nodes that are eligible because they are not in dead end, etc.
+  // TODO: This bitset can be removed if the test function is sufficiently fast.
+  HugeBitset eligible_nodes;
+  for (uint32_t np = 0; np < graph.nodes.size(); ++np) {
+    if (EligibleNodeForLouvain(graph.nodes.at(np))) {
+      eligible_nodes.SetBit(np, true);
+    }
+  }
+
+  // 'np_to_louvain_pos' contains a mapping from a node position in
+  // graph.nodes to the precomputed node position in the louvain graph.
+  // The map is sorted by key and ascending order, and by construction, the
+  // pointed to values are also sorted.
+  //
+  // Keys are only inserted for eligible nodes that have at least one edge to
+  // another eligible node.
+  //
+  // Note that when iterating, the keys *and* the values will appear in
+  // increasing order.
+  absl::btree_map<uint32_t, uint32_t> np_to_louvain_pos;
+  for (uint32_t np = 0; np < graph.nodes.size(); ++np) {
+    if (eligible_nodes.GetBit(np)) {
+      const GNode& n = graph.nodes.at(np);
+      for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
+        const GEdge& e = n.edges[ep];
+        if (e.unique_other && e.other_node_idx != np &&
+            eligible_nodes.GetBit(e.other_node_idx)) {
+          // Edge between two eligible nodes.
+          // Node 'n' at position 'np' is good to use.
+          np_to_louvain_pos[np] = np_to_louvain_pos.size();
+          break;
+        }
+      }
+    }
+  }
+
+  std::vector<std::unique_ptr<louvain::LouvainGraph>> gvec;
+  gvec.push_back(std::make_unique<louvain::LouvainGraph>());
+  louvain::LouvainGraph* g = gvec.back().get();
+
+  // Create initial Louvain graph.
+  for (auto [np, louvain_pos] : np_to_louvain_pos) {
+    g->AddNode(louvain_pos, np);
+    const GNode& n = graph.nodes.at(np);
+    for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
+      const GEdge& e = n.edges[ep];
+      if (e.unique_other && e.other_node_idx != np &&
+          eligible_nodes.GetBit(e.other_node_idx)) {
+        auto it = np_to_louvain_pos.find(e.other_node_idx);
+        CHECK_S(it != np_to_louvain_pos.end());
+        const GWay& way = graph.ways.at(e.way_idx);
+        if (way.highway_label == HW_RESIDENTIAL ||
+            way.highway_label == HW_LIVING_STREET ||
+            way.highway_label == HW_SERVICE) {
+          g->AddEdge(it->second, /*weight=*/1);
+        } else {
+          g->AddEdge(it->second, /*weight=*/1);
+        }
+      }
+    }
+    CHECK_GT_S(g->nodes.back().num_edges, 0);
+  }
+
+  LOG_S(INFO) << absl::StrFormat("Louvain nodes: %12d", g->nodes.size());
+  LOG_S(INFO) << absl::StrFormat("Louvain edges: %12d", g->edges.size());
+
+  {
+    louvain::NodeLineRemover::ClusterLineNodes(g);
+    RemoveEmptyClusters(g);
+    gvec.push_back(std::make_unique<louvain::LouvainGraph>());
+    CreateClusterGraph(*g, gvec.back().get());
+    g = gvec.back().get();
+    g->SetTotalEdgeWeight(dfl_total_edge_weight);
+  }
+
+  LOG_S(INFO) << absl::StrFormat("Louvain nodes (no line nodes): %12d",
+                                 g->nodes.size());
+  LOG_S(INFO) << absl::StrFormat("Louvain edges (no line nodes): %12d",
+                                 g->edges.size());
+
+  constexpr int MaxLevel = 20;
+  for (int level = 0; level < MaxLevel; ++level) {
+    g->Validate();
+
+    uint32_t prev_moves = INFU32;
+    uint32_t prev_empty = 0;
+    for (int step = 0; step < 40; ++step) {
+      uint32_t moves = g->Step();
+      if (g->empty_clusters_ <= prev_empty && moves >= prev_moves) {
+        break;
+      }
+      prev_moves = moves;
+      prev_empty = g->empty_clusters_;
+
+      LOG_S(INFO) << absl::StrFormat(
+          "Level %d Step %d moves:%u #clusters:%u empty:%u", level, step, moves,
+          g->clusters.size(), g->empty_clusters_);
+      if (moves == 0) {
+        if (step == 0) {
+          level = MaxLevel - 1;  // Complete stop.
+        }
+        break;
+      }
+    }
+    RemoveEmptyClusters(g);
+    if (level < MaxLevel - 1) {
+      // Create a new level.
+      gvec.push_back(std::make_unique<louvain::LouvainGraph>());
+      CreateClusterGraph(*g, gvec.back().get());
+      g = gvec.back().get();
+      g->SetTotalEdgeWeight(dfl_total_edge_weight);
+    }
+  }
+  return gvec;
+}
+
+}  // namespace build_clusters
