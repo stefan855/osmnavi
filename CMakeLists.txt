@@ -31,13 +31,14 @@ add_compile_options(-Wall)
 add_compile_options(-Wno-unused-but-set-variable)
 add_compile_options(-Wno-unused-variable)
 add_compile_options(-DLOGURU_WITH_STREAMS=1)
+# add_compile_options(-D_GLIBCXX_CONCEPT_CHECKS -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC)
 
 add_library(loguru_lib src/logging/loguru.cpp)
 add_library(build_graph_lib src/graph/build_graph.cpp)
 
 add_executable(build_graph_main src/bin/build_graph_main.cpp)
 target_include_directories(build_graph_main SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
-target_link_libraries(build_graph_main PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::btree absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
+target_link_libraries(build_graph_main PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
 
 add_executable(osmgrep src/bin/osmgrep.cpp)
 target_include_directories(osmgrep SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
@@ -45,7 +46,7 @@ target_link_libraries(osmgrep PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf ab
 
 add_executable(test src/test/test.cpp)
 target_include_directories(test SYSTEM PRIVATE)
-target_link_libraries(test PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
+target_link_libraries(test PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::flat_hash_map  absl::str_format loguru_lib absl::time build_graph_lib)
 
 add_executable(test_louvain src/test/test_louvain.cpp)
 target_include_directories(test_louvain SYSTEM PRIVATE)

@@ -6,6 +6,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
 #include "base/country_code.h"
 #include "geometry/fast_country_polygons.h"
 #include "geometry/line_clipping.h"
@@ -163,5 +164,5 @@ class TiledCountryLookup {
   // 1) Tile key doesn't exist: No country assigned to this tile.
   // 2) Value is 0: mixed results in the tile, evaluate fully.
   // 3) Value is > 0: All points in the tile have the same country (the value).
-  std::unordered_map<uint64_t, uint16_t> tile_to_country_;
+  absl::flat_hash_map<uint64_t, uint16_t> tile_to_country_;
 };

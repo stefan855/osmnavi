@@ -31,6 +31,7 @@
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
+#include "graph/store_louvain_clusters.h"
 #include "osm/admin_boundary.h"
 #include "osm/id_chain.h"
 #include "osm/osm_helpers.h"
@@ -67,7 +68,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
 
 void MarkUniqueOther(GNode* n) {
   GEdge* edges = n->edges;
-  for (size_t i = 0; i < n->num_edges_out + n->num_edges_in; ++i) {
+  for (size_t i = 0; i < gnode_num_edges(*n); ++i) {
     size_t k = 0;
     while (k < i) {
       if (edges[i].other_node_idx == edges[k].other_node_idx) {
@@ -416,7 +417,7 @@ void AllocateEdgeArrays(MetaData* meta) {
   FuncTimer timer("Allocate edge arrays");
   Graph& graph = meta->graph;
   for (GNode& n : meta->graph.nodes) {
-    const std::uint32_t num_edges = snode_num_edges(n);
+    const std::uint32_t num_edges = gnode_num_edges(n);
     CHECK_GT_S(num_edges, 0u);
     if (num_edges > 0) {
       n.edges = (GEdge*)meta->graph.aligned_pool_.AllocBytes(num_edges *
@@ -541,150 +542,6 @@ void MarkUniqueEdges(MetaData* meta) {
 }
 
 namespace {
-void AnalizeLouvainGraph(
-    const Graph& g,
-    const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec) {
-  const louvain::LouvainGraph& lg = *gvec.front();
-  struct ClusterStats {
-    uint32_t cluster_pos = 0;
-    uint32_t num_nodes = 0;
-    uint32_t num_border_nodes = 0;
-    uint32_t num_in_edges = 0;
-    uint32_t num_out_edges = 0;
-  };
-  std::vector<ClusterStats> stats(gvec.back()->clusters.size());
-
-  for (uint32_t node_pos = 0; node_pos < lg.nodes.size(); ++node_pos) {
-    const louvain::LouvainNode& n0 = lg.nodes.at(node_pos);
-    uint32_t cluster_0 = FindFinalCluster(gvec, node_pos);
-    ClusterStats& rec = stats.at(cluster_0);
-    rec.cluster_pos = cluster_0;
-    rec.num_nodes++;
-
-    bool is_border_node = false;
-    for (uint32_t p = n0.edge_start; p < n0.edge_start + n0.num_edges; ++p) {
-      const louvain::LouvainEdge& e = lg.edges.at(p);
-      const louvain::LouvainNode& n1 = lg.nodes.at(e.other_node_pos);
-      uint32_t cluster_1 = FindFinalCluster(gvec, e.other_node_pos);
-      if (cluster_0 == cluster_1) {
-        rec.num_in_edges++;
-      } else {
-        rec.num_out_edges++;
-        is_border_node = true;
-      }
-    }
-    if (is_border_node) {
-      rec.num_border_nodes++;
-    }
-  }
-
-  std::sort(stats.begin(), stats.end(), [](const auto& a, const auto& b) {
-    double va = (100.0 * a.num_out_edges) / std::max(a.num_in_edges, 1u);
-    double vb = (100.0 * b.num_out_edges) / std::max(b.num_in_edges, 1u);
-    return va > vb;
-  });
-
-  uint64_t table_size = 0;
-  double sum_nodes = 0;
-  double sum_border_nodes = 0;
-  double sum_in = 0;   // Within-cluster edges, each edge is counted twice.
-  double sum_out = 0;  // Outgoing edges, each edge is counted twice.
-  uint32_t max_nodes = 0;
-  uint32_t max_border_nodes = 0;
-  uint32_t max_in = 0;
-  uint32_t max_out = 0;
-  uint64_t replacement_edges = 0;
-  for (size_t i = 0; i < stats.size(); ++i) {
-    const ClusterStats& rec = stats.at(i);
-
-    table_size += (rec.num_out_edges * rec.num_out_edges);
-    sum_nodes += rec.num_nodes;
-    sum_border_nodes += rec.num_border_nodes;
-    sum_in += rec.num_in_edges;
-    sum_out += rec.num_out_edges;
-    max_nodes = std::max(max_nodes, rec.num_nodes);
-    max_border_nodes = std::max(max_border_nodes, rec.num_border_nodes);
-    max_in = std::max(max_in, rec.num_in_edges);
-    max_out = std::max(max_out, rec.num_out_edges);
-
-    replacement_edges +=
-        (rec.num_border_nodes * (rec.num_border_nodes - 1)) / 2;
-
-    LOG_S(INFO) << absl::StrFormat(
-        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In-Edges:%5u Out-Edges:%5u "
-        "Out/In:%2.2f%%",
-        i, rec.cluster_pos, rec.num_nodes, rec.num_border_nodes,
-        rec.num_in_edges, rec.num_out_edges,
-        (100.0 * rec.num_out_edges) / std::max(rec.num_in_edges, 1u));
-  }
-  LOG_S(INFO) << absl::StrFormat("Table size %u, %.3f per node in graph",
-                                 table_size,
-                                 (table_size + 0.0) / lg.nodes.size());
-  LOG_S(INFO) << absl::StrFormat(
-      "  Sum nodes:%.0f sum border:%.0f sum in-edges:%.0f sum out-edges:%.0f",
-      sum_nodes, sum_border_nodes, sum_in, sum_out);
-  LOG_S(INFO) << absl::StrFormat(
-      "  Avg nodes:%.1f avg border:%.1f avg in-edges:%.1f avg out-edges:%.1f",
-      sum_nodes / stats.size(), sum_border_nodes / stats.size(),
-      sum_in / stats.size(), sum_out / stats.size());
-  LOG_S(INFO) << absl::StrFormat(
-      "  Max nodes:%u max border:%u max in-edges:%u max out-edges:%u",
-      max_nodes, max_border_nodes, max_in, max_out);
-
-  // Cluster Graph Summary
-  uint64_t total_edges = replacement_edges + (uint64_t)sum_out / 2;
-  uint64_t total_nodes = (uint64_t)sum_border_nodes;
-  LOG_S(INFO) << absl::StrFormat(
-      "  Cluster-Graph: added edges:%llu total edges:%llu (%.1f%%)  total "
-      "nodes:%llu (%.1f%%)",
-      replacement_edges, total_edges,
-      (100.0 * total_edges) / ((sum_in + sum_out) / 2), total_nodes,
-      (100.0 * total_nodes) / sum_nodes);
-}
-
-void WriteLouvainGraph(
-    const Graph& g,
-    const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec,
-    const std::string& filename) {
-  LOG_S(INFO) << absl::StrFormat("Write louvain graph to %s", filename.c_str());
-  std::ofstream myfile;
-  myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
-
-  const louvain::LouvainGraph& lg = *gvec.front();
-  uint64_t count = 0;
-  for (uint32_t node_pos = 0; node_pos < lg.nodes.size(); ++node_pos) {
-    const louvain::LouvainNode& n0 = lg.nodes.at(node_pos);
-    uint32_t cluster_0 = FindFinalCluster(gvec, node_pos);
-
-    for (uint32_t p = n0.edge_start; p < n0.edge_start + n0.num_edges; ++p) {
-      const louvain::LouvainEdge& e = lg.edges.at(p);
-      const louvain::LouvainNode& n1 = lg.nodes.at(e.other_node_pos);
-      uint32_t cluster_1 = FindFinalCluster(gvec, e.other_node_pos);
-      std::string_view color = "mag";  // edges between clusters
-      if (cluster_0 == cluster_1) {
-        // edge within cluster.
-        constexpr int32_t kMaxColor = 16;
-        static std::string_view colors[kMaxColor] = {
-            "blue",  "green",  "red",    "black", "yel",   "violet",
-            "olive", "lblue",  "dgreen", "dred",  "brown", "grey",
-            "gblue", "orange", "lgreen", "pink",
-        };
-
-        color = colors[cluster_0 % kMaxColor];
-      }
-
-      if (&n0 >= &n1) continue;  // Ignore half the edges (don't paint twice).
-      const GNode& gn0 = g.nodes.at(n0.back_ref);
-      const GNode& gn1 = g.nodes.at(n1.back_ref);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, gn0.lat,
-                                gn0.lon, gn1.lat, gn1.lon);
-      count++;
-    }
-  }
-
-  myfile.close();
-  LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
-}
 
 bool EligibleNodeForLouvain(const MetaData& meta, const GNode& n) {
   return n.dead_end == 0 && n.large_component == 1;
@@ -721,7 +578,7 @@ void ExecuteLouvain(MetaData* meta) {
   for (uint32_t np = 0; np < meta->graph.nodes.size(); ++np) {
     if (eligible_nodes.GetBit(np)) {
       const GNode& n = meta->graph.nodes.at(np);
-      for (size_t ep = 0; ep < n.num_edges_out + n.num_edges_in; ++ep) {
+      for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
         const GEdge& e = n.edges[ep];
         if (e.unique_other && e.other_node_idx != np &&
             eligible_nodes.GetBit(e.other_node_idx)) {
@@ -742,7 +599,7 @@ void ExecuteLouvain(MetaData* meta) {
   for (auto [np, louvain_pos] : np_to_louvain_pos) {
     g->AddNode(louvain_pos, np);
     const GNode& n = meta->graph.nodes.at(np);
-    for (size_t ep = 0; ep < n.num_edges_out + n.num_edges_in; ++ep) {
+    for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
       const GEdge& e = n.edges[ep];
       if (e.unique_other && e.other_node_idx != np &&
           eligible_nodes.GetBit(e.other_node_idx)) {
@@ -812,8 +669,9 @@ void ExecuteLouvain(MetaData* meta) {
     }
   }
 
-  WriteLouvainGraph(meta->graph, gvec, "/tmp/louvain.csv");
-  AnalizeLouvainGraph(meta->graph, gvec);
+  StoreClusterInformation(gvec, &meta->graph);
+  PrintClusterInformation(meta->graph, gvec);
+  WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
 }
 
 void PrintStructSizes() {

@@ -69,7 +69,7 @@ class ComponentAnalyzer {
         // TODO: pop from front? Might be more efficient.
         GNode& n = g->nodes.at(nodes.front());
         nodes.pop_front();
-        for (size_t edge_pos = 0; edge_pos < snode_num_edges(n); ++edge_pos) {
+        for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
           GEdge& e = n.edges[edge_pos];
           if (!e.unique_other) continue;
           GNode& other = g->nodes.at(e.other_node_idx);
@@ -93,7 +93,7 @@ class ComponentAnalyzer {
       queue.pop_back();
       count++;
       const GNode& n = g_.nodes.at(node_idx);
-      for (uint32_t pos = 0; pos < snode_num_edges(n); ++pos) {
+      for (uint32_t pos = 0; pos < gnode_num_edges(n); ++pos) {
         const uint32_t other_idx = n.edges[pos].other_node_idx;
         if (n.edges[pos].unique_other && label_.at(other_idx) == INFU32) {
           queue.push_back(other_idx);

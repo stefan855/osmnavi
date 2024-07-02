@@ -7,6 +7,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
 #include "base/country_code.h"
@@ -116,7 +117,7 @@ class FastCountryPolygons {
 
   void CountRayIntersections(
       const int32_t p_x, const int32_t p_y,
-      std::unordered_map<uint16_t, int32_t>* counts_per_country) const {
+      absl::flat_hash_map<uint16_t, int32_t>* counts_per_country) const {
     for (size_t pos = 0; pos < max_height_.size(); ++pos) {
       const std::vector<Line>& lines = limited_lines_.at(pos);
       //      auto it = lines.begin();
@@ -143,7 +144,7 @@ class FastCountryPolygons {
 
   uint16_t GetCountryNum(const int32_t p_x, const int32_t p_y,
                          const int64_t debug_id = 0) const {
-    std::unordered_map<uint16_t, int32_t> counts_per_country;
+    absl::flat_hash_map<uint16_t, int32_t> counts_per_country;
     CountRayIntersections(p_x, p_y, &counts_per_country);
     int num_odds = 0;
     uint16_t found_country_num = 0;
@@ -242,7 +243,7 @@ class FastCountryPolygons {
   }
 
   int CountIntersections(const int32_t p_x, const int32_t p_y) const {
-    std::unordered_map<uint16_t, int32_t> counts_per_country;
+    absl::flat_hash_map<uint16_t, int32_t> counts_per_country;
     CountRayIntersections(p_x, p_y, &counts_per_country);
     int total = 0;
     for (auto [country_num, count] : counts_per_country) {

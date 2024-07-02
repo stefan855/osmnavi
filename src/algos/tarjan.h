@@ -10,7 +10,7 @@
 inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
   GNode& from = g.nodes.at(from_idx);
   if (from.dead_end) return;
-  for (size_t edge_pos = 0; edge_pos < snode_num_edges(from); ++edge_pos) {
+  for (size_t edge_pos = 0; edge_pos < gnode_num_edges(from); ++edge_pos) {
     GEdge& e = from.edges[edge_pos];
     if (e.other_node_idx == to_idx) {
       e.bridge = 1;
@@ -31,7 +31,7 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
   size_t pos = 0;
   while (pos < nodes.size()) {
     GNode& n = g.nodes.at(nodes.at(pos++));
-    for (size_t edge_pos = 0; edge_pos < snode_num_edges(n); ++edge_pos) {
+    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
       GEdge& e = n.edges[edge_pos];
       if (e.bridge || !e.unique_other) continue;
       GNode& other = g.nodes.at(e.other_node_idx);
@@ -58,7 +58,7 @@ class Tarjan {
 
 #if 0
   // Recursive Version of Tarjan bridge finding algorithm. Not used because
-  // recursion causes memory issues on large graphs.
+  // recursion causes stack memory issues on large graphs.
   void DFS(std::int32_t parent, std::int32_t current, std::int32_t time,
            std::vector<std::int32_t>* visno, std::vector<std::int32_t>* low) {
     visno->at(current) = time;
@@ -182,7 +182,7 @@ class Tarjan {
   // This is used to iterate over the undirected neighbours of a node.
   bool GetNextNeighbour(const GNode& n, std::uint32_t* edge_pos,
                         std::uint32_t* neighbour) {
-    const uint32_t num_edges = snode_num_edges(n);
+    const uint32_t num_edges = gnode_num_edges(n);
     while ((*edge_pos) < num_edges) {
       if (n.edges[*edge_pos].unique_other) {
         *neighbour = n.edges[*edge_pos].other_node_idx;

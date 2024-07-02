@@ -70,13 +70,13 @@ inline bool RoutableBackward(const GWay& way) {
   return RoutableAccess(way.ri[1].access);
 }
 
+constexpr std::uint32_t INVALID_CLUSTER_ID = (1 << 22) - 1;
+
 struct GEdge;
 struct GNode {
   std::int64_t node_id : 40;
-  std::int32_t lat = 0;
-  std::int32_t lon = 0;
-  std::uint32_t num_edges_out : 16;
-  std::uint32_t num_edges_in : 16;  // Is one byte actually enough?
+  std::uint32_t num_edges_out : 11;
+  std::uint32_t num_edges_in : 11;  // Is one byte actually enough?
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
   // node outside of this dead end have to pass through the bridge edge.
@@ -86,10 +86,19 @@ struct GNode {
   std::uint32_t dead_end : 1;
   // 1 iff the node is in a large component of the graph.
   std::uint32_t large_component : 1;
+
+  // Cluster id number. It is expected (and checked during construction)
+  // that there are less than 2^22 clusters in the planet graph.
+  std::uint32_t cluster_id : 22 = INVALID_CLUSTER_ID;
+  // 1 iff the node connects to different clusters.
+  std::uint32_t cluster_border_node : 1 = 0;
+
+  std::int32_t lat = 0;
+  std::int32_t lon = 0;
   GEdge* edges;  // Array of length 'num_edges_out + num_edges_in'.
 };
 
-inline size_t snode_num_edges(const GNode& n) {
+inline size_t gnode_num_edges(const GNode& n) {
   return n.num_edges_out + n.num_edges_in;
 }
 
@@ -116,6 +125,20 @@ struct GEdge {
   std::uint64_t cross_country : 1;
 };
 
+// Contains the list of border nodes and some metadata for a cluster.
+struct GCluster {
+  std::uint32_t cluster_id = 0;
+  std::uint32_t num_nodes = 0;
+  std::uint32_t num_border_nodes = 0;
+  // Each edge is either 'inner', 'outer' (connects to another cluster) or a
+  // bridge.
+  std::uint32_t num_inner_edges = 0;
+  std::uint32_t num_outer_edges = 0;
+  std::uint32_t num_bridges = 0;
+  // Sorted vector containing the border node indexes.
+  std::vector<std::uint32_t> border_nodes;
+};
+
 struct Graph {
   struct Component {
     uint32_t start_node;
@@ -126,10 +149,11 @@ struct Graph {
 
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
-  SimpleMemPool aligned_pool_;
-  SimpleMemPool unaligned_pool_;
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
+  std::vector<GCluster> clusters;
+  SimpleMemPool aligned_pool_;
+  SimpleMemPool unaligned_pool_;
 
   std::size_t FindWayIndex(std::int64_t way_id) const {
     auto it = std::lower_bound(

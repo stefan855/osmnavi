@@ -4,6 +4,7 @@
 #include <queue>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "algos/routing_metric.h"
 #include "base/util.h"
 #include "graph/graph_def.h"
@@ -133,7 +134,7 @@ class DijkstraRouter {
 
   const Graph& g_;
   std::vector<VisitedNode> visited_nodes_;
-  std::unordered_map<std::uint32_t, std::uint32_t> node_to_vnode_idx_;
+  absl::flat_hash_map<uint32_t, uint32_t> node_to_vnode_idx_;
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, decltype(&MetricCmp)>
       pq_;
   std::uint32_t target_visited_node_index_;
