@@ -15,6 +15,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "algos/astar.h"
+#include "algos/cluster_dijkstra.h"
 #include "algos/components.h"
 #include "algos/dijkstra.h"
 #include "algos/louvain.h"
@@ -56,6 +57,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
       edges[pos].bridge = 0;
       edges[pos].contra_way = contra_way ? 1 : 0;
       edges[pos].cross_country = 0;
+      edges[pos].cross_cluster = 0;
       return;
     }
   }
@@ -542,10 +544,17 @@ void MarkUniqueEdges(MetaData* meta) {
 }
 
 void ExecuteLouvain(MetaData* meta) {
+  FuncTimer timer("ExecuteLouvain()");
   auto gvec = build_clusters::ExecuteLouvainStages(meta->graph);
   build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::PrintClusterInformation(meta->graph, gvec);
   build_clusters::WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
+  if (!meta->graph.clusters.empty()) {
+    RoutingMetricTime metric;
+    for (GCluster& cluster : meta->graph.clusters) {
+      ComputeShortestClusterPaths(meta->graph, metric, &cluster);
+    }
+  }
 }
 
 void PrintStructSizes() {
@@ -600,6 +609,8 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << "========= Graph Stats ============";
   size_t num_edges_in = 0;
   size_t num_edges_out = 0;
+  size_t num_non_unique_edges = 0;
+  size_t num_cross_cluster_edges = 0;
   size_t max_edges_in = 0;
   size_t max_edges_out = 0;
   for (const GNode& n : graph.nodes) {
@@ -607,6 +618,14 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
     num_edges_out += n.num_edges_out;
     max_edges_in = std::max((uint64_t)n.num_edges_in, max_edges_in);
     max_edges_out = std::max((uint64_t)n.num_edges_out, max_edges_out);
+    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
+      if (!n.edges[edge_pos].unique_other) {
+        num_non_unique_edges++;
+      }
+      if (n.edges[edge_pos].cross_cluster) {
+        num_cross_cluster_edges++;
+      }
+    }
   }
 
   uint64_t num_diff_maxspeed = 0;
@@ -627,6 +646,10 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
                                  graph.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld", num_edges_out);
   LOG_S(INFO) << absl::StrFormat("  Num edges in:     %12lld", num_edges_in);
+  LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
+                                 num_non_unique_edges);
+  LOG_S(INFO) << absl::StrFormat("  Num cross-cluster:%12lld",
+                                 num_cross_cluster_edges);
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node:   %12.2f",
       static_cast<double>(num_edges_in + num_edges_out) / graph.nodes.size());

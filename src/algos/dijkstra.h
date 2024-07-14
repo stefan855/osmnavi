@@ -35,13 +35,14 @@ class DijkstraRouter {
     LOG_S(INFO) << "Start routing from " << start_idx << " to " << target_idx
                 << " (Dijkstra, " << metric.Name() << ")";
     std::uint32_t start_v_idx = FindOrAddVisitedNode(start_idx);
-    assert(start_v_idx == 0);
-    assert(visited_nodes_.at(0).from_v_idx == INF);
+    CHECK_EQ_S(start_v_idx, 0);
+    CHECK_EQ_S(visited_nodes_.at(0).from_v_idx, INF);
 
     visited_nodes_.front().min_metric = 0;
 
     pq_.emplace(0, start_v_idx);
     while (!pq_.empty()) {
+      // Remove the minimal node from the priority queue. 
       const QueuedNode qnode = pq_.top();
       pq_.pop();
       VisitedNode& vnode = visited_nodes_.at(qnode.visited_node_idx);
@@ -56,7 +57,7 @@ class DijkstraRouter {
       }
       vnode.done = 1;
 
-      // shortest route found?
+      // Shortest route found?
       if (vnode.node_idx == target_idx) {
         target_visited_node_index_ = qnode.visited_node_idx;
         LOG_S(INFO) << absl::StrFormat(
@@ -79,6 +80,10 @@ class DijkstraRouter {
       // FindOrAddVisitedNode() in the loop below might invalidate it.
       for (size_t i = 0; i < node.num_edges_out; ++i) {
         const GEdge& edge = node.edges[i];
+        // Even if we want to avoid dead ends, still allow to leave a dead end
+        // but not entering one. This way, the start node can reside in a dead
+        // end and routing still works. To achieve this behavior, we allow to
+        // pass a bridge only when leaving a dead end.
         if (avoid_dead_end && edge.bridge && !node.dead_end) {
           continue;
         }

@@ -14,12 +14,12 @@ class AStarRouter {
  public:
   // This exists once per 'node_idx'.
   struct VisitedNode {
-    std::uint32_t node_idx;            // Index into global node vector.
-    std::uint32_t min_metric;          // The minimal metric seen so far.
-    std::uint32_t heuristic_distance;  // estimated distance to target.
-    std::uint32_t from_v_idx : 30;     // index into visited_nodes vector.
-    std::uint32_t done : 1;            // 1 <=> node has been finalized.
-    std::uint32_t shortest_route : 1;  // 1 <=> node is part of shortest route.
+    std::uint32_t node_idx;             // Index into global node vector.
+    std::uint32_t min_metric;           // The minimal metric seen so far.
+    std::uint32_t heuristic_to_target;  // estimated distance to target.
+    std::uint32_t from_v_idx : 30;      // index into visited_nodes vector.
+    std::uint32_t done : 1;             // 1 <=> node has been finalized.
+    std::uint32_t shortest_route : 1;   // 1 <=> node is part of shortest route.
   };
 
   // This might exist multiple times for each 'node_idx', when a node gets
@@ -41,8 +41,8 @@ class AStarRouter {
     const double target_lon = g_.nodes.at(target_idx).lon;
 
     std::uint32_t start_v_idx = FindOrAddVisitedNode(start_idx);
-    assert(start_v_idx == 0);
-    assert(visited_nodes_.at(0).from_v_idx == INF30);
+    CHECK_EQ_S(start_v_idx, 0);
+    CHECK_EQ_S(visited_nodes_.at(0).from_v_idx, INF30);
 
     visited_nodes_.front().min_metric = 0;
 
@@ -94,13 +94,13 @@ class AStarRouter {
         if (new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;
-          if (vother.heuristic_distance == INF32) {
+          if (vother.heuristic_to_target == INF32) {
             // TODO: use country specific maxspeed.
             static const RoutingAttrs g_ri = {.access = ACC_YES,
                                               .maxspeed = 120};
             static const GWay g_way = {.ri = g_ri};
             const GNode& other_node = g_.nodes.at(edge.other_node_idx);
-            vother.heuristic_distance = metric.Compute(
+            vother.heuristic_to_target = metric.Compute(
                 g_way,
                 {.distance_cm = static_cast<uint64_t>(
                      1.05 * calculate_distance(other_node.lat /* / 10000000.0*/,
@@ -108,7 +108,7 @@ class AStarRouter {
                                                target_lat, target_lon)),
                  .contra_way = 0});
           }
-          pq_.emplace(new_metric + vother.heuristic_distance, v_idx);
+          pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
         }
       }
     }

@@ -123,6 +123,8 @@ struct GEdge {
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
   std::uint64_t cross_country : 1;
+  // 1 iff the edge connects two nodes from different clusters.
+  std::uint64_t cross_cluster : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -135,8 +137,10 @@ struct GCluster {
   std::uint32_t num_inner_edges = 0;
   std::uint32_t num_outer_edges = 0;
   std::uint32_t num_bridges = 0;
-  // Sorted vector containing the border node indexes.
+  // Sorted vector containing the border node indexes. Sorting should improve
+  // data locality.
   std::vector<std::uint32_t> border_nodes;
+  // For each border node, list distances to all other border nodes.
 };
 
 struct Graph {

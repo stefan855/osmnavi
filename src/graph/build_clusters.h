@@ -25,7 +25,7 @@ void StoreClusterInformation(
     g->clusters.at(cluster_id).cluster_id = cluster_id;
   }
 
-  // Store cluster_id in all nodes.
+  // Store cluster_id in all clustered nodes.
   for (uint32_t node_pos = 0; node_pos < lg.nodes.size(); ++node_pos) {
     const louvain::LouvainNode& n = lg.nodes.at(node_pos);
     const uint32_t cluster_id = FindFinalCluster(gvec, node_pos);
@@ -33,7 +33,7 @@ void StoreClusterInformation(
     gn->cluster_id = cluster_id;
   }
 
-  // Mark border nodes.
+  // Mark cross-cluster edges and count edge types.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
     GNode& n = g->nodes.at(node_pos);
     if (n.cluster_id == INVALID_CLUSTER_ID) {
@@ -43,10 +43,10 @@ void StoreClusterInformation(
     cluster.num_nodes++;
 
     for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
-      const GEdge& e = n.edges[edge_pos];
-      if (!e.unique_other) continue;
-      const GNode& other = g->nodes.at(e.other_node_idx);
-      // By construction, any connection to an non-clustered node should be
+      GEdge& e = n.edges[edge_pos];
+      GNode& other = g->nodes.at(e.other_node_idx);
+
+      // By construction, any connection to an non-clustered node must be
       // through a bridge.
       CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge != 0);
       if (e.bridge) {
@@ -55,12 +55,25 @@ void StoreClusterInformation(
         cluster.num_inner_edges++;
       } else {
         CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
+        e.cross_cluster = 1;
         n.cluster_border_node = 1;
-        cluster.num_border_nodes++;
+        other.cluster_border_node = 1;
         cluster.num_outer_edges++;
-        cluster.border_nodes.push_back(node_pos);
       }
     }
+  }
+
+  // Store and count border nodes in a *separate* loop. This avoids issues when
+  // there are parallel edges.
+  for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
+    GNode& n = g->nodes.at(node_pos);
+    if (!n.cluster_border_node) {
+      continue;
+    }
+    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
+    GCluster& cluster = g->clusters.at(n.cluster_id);
+    cluster.num_border_nodes++;
+    cluster.border_nodes.push_back(node_pos);
   }
 
   for (GCluster& cluster : g->clusters) {
@@ -115,7 +128,7 @@ void PrintClusterInformation(
         (rec.num_border_nodes * (rec.num_border_nodes - 1)) / 2;
 
     LOG_S(INFO) << absl::StrFormat(
-        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In-Edges:%5u Out-Edges:%5u "
+        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In:%5u Out:%5u  "
         "Out/In:%2.2f%%",
         i, rec.cluster_id, rec.num_nodes, rec.num_border_nodes,
         rec.num_inner_edges, rec.num_outer_edges,

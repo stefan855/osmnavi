@@ -36,7 +36,7 @@ struct LouvainGraph {
   std::vector<LouvainEdge> edges;
   double two_m_ = 0;
   uint32_t empty_clusters_ = 0;
-  double resolution_ = 1.0;
+  double resolution_ = 0.7;
 
   void SetTotalEdgeWeight(double m) { two_m_ = 2 * m; }
 
