@@ -406,36 +406,25 @@ void LogRoutingAttrs(uint16_t cc_num, HIGHWAY_LABEL hw, VEHICLE vh,
 
 void TestRoutingConfig() {
   LOG_S(INFO) << "TestRoutingConfig() started";
-  /*
   {
     PerCountryConfig config;
-    CHECK_S(config.ApplyConfigLine("ALL:vh_foot acc_designated 7"));
-    CHECK_S(config.ApplyConfigLine("CH:vh_motorized acc_yes 50"));
+    CHECK_S(config.ApplyConfigLine("ALL:vh_motorized speed_max=10"));
+    CHECK_S(config.ApplyConfigLine("CH:vh_motorized speed_max=50"));
 
     for (HIGHWAY_LABEL hw : AllHws()) {
-      LOG_S(INFO) << absl::StrFormat("hw_%s vh_foot:\n%s",
-                                     HighwayLabelToString(hw),
-                                     RoutingAttrsDebugString(config.GetDefault(
-                                         NCC_CH, hw, VH_FOOT, ET_ANY, IM_NO)));
-      CHECK_EQ_S(config.GetDefault(NCC_CH, hw, VH_FOOT, ET_ANY, IM_NO).maxspeed,
-                 7)
-          << HighwayLabelToString(hw);
-      CHECK_EQ_S(config.GetDefault(NCC_CH, hw, VH_FOOT, ET_ANY,
-  IM_YES).maxspeed, 7)
-          << HighwayLabelToString(hw);
+      RoutingAttrs ra;
+
+      ra = config.GetDefault(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_NO);
+      LOG_S(INFO) << absl::StrFormat("hw_%s:\n%s", HighwayLabelToString(hw),
+                                     RoutingAttrsDebugString(ra));
+      CHECK_EQ_S(ra.maxspeed, 50) << HighwayLabelToString(hw);
+
+      ra = config.GetDefault(NCC_DE, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_YES);
+      LOG_S(INFO) << absl::StrFormat("hw_%s:\n%s", HighwayLabelToString(hw),
+                                     RoutingAttrsDebugString(ra));
+      CHECK_EQ_S(ra.maxspeed, 10) << HighwayLabelToString(hw);
     }
   }
-  {
-    PerCountryConfig config;
-    config.ReadConfig("../routing.cfg");
-    for (VEHICLE vh : AllVhs()) {
-      LOG_S(INFO) << "*** " << VehicleToString(vh);
-      for (HIGHWAY_LABEL hw : AllHws()) {
-        LogRoutingAttrs(NCC_CH, hw, vh, ET_ANY, IM_NO, config);
-      }
-    }
-  }
-  */
   {
     PerCountryConfig config;
     config.ReadConfig("../config/routing.cfg");

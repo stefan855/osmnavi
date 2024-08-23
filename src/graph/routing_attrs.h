@@ -231,7 +231,7 @@ enum ACCESS : uint16_t {
 
 namespace {
 std::vector<std::string_view> AccessStringVector() {
-  std::vector<std::string_view> v((size_t)VH_MAX);
+  std::vector<std::string_view> v((size_t)ACC_MAX);
   v[(size_t)ACC_NO] = "no";
   v[(size_t)ACC_PRIVATE] = "private";
   v[(size_t)ACC_CUSTOMERS] = "customers";
@@ -399,7 +399,6 @@ inline bool ParseNumericMaxspeed(std::string_view val,
 }
 
 inline std::string RoutingAttrsDebugString(RoutingAttrs ra) {
-  return absl::StrFormat("dir:%s acc:%4s msp:%3u",
-                         "n/a", /*DirectionToString(ra.dir).substr(0, 4),*/
+  return absl::StrFormat("dir:%s acc:%s maxsp:%u",
                          AccessToString(ra.access).substr(0, 4), ra.maxspeed);
 }

@@ -38,12 +38,12 @@ class PerCountryConfig {
   bool ApplyConfigLine(std::string_view line) {
     std::vector<std::string_view> elements =
         absl::StrSplit(line, ' ', absl::SkipEmpty());
-    CHECK_EQ_S(elements.size(), 3) << "Expecting 3 pieces in <" << line << ">";
-    const Operation op = GetOperation(elements[1], elements[2], line);
+    CHECK_EQ_S(elements.size(), 2) << "Expecting 2 pieces in <" << line << ">";
+    const Operation op = GetOperation(elements[1], line);
 
     std::vector<std::string_view> keys = absl::StrSplit(elements[0], ':');
     CHECK_GT_S(keys.size(), 0)
-        << "Expecting more than 0 keys in <" << line << ">";
+        << "Expecting at least one key in <" << line << ">";
     CountryDefaults* arr = &global_defaults_;
     if (keys[0] != "ALL") {
       uint16_t cc_num = TwoLetterCountryCodeToNum(keys[0]);
@@ -206,37 +206,33 @@ class PerCountryConfig {
     return sel;
   }
 
-  Operation GetOperation(std::string_view access_str,
-                         std::string_view maxspeed_str,
+  Operation GetOperation(std::string_view value,
                          std::string_view line) const {
     Operation op;
 
-    if (access_str == "-") {
-      op.op_access = "";
-    } else {
+    if (ConsumePrefixIf("access=", &value)) {
       op.op_access = "set";
-      op.access = PrefixedAccessToEnum(access_str);
+      op.access = AccessToEnum(value);
       CHECK_NE_S(op.access, ACC_MAX) << "Bad access in <" << line << ">";
-    }
-
-    if (maxspeed_str == "-") {
-      op.op_maxspeed = "";
-    } else {
-      if (ConsumePrefixIf("limit:", &maxspeed_str)) {
-        op.op_maxspeed = "limit";
-      } else {
+    } else if (ConsumePrefixIf("speed_max=", &value)) {
         op.op_maxspeed = "set";
-      }
-      if (!ParseNumericMaxspeed(maxspeed_str, &op.maxspeed)) {
-        ABORT_S() << "Invalid maxspeed in <" << line << ">";
-      }
+        if (!ParseNumericMaxspeed(value, &op.maxspeed)) {
+          ABORT_S() << "Invalid speed value in <" << line << ">";
+        }
+    } else if (ConsumePrefixIf("speed_limit=", &value)) {
+        op.op_maxspeed = "limit";
+        if (!ParseNumericMaxspeed(value, &op.maxspeed)) {
+          ABORT_S() << "Invalid speed value in <" << line << ">";
+        }
+    } else {
+      ABORT_S() << "Unknown value in <" << line << ">";
     }
+    /* TODO
     if (log_details_) {
       LOG_S(INFO) << access_str << ":" << maxspeed_str;
       LOG_S(INFO) << op.op_access << ":" << op.op_maxspeed;
     }
-    CHECK_S(!op.op_access.empty() || !op.op_maxspeed.empty())
-        << "Need to set at least one value in <" << line << ">";
+    */
     return op;
   }
 
