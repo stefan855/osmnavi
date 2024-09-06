@@ -134,9 +134,9 @@ void PrintClusterInformation(
         rec.num_inner_edges, rec.num_outer_edges,
         (100.0 * rec.num_outer_edges) / std::max(rec.num_inner_edges, 1u));
   }
-  LOG_S(INFO) << absl::StrFormat("Table size %u, %.3f per node in graph",
-                                 table_size,
-                                 (table_size + 0.0) / lg.nodes.size());
+  LOG_S(INFO) << absl::StrFormat(
+      "Total border distance entries:%u, %.3f per node in graph", table_size,
+      (table_size + 0.0) / lg.nodes.size());
   LOG_S(INFO) << absl::StrFormat(
       "  Sum nodes:%.0f sum border:%.0f sum in-edges:%.0f sum out-edges:%.0f",
       sum_nodes, sum_border_nodes, sum_in, sum_out);
