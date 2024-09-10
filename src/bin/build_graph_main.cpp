@@ -177,7 +177,9 @@ void TestRoute(const Graph& g) {
     } else {
       {
         DijkstraRouter router(g);
-        if (router.Route(start_idx, target_idx, RoutingMetricDistance())) {
+        auto result =
+            router.Route(start_idx, target_idx, RoutingMetricDistance());
+        if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/route_dist.csv");
         } else {
           LOG_S(INFO) << "failed to find dijkstra route!";
@@ -185,7 +187,8 @@ void TestRoute(const Graph& g) {
       }
       {
         DijkstraRouter router(g);
-        if (router.Route(start_idx, target_idx, RoutingMetricTime())) {
+        auto result = router.Route(start_idx, target_idx, RoutingMetricTime());
+        if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/route_time.csv");
         } else {
           LOG_S(INFO) << "failed to find dijkstra route!";
@@ -193,7 +196,9 @@ void TestRoute(const Graph& g) {
       }
       {
         AStarRouter router(g);
-        if (router.Route(start_idx, target_idx, RoutingMetricDistance())) {
+        auto result =
+            router.Route(start_idx, target_idx, RoutingMetricDistance());
+        if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/astar_route_dist.csv");
         } else {
           LOG_S(INFO) << "failed to find astar route!";
@@ -201,7 +206,8 @@ void TestRoute(const Graph& g) {
       }
       {
         AStarRouter router(g);
-        if (router.Route(start_idx, target_idx, RoutingMetricTime())) {
+        auto result = router.Route(start_idx, target_idx, RoutingMetricTime());
+        if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
         } else {
           LOG_S(INFO) << "failed to find astar route!";
@@ -543,18 +549,59 @@ void MarkUniqueEdges(MetaData* meta) {
   }
 }
 
+void CheckShortestClusterPaths(int n_threads, const Graph& g,
+                       const RoutingMetric& metric) {
+  FuncTimer timer("ExecuteLouvain()::CheckShortestClusterPaths()");
+  ThreadPool pool;
+  for (const GCluster& c : g.clusters) {
+    pool.AddWork([&g, &c, &metric](int) {
+      LOG_S(INFO) << absl::StrFormat("Checks paths in cluster:%u #border:%u",
+                                     c.cluster_id, c.num_border_nodes);
+      DijkstraRouter::Filter filter = {.avoid_dead_end = true,
+                                    .restrict_to_cluster = true,
+                                    .cluster_id = c.cluster_id};
+      for (uint32_t idx = 0; idx < c.num_border_nodes; ++idx) {
+        for (uint32_t idx2 = 0; idx2 < c.num_border_nodes; ++idx2) {
+          DijkstraRouter rt(g, /*verbose=*/false);
+          // AStarRouter rt(g, /*verbose=*/false);
+          auto result = rt.Route(c.border_nodes.at(idx),
+                                 c.border_nodes.at(idx2), metric, filter);
+          if (c.distances.at(idx).at(idx2) != result.found_distance) {
+            LOG_S(INFO) << absl::StrFormat(
+                "Cluster:%u path from %u to %u differs -- stored:%u vs. "
+                "computed:%u",
+                c.cluster_id, idx, idx2, c.distances.at(idx).at(idx2),
+                result.found_distance);
+          }
+          // CHECK(c.distances.at(idx).at(idx2), result.found_distance);
+        }
+      }
+    });
+  }
+  pool.Start(std::min(3, n_threads));
+  pool.WaitAllFinished();
+}
+
 void ExecuteLouvain(MetaData* meta) {
   FuncTimer timer("ExecuteLouvain()");
   auto gvec = build_clusters::ExecuteLouvainStages(meta->graph);
   build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::PrintClusterInformation(meta->graph, gvec);
   build_clusters::WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
+
+  RoutingMetricTime metric;
   if (!meta->graph.clusters.empty()) {
-    RoutingMetricTime metric;
+    FuncTimer timer("ExecuteLouvain()::ComputeShortestClusterPaths");
+    ThreadPool pool;
     for (GCluster& cluster : meta->graph.clusters) {
-      ComputeShortestClusterPaths(meta->graph, metric, &cluster);
+      pool.AddWork([meta, &metric, &cluster](int) {
+        ComputeShortestClusterPaths(meta->graph, metric, &cluster);
+      });
     }
+    pool.Start(std::min(3, meta->n_threads));
+    pool.WaitAllFinished();
   }
+  CheckShortestClusterPaths(meta->n_threads, meta->graph, metric);
 }
 
 void PrintStructSizes() {
@@ -670,39 +717,39 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
 
   std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
   std::int64_t way_added_bytes = graph.unaligned_pool_.MemAllocated();
-  LOG_S(INFO) << absl::StrFormat("Num ways:          %12lld",
+  LOG_S(INFO) << absl::StrFormat("Num ways:           %12lld",
                                  graph.ways.size());
 
-  LOG_S(INFO) << absl::StrFormat("  Way nodes:       %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Way nodes:        %12lld",
                                  meta.way_nodes_seen.CountBits());
 
-  LOG_S(INFO) << absl::StrFormat("  Routing nodes:   %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Routing nodes:    %12lld",
                                  meta.way_nodes_needed.CountBits());
 
-  LOG_S(INFO) << absl::StrFormat("  Diff maxspeed/dir:%11lld",
+  LOG_S(INFO) << absl::StrFormat("  Diff maxspeed/dir: %11lld",
                                  num_diff_maxspeed);
-  LOG_S(INFO) << absl::StrFormat("  Has country:     %12lld", num_has_country);
-  LOG_S(INFO) << absl::StrFormat("  Has streetname:  %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Has country:      %12lld", num_has_country);
+  LOG_S(INFO) << absl::StrFormat("  Has streetname:   %12lld",
                                  num_has_streetname);
-  LOG_S(INFO) << absl::StrFormat("  Oneway:          %12lld", num_oneway);
-  LOG_S(INFO) << absl::StrFormat("  Closed ways:     %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Oneway:           %12lld", num_oneway);
+  LOG_S(INFO) << absl::StrFormat("  Closed ways:      %12lld",
                                  meta.hlp.num_ways_closed);
-  LOG_S(INFO) << absl::StrFormat("  Deleted ways:    %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Deleted ways:     %12lld",
                                  meta.hlp.num_ways_deleted);
-  LOG_S(INFO) << absl::StrFormat("  Bytes per way    %12.2f",
+  LOG_S(INFO) << absl::StrFormat("  Bytes per way     %12.2f",
                                  (double)way_bytes / graph.ways.size());
-  LOG_S(INFO) << absl::StrFormat("  Added per way    %12.2f",
+  LOG_S(INFO) << absl::StrFormat("  Added per way     %12.2f",
                                  (double)way_added_bytes / graph.ways.size());
   LOG_S(INFO) << "========= Memory Stats ===========";
-  LOG_S(INFO) << absl::StrFormat("Varnode memory:    %12.2f Gib",
+  LOG_S(INFO) << absl::StrFormat("Varnode memory:     %12.2f Gib",
                                  meta.nodes.mem_allocated() / 1000000000.0);
   LOG_S(INFO) << absl::StrFormat(
-      "Node graph memory: %12.2f Gib",
+      "Node graph memory:  %12.2f Gib",
       (node_bytes + node_added_bytes) / 1000000000.0);
-  LOG_S(INFO) << absl::StrFormat("Way graph memory:  %12.2f Gib",
+  LOG_S(INFO) << absl::StrFormat("Way graph memory:   %12.2f Gib",
                                  (way_bytes + way_added_bytes) / 1000000000.0);
   LOG_S(INFO) << absl::StrFormat(
-      "Total graph memory:%12.2f Gib",
+      "Total graph memory: %12.2f Gib",
       (node_bytes + node_added_bytes + way_bytes + way_added_bytes) /
           1000000000.0);
 }

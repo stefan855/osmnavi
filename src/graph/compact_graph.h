@@ -29,7 +29,7 @@ class CompactDirectedGraph {
   CompactDirectedGraph(uint32_t num_nodes,
                        const std::vector<FullEdge>& full_edges)
       : num_nodes_(num_nodes) {
-    BuildMiniGraph(full_edges);
+    BuildGraph(full_edges);
   }
 
   // Return the number of nodes in the mini graph. Ids are 0..num_nodes()-1.
@@ -62,11 +62,11 @@ class CompactDirectedGraph {
   }
 
  private:
-  void BuildMiniGraph(const std::vector<FullEdge>& full_edges) {
-    // Nodes are numbered [0..num_nodes). For each one, we want to store
-    // the start of its edges in the edge array.
-    // In the end we add one more element with value full_edges.size(), to allow
-    // easy iteration.
+  // Nodes are numbered [0..num_nodes). For each one, we want to store
+  // the start of its edges in the edge array.
+  // In the end we add one more element with value full_edges.size(), to allow
+  // easy iteration.
+  void BuildGraph(const std::vector<FullEdge>& full_edges) {
     size_t current_start = 0;
     for (size_t mini_idx = 0; mini_idx < num_nodes_; ++mini_idx) {
       edges_start_.push_back(current_start);

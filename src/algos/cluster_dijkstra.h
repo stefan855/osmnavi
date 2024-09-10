@@ -3,11 +3,14 @@
 #pragma once
 
 #include <fstream>
+#include <memory>
 #include <queue>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "algos/dijkstra.h"
 #include "algos/routing_metric.h"
+#include "base/thread_pool.h"
 #include "base/util.h"
 #include "graph/compact_graph.h"
 #include "graph/graph_def.h"
@@ -125,12 +128,13 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
   LOG_S(INFO) << "Start routing from " << start_idx << " to "
               << num_border_nodes << " border nodes";
 
-  std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {0, 0});
+  std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {INFU32, 0});
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, MetricCmp> pq;
   const std::vector<uint32_t>& edges_start = cg.edges_start();
   const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
 
   pq.emplace(0, start_idx);
+  visited_nodes.at(start_idx).min_weight = 0;
   int count = 0;
   while (!pq.empty()) {
     ++count;
@@ -155,8 +159,9 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
       const CompactDirectedGraph::PartialEdge e = edges.at(i);
       const std::uint32_t new_weight = vnode.min_weight + e.weight;
       VisitedNode& other = visited_nodes.at(e.to_idx);
-      if (!other.done &&
-          (other.min_weight == 0 || new_weight < other.min_weight)) {
+      if (!other.done && new_weight < other.min_weight) {
+      // if (!other.done &&
+      //     (other.min_weight == 0 || new_weight < other.min_weight)) {
         /*
         LOG_S(INFO) << "i=" << i << " idx=" << qnode.visited_node_idx
                     << " o_idx=" << e.to_idx << " new_m=" << new_weight
@@ -168,17 +173,45 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
     }
   }
   LOG_S(INFO) << "Finished loops:" << count;
-  return std::vector<uint32_t>();
+
+  std::vector<uint32_t> res;
+  for (size_t i = 0; i < num_border_nodes; ++i) {
+    res.push_back(visited_nodes.at(i).min_weight);
+  }
+  return res;
 }
+
+#if 0
+void CompareRoutes(const Graph& g, const GCluster& cluster,
+                   const RoutingMetric& metric,
+                   const std::vector<uint32_t>& distances) {
+  if (cluster.num_border_nodes < 2) return;
+  uint32_t start_tdx = cluster.border_nodes.at(0);
+  ;
+  uint32_t target_tdx = cluster.border_nodes.at(1);
+  ;
+  uint32_t expected = distances
+      // Check one of the routs by comparing with normal Dijkstra.
+      DijkstraRouter rt(g);
+  bool has_route = rt.Route(start_idx, target_idx, metric);
+  if (!has_route && 
+
+  if (!rt.Route(start_idx, target_idx, metric) || rt.GetFoundDistance() =! ) {
+    ;
+  }
+}
+#endif
 
 }  // namespace cluster_all_paths
 
-// **** Experimental, currently it doesn't actually do what is says.
-//
 // Compute all shortest paths between border nodes in a cluster. The results
-// are stored in 'cluster'.
+// are stored in 'cluster.distances'.
 void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
                                  GCluster* cluster) {
+  if (cluster->border_nodes.empty()) {
+    return;
+  }
+
   // Construct a minimal graph with all necessary information.
   uint32_t num_nodes = 0;
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
@@ -190,9 +223,15 @@ void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
       "Cluster:%u removed %u dups from edges array size:%u",
       cluster->cluster_id, prev_edges_size - full_edges.size(),
       prev_edges_size);
-  if (!cluster->border_nodes.empty()) {
-    const CompactDirectedGraph cg(num_nodes, full_edges);
-    cg.LogStats();
-    cluster_all_paths::GetBorderRoutes(cg, cluster->border_nodes.size(), 0);
-  }
+  const CompactDirectedGraph cg(num_nodes, full_edges);
+  cg.LogStats();
+  for (size_t border_node = 0; border_node < cluster->border_nodes.size();
+       ++border_node) {
+    std::vector<uint32_t> dist = cluster_all_paths::GetBorderRoutes(
+        cg, cluster->border_nodes.size(), border_node);
+    CHECK_EQ_S(dist.size(), cluster->border_nodes.size());
+    cluster->distances.push_back(dist);
+    // cluster_all_paths::CompareRoutes(g, *cluster, metric, distances);
+  };
+  CHECK_EQ_S(cluster->distances.size(), cluster->border_nodes.size());
 }
