@@ -362,6 +362,8 @@ inline bool ParseNumericMaxspeed(std::string_view val,
     return false;
   }
   if (val == "none") {
+    // TODO: This value is too high for routing. There should be something like
+    // PRACTICAL_INFINITE_MAXSPEED or a limit for maxspeed in the config.
     *maxspeed = INFINITE_MAXSPEED;
     return true;
   } else if (val == "walk") {

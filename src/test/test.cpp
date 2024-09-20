@@ -298,11 +298,13 @@ void TestWayRural() {
 namespace {
 void CheckCarMaxspeed(std::string_view tag_string, uint16_t exp_maxspeed_forw,
                       uint16_t exp_maxspeed_backw) {
-  RoutingAttrs forw = {.maxspeed = 0}, backw = {.maxspeed = 0};
+  std::uint16_t speed_forw = 0;
+  std::uint16_t speed_backw = 0;
   OsmWayWrapper w = FillWayData(tag_string);
-  build_graph::CarMaxspeed(*w.tagh, /*way_id=*/1, w.ptags, &forw, &backw);
-  CHECK_EQ_S(forw.maxspeed, exp_maxspeed_forw) << tag_string;
-  CHECK_EQ_S(backw.maxspeed, exp_maxspeed_backw) << tag_string;
+  build_graph::CarMaxspeedFromWay(*w.tagh, /*way_id=*/1, w.ptags, &speed_forw,
+                                  &speed_backw);
+  CHECK_EQ_S(speed_forw, exp_maxspeed_forw) << tag_string;
+  CHECK_EQ_S(speed_backw, exp_maxspeed_backw) << tag_string;
 }
 }  // namespace
 
@@ -397,11 +399,11 @@ std::vector<VEHICLE> AllVhs() {
 void LogRoutingAttrs(uint16_t cc_num, HIGHWAY_LABEL hw, VEHICLE vh,
                      ENVIRONMENT_TYPE et, IS_MOTORROAD im,
                      const PerCountryConfig& config) {
+  auto val = config.GetDefault(cc_num, hw, vh, et, im);
   LOG_S(INFO) << absl::StrFormat(
       "%s hw=%-10s vh=%-7s et=%s im=%u %s", CountryNumToString(cc_num),
       HighwayLabelToString(hw).substr(0, 10), VehicleToString(vh).substr(0, 7),
-      EnvironmentTypeToString(et), im,
-      RoutingAttrsDebugString(config.GetDefault(cc_num, hw, vh, et, im)));
+      EnvironmentTypeToString(et), im, config.ConfigValueDebugString(val));
 }
 
 void TestRoutingConfig() {
@@ -412,17 +414,17 @@ void TestRoutingConfig() {
     CHECK_S(config.ApplyConfigLine("CH:vh_motorized speed_max=50"));
 
     for (HIGHWAY_LABEL hw : AllHws()) {
-      RoutingAttrs ra;
+      PerCountryConfig::ConfigValue cv;
 
-      ra = config.GetDefault(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_NO);
+      cv = config.GetDefault(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_NO);
       LOG_S(INFO) << absl::StrFormat("hw_%s:\n%s", HighwayLabelToString(hw),
-                                     RoutingAttrsDebugString(ra));
-      CHECK_EQ_S(ra.maxspeed, 50) << HighwayLabelToString(hw);
+                                     config.ConfigValueDebugString(cv));
+      CHECK_EQ_S(cv.dflt.maxspeed, 50) << HighwayLabelToString(hw);
 
-      ra = config.GetDefault(NCC_DE, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_YES);
+      cv = config.GetDefault(NCC_DE, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_YES);
       LOG_S(INFO) << absl::StrFormat("hw_%s:\n%s", HighwayLabelToString(hw),
-                                     RoutingAttrsDebugString(ra));
-      CHECK_EQ_S(ra.maxspeed, 10) << HighwayLabelToString(hw);
+                                     config.ConfigValueDebugString(cv));
+      CHECK_EQ_S(cv.dflt.maxspeed, 10) << HighwayLabelToString(hw);
     }
   }
   {

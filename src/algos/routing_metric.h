@@ -23,13 +23,16 @@ class RoutingMetricTime : public RoutingMetric {
  public:
   int32_t Compute(const GWay& way, const GEdge& edge) const override final {
     uint32_t km_per_hour = way.ri[edge.contra_way].maxspeed;
-    if (km_per_hour == 0) {
-      km_per_hour = 50u;
-      if (way.highway_label == HW_MOTORWAY ||
-          way.highway_label == HW_MOTORWAY_LINK) {
-        km_per_hour = 100u;
-      }
+    CHECK_GT_S(km_per_hour, 0)
+        << "Way " << way.id << " has no maxspeed dir " << edge.contra_way;
+#if 0
+    km_per_hour = 50u;
+    if (way.highway_label == HW_MOTORWAY ||
+        way.highway_label == HW_MOTORWAY_LINK) {
+      km_per_hour = 100u;
     }
+  }
+#endif
     // Compute how long it takes in milliseconds.
     return (36ull * edge.distance_cm) / km_per_hour;
   }

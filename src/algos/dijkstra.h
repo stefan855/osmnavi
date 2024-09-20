@@ -157,7 +157,7 @@ class DijkstraRouter {
         const GNode& sfrom = g_.nodes.at(from.node_idx);
         bool shortest = from.shortest_route && n.shortest_route;
         myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
-                                  shortest ? "mag" : "black", sfrom.lat,
+                                  shortest ? "red" : "black", sfrom.lat,
                                   sfrom.lon, sn.lat, sn.lon);
       }
     }

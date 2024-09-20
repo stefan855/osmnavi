@@ -47,6 +47,8 @@ double ComputeModularity(const LouvainGraph& g) {
   return sum_loop / two_m;
 }
 
+
+
 void TestLouvainTriangleGrpah() {
   FuncTimer("TestLouvainTriangleGrpah()");
   // These values where manually verified.
@@ -56,6 +58,8 @@ void TestLouvainTriangleGrpah() {
 
   // Two triangles (0,1,2) and (3,4,5) interconnected at 2 and 5.
   LouvainGraph g;
+  g.resolution_ = 1.0;
+  
   g.AddNodeAndEdges(0, {1, 2, 3});
   g.AddNodeAndEdges(1, {0, 4, 5});
   g.AddNodeAndEdges(2, {0, 3});

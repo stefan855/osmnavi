@@ -130,11 +130,13 @@ class AStarRouter {
         if (new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;
+
+          // Compute heuristic distance from new node to target.
           if (vother.heuristic_to_target == INF32) {
             // TODO: use country specific maxspeed.
             static const RoutingAttrs g_ri = {.access = ACC_YES,
                                               .maxspeed = 120};
-            static const GWay g_way = {.ri = g_ri};
+            static const GWay g_way = {.ri = g_ri};  // Sets .ri[0] and .ri[1]!
             const GNode& other_node = g_.nodes.at(edge.other_node_idx);
             vother.heuristic_to_target = metric.Compute(
                 g_way,
@@ -167,7 +169,7 @@ class AStarRouter {
         const GNode& sfrom = g_.nodes.at(from.node_idx);
         bool shortest = from.shortest_route && n.shortest_route;
         myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
-                                  shortest ? "mag" : "black", sfrom.lat,
+                                  shortest ? "red" : "black", sfrom.lat,
                                   sfrom.lon, sn.lat, sn.lon);
       }
     }

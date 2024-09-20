@@ -160,8 +160,8 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
       const std::uint32_t new_weight = vnode.min_weight + e.weight;
       VisitedNode& other = visited_nodes.at(e.to_idx);
       if (!other.done && new_weight < other.min_weight) {
-      // if (!other.done &&
-      //     (other.min_weight == 0 || new_weight < other.min_weight)) {
+        // if (!other.done &&
+        //     (other.min_weight == 0 || new_weight < other.min_weight)) {
         /*
         LOG_S(INFO) << "i=" << i << " idx=" << qnode.visited_node_idx
                     << " o_idx=" << e.to_idx << " new_m=" << new_weight
@@ -180,27 +180,6 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
   }
   return res;
 }
-
-#if 0
-void CompareRoutes(const Graph& g, const GCluster& cluster,
-                   const RoutingMetric& metric,
-                   const std::vector<uint32_t>& distances) {
-  if (cluster.num_border_nodes < 2) return;
-  uint32_t start_tdx = cluster.border_nodes.at(0);
-  ;
-  uint32_t target_tdx = cluster.border_nodes.at(1);
-  ;
-  uint32_t expected = distances
-      // Check one of the routs by comparing with normal Dijkstra.
-      DijkstraRouter rt(g);
-  bool has_route = rt.Route(start_idx, target_idx, metric);
-  if (!has_route && 
-
-  if (!rt.Route(start_idx, target_idx, metric) || rt.GetFoundDistance() =! ) {
-    ;
-  }
-}
-#endif
 
 }  // namespace cluster_all_paths
 

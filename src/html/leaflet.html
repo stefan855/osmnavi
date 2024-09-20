@@ -22,6 +22,8 @@
   <body>
     <div id="map"></div>
     <script>
+      var my_attribution = '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>';
+
       var osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
@@ -34,62 +36,75 @@
 
       var graph = L.tileLayer('http://localhost:8080/tiles/graph/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var louvain = L.tileLayer('http://localhost:8080/tiles/louvain/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var route = L.tileLayer('http://localhost:8080/tiles/route/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var astar_route = L.tileLayer('http://localhost:8080/tiles/astar_route/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var ALL = L.tileLayer('http://localhost:8080/tiles/ALL/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var CH = L.tileLayer('http://localhost:8080/tiles/CH/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var DE = L.tileLayer('http://localhost:8080/tiles/DE/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var IL = L.tileLayer('http://localhost:8080/tiles/IL/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var JO = L.tileLayer('http://localhost:8080/tiles/JO/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var UA = L.tileLayer('http://localhost:8080/tiles/UA/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var RU = L.tileLayer('http://localhost:8080/tiles/RU/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
       });
 
       var cross = L.tileLayer('http://localhost:8080/tiles/cross/{z}/{x}/{y}.png', {
         maxZoom: 21,
-        attribution: '&copy; <a href="https://openstreetmap.org/copyright">Stefan Christoph</a>'
+        attribution: my_attribution
+      });
+
+      var experimental1 = L.tileLayer('http://localhost:8080/tiles/experimental1/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental2 = L.tileLayer('http://localhost:8080/tiles/experimental2/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental3 = L.tileLayer('http://localhost:8080/tiles/experimental3/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
       });
 
       var map = L.map('map', {
@@ -115,7 +130,10 @@
         "Jordanien": JO,
         "Ukraine": UA,
         "Russland": RU,
-        "Cross-Country Edges": cross
+        "Cross-Country Edges": cross,
+        "Experimental 1": experimental1,
+        "Experimental 2": experimental2,
+        "Experimental 3": experimental3
       };
 
       var layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);

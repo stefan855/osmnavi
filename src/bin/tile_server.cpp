@@ -355,6 +355,10 @@ int main(int argc, char* argv[]) {
   LoadFiles(root + "/louvain.csv", &layers["louvain"]);
   LoadFiles(root + "/cross.csv", &layers["cross"]);
 
+  LoadFiles(root + "/experimental1.csv", &layers["experimental1"]);
+  LoadFiles(root + "/experimental2.csv", &layers["experimental2"]);
+  LoadFiles(root + "/experimental3.csv", &layers["experimental3"]);
+
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");
   });

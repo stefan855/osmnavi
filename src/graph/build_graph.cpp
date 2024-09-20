@@ -196,6 +196,8 @@ int InterpretMaxspeedValue(std::string_view val, bool lanes) {
   if (!lanes) {
     maxspeed = GetSingleMaxspeed(val);
   } else {
+    // Get the maximum from all the lanes, assuming that the car can use this
+    // lane.
     for (std::string_view sub : absl::StrSplit(val, '|')) {
       int sub_maxspeed = GetSingleMaxspeed(sub);
       // Only replace if value is "better".
@@ -208,9 +210,10 @@ int InterpretMaxspeedValue(std::string_view val, bool lanes) {
 }
 }  // namespace
 
-void CarMaxspeed(const OSMTagHelper& tagh, std::int64_t way_id,
-                 const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
-                 RoutingAttrs* ra_backw, bool logging_on) {
+void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
+                        const std::vector<ParsedTag>& ptags,
+                        std::uint16_t* maxspeed_forw,
+                        std::uint16_t* maxspeed_backw, bool logging_on) {
   // Special (hard) cases:
   constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
   constexpr uint64_t modifier_bits =
@@ -218,9 +221,8 @@ void CarMaxspeed(const OSMTagHelper& tagh, std::int64_t way_id,
       GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER) |
       GetBitMask(KEY_BIT_VEHICLE) | GetBitMask(KEY_BIT_MOTOR_VEHICLE) |
       GetBitMask(KEY_BIT_MOTORCAR);
-  // Start with the defaults from config.
-  uint16_t maxspeed_forw = ra_forw->maxspeed;
-  uint16_t maxspeed_backw = ra_backw->maxspeed;
+  *maxspeed_forw = 0;
+  *maxspeed_backw = 0;
 
   for (const ParsedTag& pt : ptags) {
     if ((pt.bits & selector_bits) == 0) {
@@ -234,14 +236,14 @@ void CarMaxspeed(const OSMTagHelper& tagh, std::int64_t way_id,
             val, BitIsContained(KEY_BIT_LANES_INNER, pt.bits));
         if (maxspeed > 0 && maxspeed <= INFINITE_MAXSPEED) {
           if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
-            ra_forw->maxspeed = maxspeed;
+            *maxspeed_forw = maxspeed;
           } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
-            ra_backw->maxspeed = maxspeed;
+            *maxspeed_backw = maxspeed;
           } else {
             // forward/backward are missing, either nothing or both_ways is
             // specified, so set both.
-            ra_forw->maxspeed = maxspeed;
-            ra_backw->maxspeed = maxspeed;
+            *maxspeed_forw = maxspeed;
+            *maxspeed_backw = maxspeed;
           }
           break;
         }
@@ -250,7 +252,7 @@ void CarMaxspeed(const OSMTagHelper& tagh, std::int64_t way_id,
         if (logging_on && (pt.bits & GetBitMask(KEY_BIT_SOURCE, KEY_BIT_TYPE,
                                                 KEY_BIT_ZONE)) == 0) {
           LOG_S(INFO) << absl::StrFormat(
-              "CarMaxspeed(): way %lld: can't handle %s=%s", way_id,
+              "CarMaxspeedFromWay(): way %lld: can't handle %s=%s", way_id,
               KeyPartBitsToString(pt.bits), tagh.ToString(pt.val_st_idx));
         }
     }
@@ -503,6 +505,19 @@ void MarkSeenAndNeeded(MetaData* meta, const std::vector<NodeCountry>& v) {
     meta->hlp.num_ways_closed++;
   }
 }
+
+std::uint16_t FinalMaxspeed(const PerCountryConfig::ConfigValue& cv,
+                            std::uint16_t extracted_maxspeed) {
+  std::uint16_t m = cv.dflt.maxspeed;
+  if (extracted_maxspeed > 0) {
+    m = extracted_maxspeed;
+  }
+  if (cv.speed_limit > 0 && cv.speed_limit < m) {
+    m = cv.speed_limit;
+  }
+  return m;
+}
+
 }  // namespace
 
 bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
@@ -520,39 +535,52 @@ bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
   }
 
   // TODO(HACK): Use NCC_CH to get routable data in all countries
-  RoutingAttrs ra_forw = meta.per_country_config.GetDefault(
-      /*way->ncc*/ NCC_CH, way->highway_label, VH_MOTOR_VEHICLE, rural.et_forw,
-      rural.im_forw);
+  const PerCountryConfig::ConfigValue config_forw =
+      meta.per_country_config.GetDefault(
+          /*way->ncc*/ NCC_CH, way->highway_label, VH_MOTOR_VEHICLE,
+          rural.et_forw, rural.im_forw);
 
-  RoutingAttrs ra_backw = meta.per_country_config.GetDefault(
-      /*way->ncc*/ NCC_CH, way->highway_label, VH_MOTOR_VEHICLE, rural.et_backw,
-      rural.im_backw);
+  const PerCountryConfig::ConfigValue config_backw =
+      meta.per_country_config.GetDefault(
+          /*way->ncc*/ NCC_CH, way->highway_label, VH_MOTOR_VEHICLE,
+          rural.et_backw, rural.im_backw);
 
-  way->dir_dontuse = RoadDirection(tagh, way->highway_label, way->id, ptags);
-  if (way->dir_dontuse == DIR_MAX) {
+  RoutingAttrs ra_forw = config_forw.dflt;
+  RoutingAttrs ra_backw = config_backw.dflt;
+
+  way->dir_obsolete = RoadDirection(tagh, way->highway_label, way->id, ptags);
+  if (way->dir_obsolete == DIR_MAX) {
     return false;  // For instance wrong vehicle type or some tagging error.
   }
 
+  // Set access.
   CarAccess(tagh, way->id, ptags, &ra_forw, &ra_backw);
-  bool rforw = RoutableAccess(ra_forw.access);
-  bool rbackw = RoutableAccess(ra_backw.access);
-  if ((!IsDirForward(way->dir_dontuse) || !rforw) &&
-      (!IsDirBackward(way->dir_dontuse) || !rbackw)) {
-    if (rforw || rbackw) {
+  bool acc_forw = RoutableAccess(ra_forw.access);
+  bool acc_backw = RoutableAccess(ra_backw.access);
+  if ((!IsDirForward(way->dir_obsolete) || !acc_forw) &&
+      (!IsDirBackward(way->dir_obsolete) || !acc_backw)) {
+    if (acc_forw || acc_backw) {
       LOG_S(INFO) << absl::StrFormat("way %lld has no valid direction\n%s",
                                      osm_way.id(), tagh.GetLoggingStr(osm_way));
     }
     return false;  // For instance when "private" or "no".
   }
-  CarMaxspeed(tagh, way->id, ptags, &ra_forw, &ra_backw);
 
-  if (rforw && IsDirForward(way->dir_dontuse) && ra_forw.maxspeed > 0) {
+  // Set maxspeed.
+  std::uint16_t maxspeed_forw;
+  std::uint16_t maxspeed_backw;
+  CarMaxspeedFromWay(tagh, way->id, ptags, &maxspeed_forw, &maxspeed_backw);
+  ra_forw.maxspeed = FinalMaxspeed(config_forw, maxspeed_forw);
+  ra_backw.maxspeed = FinalMaxspeed(config_backw, maxspeed_backw);
+
+  // Store final routing attributes.
+  if (acc_forw && IsDirForward(way->dir_obsolete) && ra_forw.maxspeed > 0) {
     way->ri[0] = ra_forw;
   } else {
     std::memset(&way->ri[0], 0, sizeof(way->ri[0]));
   }
 
-  if (rbackw && IsDirBackward(way->dir_dontuse) && ra_backw.maxspeed > 0) {
+  if (acc_backw && IsDirBackward(way->dir_obsolete) && ra_backw.maxspeed > 0) {
     way->ri[1] = ra_backw;
   } else {
     std::memset(&way->ri[1], 0, sizeof(way->ri[1]));

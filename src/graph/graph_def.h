@@ -43,9 +43,9 @@ struct GWay {
   // If uniform_country==1, then this value is the country of all the nodes.
   std::uint16_t ncc : 10 = INVALID_NCC;
 
-  // Vehice Type/Lane information here.
+  // Vehicle Type/Lane information here.
   // Directions directions : 2 = Directions::Both;
-  DIRECTION dir_dontuse : 2 = DIR_BOTH;
+  DIRECTION dir_obsolete : 2 = DIR_BOTH;
   // std::uint32_t maxspeed : 10 = 0;  // 0..1023 km/h
 
   RoutingAttrs ri[2];  // Routing info in forward and backward direction.

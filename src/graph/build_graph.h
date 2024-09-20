@@ -106,9 +106,13 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
 WayRural ExtractWayRural(const OSMTagHelper& tagh,
                          const std::vector<ParsedTag>& ptags);
 
-void CarMaxspeed(const OSMTagHelper& tagh, std::int64_t way_id,
-                 const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
-                 RoutingAttrs* ra_backw, bool logging_on = false);
+// Extract the maxspeed from an osm way, in both directions. If there arre
+// lanes, then the highest maxspeed is returned. If no maxspeed is set, then 0
+// is returned.
+void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
+                        const std::vector<ParsedTag>& ptags,
+                        std::uint16_t* maxspeed_forw,
+                        std::uint16_t* maxspeed_backw, bool logging_on = false);
 
 void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
                const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,

@@ -550,28 +550,45 @@ void MarkUniqueEdges(MetaData* meta) {
 }
 
 void CheckShortestClusterPaths(int n_threads, const Graph& g,
-                       const RoutingMetric& metric) {
+                               const RoutingMetric& metric) {
   FuncTimer timer("ExecuteLouvain()::CheckShortestClusterPaths()");
   ThreadPool pool;
   for (const GCluster& c : g.clusters) {
     pool.AddWork([&g, &c, &metric](int) {
       LOG_S(INFO) << absl::StrFormat("Checks paths in cluster:%u #border:%u",
                                      c.cluster_id, c.num_border_nodes);
-      DijkstraRouter::Filter filter = {.avoid_dead_end = true,
+      AStarRouter::Filter filter = {.avoid_dead_end = true,
                                     .restrict_to_cluster = true,
                                     .cluster_id = c.cluster_id};
       for (uint32_t idx = 0; idx < c.num_border_nodes; ++idx) {
         for (uint32_t idx2 = 0; idx2 < c.num_border_nodes; ++idx2) {
-          DijkstraRouter rt(g, /*verbose=*/false);
-          // AStarRouter rt(g, /*verbose=*/false);
+          // DijkstraRouter rt(g, /*verbose=*/false);
+          AStarRouter rt(g, /*verbose=*/false);
           auto result = rt.Route(c.border_nodes.at(idx),
                                  c.border_nodes.at(idx2), metric, filter);
+
           if (c.distances.at(idx).at(idx2) != result.found_distance) {
             LOG_S(INFO) << absl::StrFormat(
                 "Cluster:%u path from %u to %u differs -- stored:%u vs. "
                 "computed:%u",
                 c.cluster_id, idx, idx2, c.distances.at(idx).at(idx2),
                 result.found_distance);
+            // Debug special case when AStar route is not equal to the Dijkstra
+            // route.
+            if (c.cluster_id == 36) {
+              rt.SaveSpanningTreeSegments("/tmp/experimental1.csv");
+              // Run the same using Dijkstra, to compare.
+              DijkstraRouter rt2(g, /*verbose=*/false);
+              auto result2 = rt2.Route(c.border_nodes.at(idx),
+                                       c.border_nodes.at(idx2), metric,
+                                       {.avoid_dead_end = true,
+                                        .restrict_to_cluster = true,
+                                        .cluster_id = c.cluster_id});
+              CHECK_EQ_S(c.distances.at(idx).at(idx2), result2.found_distance);
+              rt2.SaveSpanningTreeSegments("/tmp/experimental2.csv");
+            } else {
+              rt.SaveSpanningTreeSegments("/tmp/experimental3.csv");
+            }
           }
           // CHECK(c.distances.at(idx).at(idx2), result.found_distance);
         }
@@ -675,6 +692,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
     }
   }
 
+  uint64_t num_no_maxspeed = 0;
   uint64_t num_diff_maxspeed = 0;
   uint64_t num_has_country = 0;
   uint64_t num_has_streetname = 0;
@@ -684,9 +702,13 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
         w.ri[0].maxspeed != w.ri[1].maxspeed) {
       num_diff_maxspeed += 1;
     }
+    if ((RoutableForward(w) && w.ri[0].maxspeed == 0) ||
+        (RoutableBackward(w) && w.ri[1].maxspeed == 0)) {
+      num_no_maxspeed += 1;
+    }
     num_has_country += w.uniform_country;
     num_has_streetname += w.streetname == nullptr ? 0 : 1;
-    num_oneway += w.dir_dontuse == DIR_BOTH ? 0 : 1;
+    num_oneway += w.dir_obsolete == DIR_BOTH ? 0 : 1;
   }
 
   LOG_S(INFO) << absl::StrFormat("Num nodes:          %12lld",
@@ -726,6 +748,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Routing nodes:    %12lld",
                                  meta.way_nodes_needed.CountBits());
 
+  LOG_S(INFO) << absl::StrFormat("  No maxspeed:      %12lld", num_no_maxspeed);
   LOG_S(INFO) << absl::StrFormat("  Diff maxspeed/dir: %11lld",
                                  num_diff_maxspeed);
   LOG_S(INFO) << absl::StrFormat("  Has country:      %12lld", num_has_country);

@@ -10,6 +10,11 @@
 
 class PerCountryConfig {
  public:
+  struct alignas(2) ConfigValue {
+    RoutingAttrs dflt;
+    uint16_t speed_limit : 10;
+  };
+
   PerCountryConfig(bool log_details = false)
       : country_defaults_(MAX_NCC, nullptr), log_details_(log_details) {
     Clear();
@@ -72,7 +77,7 @@ class PerCountryConfig {
     }
   }
 
-  RoutingAttrs GetDefault(uint16_t cc_num, HIGHWAY_LABEL hw, VEHICLE vh,
+  ConfigValue GetDefault(uint16_t cc_num, HIGHWAY_LABEL hw, VEHICLE vh,
                          ENVIRONMENT_TYPE et, IS_MOTORROAD im) const {
     CHECK_NE_S(hw, HW_MAX);
     CHECK_NE_S(vh, VH_MAX);
@@ -85,8 +90,13 @@ class PerCountryConfig {
     }
   }
 
+  static std::string ConfigValueDebugString(const ConfigValue& cv) {
+    return absl::StrCat(RoutingAttrsDebugString(cv.dflt),
+                        " limit:", cv.speed_limit);
+  }
+
  private:
-  typedef RoutingAttrs CountryDefaults[HW_MAX][VH_MAX][ET_MAX][IM_MAX];
+  typedef ConfigValue CountryDefaults[HW_MAX][VH_MAX][ET_MAX][IM_MAX];
   struct Selector {
     std::vector<VEHICLE> vts;
     std::vector<HIGHWAY_LABEL> hws;
@@ -100,15 +110,16 @@ class PerCountryConfig {
     uint16_t maxspeed = 0;
   };
 
-  // Set maxspeed to 0 whenever there is no access.
+  // Set speed to 0 whenever there is no access.
   void PostProcessRoutingAttrs(CountryDefaults& arr) {
     for (size_t hw = 0; hw < HW_MAX; ++hw) {
       for (size_t vh = 0; vh < VH_MAX; ++vh) {
         for (size_t et = ET_ANY; et < ET_MAX; ++et) {
           for (size_t im = 0; im < IM_MAX; ++im) {
-            RoutingAttrs& ri = arr[hw][vh][et][im];
-            if (ri.access == ACC_NO) {
-              ri.maxspeed = 0;
+            ConfigValue& ri = arr[hw][vh][et][im];
+            if (ri.dflt.access == ACC_NO) {
+              ri.dflt.maxspeed = 0;
+              ri.speed_limit = 0;
             }
           }
         }
@@ -116,7 +127,7 @@ class PerCountryConfig {
     }
   }
 
-  static RoutingAttrs GetDefaultsFrom(HIGHWAY_LABEL hw, VEHICLE vh,
+  static ConfigValue GetDefaultsFrom(HIGHWAY_LABEL hw, VEHICLE vh,
                                      ENVIRONMENT_TYPE et, IS_MOTORROAD im,
                                      const CountryDefaults& arr) {
     return arr[hw][vh][et][im];
@@ -206,8 +217,7 @@ class PerCountryConfig {
     return sel;
   }
 
-  Operation GetOperation(std::string_view value,
-                         std::string_view line) const {
+  Operation GetOperation(std::string_view value, std::string_view line) const {
     Operation op;
 
     if (ConsumePrefixIf("access=", &value)) {
@@ -215,15 +225,15 @@ class PerCountryConfig {
       op.access = AccessToEnum(value);
       CHECK_NE_S(op.access, ACC_MAX) << "Bad access in <" << line << ">";
     } else if (ConsumePrefixIf("speed_max=", &value)) {
-        op.op_maxspeed = "set";
-        if (!ParseNumericMaxspeed(value, &op.maxspeed)) {
-          ABORT_S() << "Invalid speed value in <" << line << ">";
-        }
+      op.op_maxspeed = "set";
+      if (!ParseNumericMaxspeed(value, &op.maxspeed)) {
+        ABORT_S() << "Invalid speed value in <" << line << ">";
+      }
     } else if (ConsumePrefixIf("speed_limit=", &value)) {
-        op.op_maxspeed = "limit";
-        if (!ParseNumericMaxspeed(value, &op.maxspeed)) {
-          ABORT_S() << "Invalid speed value in <" << line << ">";
-        }
+      op.op_maxspeed = "limit";
+      if (!ParseNumericMaxspeed(value, &op.maxspeed)) {
+        ABORT_S() << "Invalid speed value in <" << line << ">";
+      }
     } else {
       ABORT_S() << "Unknown value in <" << line << ">";
     }
@@ -251,7 +261,7 @@ class PerCountryConfig {
             }
             // RoutingAttrs defaults_[VH_MAX][HW_MAX][ET_MAX][IM_MAX];
             if (op.op_access == "set") {
-              arr[hw][vh][et][im].access = op.access;
+              arr[hw][vh][et][im].dflt.access = op.access;
             } else {
               CHECK_S(op.op_access.empty()) << op.op_access;
             }
@@ -263,7 +273,7 @@ class PerCountryConfig {
                     op.maxspeed, VehicleToString(vh), HighwayLabelToString(hw),
                     et, im);
               }
-              arr[hw][vh][et][im].maxspeed = op.maxspeed;
+              arr[hw][vh][et][im].dflt.maxspeed = op.maxspeed;
             } else if (op.op_maxspeed == "limit") {
               if (log_details_) {
                 LOG_S(INFO) << absl::StrFormat(
@@ -271,8 +281,7 @@ class PerCountryConfig {
                     op.maxspeed, HighwayLabelToString(hw), VehicleToString(vh),
                     et, im);
               }
-              arr[hw][vh][et][im].maxspeed =
-                  std::min(op.maxspeed, arr[hw][vh][et][im].maxspeed);
+              arr[hw][vh][et][im].speed_limit = op.maxspeed;
             } else {
               CHECK_S(op.op_maxspeed.empty()) << op.op_maxspeed;
             }
