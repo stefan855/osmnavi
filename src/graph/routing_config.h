@@ -148,6 +148,11 @@ class PerCountryConfig {
                      std::string_view line) {
     Selector sel;
     for (size_t i = 1; i < keys.size(); ++i) {
+      if (keys[i] == "*") {
+        CHECK_S(i == 1 && keys.size() == 2)
+            << "'*' only allowed as first and only selector in key.";
+        continue;
+      }
       if (sel.vts.empty()) {
         VEHICLE vh = PrefixedVehicleToEnum(keys[i]);
         if (vh != VH_MAX) {

@@ -124,8 +124,10 @@ class DijkstraRouter {
         }
         std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx);
         VisitedNode& vother = visited_nodes_.at(v_idx);
+        const GWay& way = g_.ways.at(edge.way_idx);
         std::uint32_t new_metric =
-            min_metric + metric.Compute(g_.ways.at(edge.way_idx), edge);
+            min_metric +
+            metric.Compute(g_.way_shared_attrs.at(way.wsa_id), edge);
         if (!vother.done && new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;

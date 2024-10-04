@@ -7,6 +7,7 @@
 
 #include "base/argli.h"
 #include "base/country_code.h"
+#include "base/deduper_with_ids.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
 #include "base/thread_pool.h"
@@ -229,13 +230,13 @@ void TestParseTags() {
   }
 }
 
-void TestWayRural() {
-  FuncTimer("TestWayRural()");
+void TestWayZones() {
+  FuncTimer("TestWayZones()");
   OsmWayWrapper w;
-  build_graph::WayRural wr;
+  build_graph::WayTaggedZones wr;
 
   w = FillWayData("");
-  wr = ExtractWayRural(*w.tagh, w.ptags);
+  wr = ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, INVALID_NCC);
   CHECK_EQ_S(wr.et_forw, ET_ANY);
   CHECK_EQ_S(wr.et_backw, ET_ANY);
@@ -243,7 +244,7 @@ void TestWayRural() {
   CHECK_EQ_S(wr.im_backw, IM_NO);
 
   w = FillWayData("maxspeed:source=FR:rural");
-  wr = ExtractWayRural(*w.tagh, w.ptags);
+  wr = ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, NCC_FR);
   CHECK_EQ_S(wr.et_forw, ET_RURAL);
   CHECK_EQ_S(wr.et_backw, ET_RURAL);
@@ -251,7 +252,7 @@ void TestWayRural() {
   CHECK_EQ_S(wr.im_backw, IM_NO);
 
   w = FillWayData("motorroad=yes");
-  wr = ExtractWayRural(*w.tagh, w.ptags);
+  wr = ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, INVALID_NCC);
   CHECK_EQ_S(wr.et_forw, ET_ANY);
   CHECK_EQ_S(wr.et_backw, ET_ANY);
@@ -259,36 +260,36 @@ void TestWayRural() {
   CHECK_EQ_S(wr.im_backw, IM_YES);
 
   w = FillWayData("motorroad:forward=yes");
-  wr = ExtractWayRural(*w.tagh, w.ptags);
+  wr = ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.im_forw, IM_YES);
   CHECK_EQ_S(wr.im_backw, IM_NO);
 
   w = FillWayData("motorroad:backward=yes");
-  wr = ExtractWayRural(*w.tagh, w.ptags);
+  wr = ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.im_forw, IM_NO);
   CHECK_EQ_S(wr.im_backw, IM_YES);
 
   w = FillWayData("maxspeed:source=??:urban");
-  wr = ExtractWayRural(*w.tagh, w.ptags);
+  wr = ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, INVALID_NCC);
 
   for (std::string_view key :
        {"maxspeed", "maxspeed:source", "maxspeed:type", "source:maxspeed",
         "zone:maxspeed", "zone:traffic", "traffic:zone"}) {
     w = FillWayData(absl::StrCat(key, "=FR:urban"));
-    wr = ExtractWayRural(*w.tagh, w.ptags);
+    wr = ExtractWayZones(*w.tagh, w.ptags);
     CHECK_EQ_S(wr.ncc, NCC_FR);
     CHECK_EQ_S(wr.et_forw, ET_URBAN);
     CHECK_EQ_S(wr.et_backw, ET_URBAN);
 
     w = FillWayData(absl::StrCat(key, ":forward=FR:urban"));
-    wr = ExtractWayRural(*w.tagh, w.ptags);
+    wr = ExtractWayZones(*w.tagh, w.ptags);
     CHECK_EQ_S(wr.ncc, NCC_FR);
     CHECK_EQ_S(wr.et_forw, ET_URBAN);
     CHECK_EQ_S(wr.et_backw, ET_ANY);
 
     w = FillWayData(absl::StrCat(key, ":backward=FR:urban"));
-    wr = ExtractWayRural(*w.tagh, w.ptags);
+    wr = ExtractWayZones(*w.tagh, w.ptags);
     CHECK_EQ_S(wr.ncc, NCC_FR);
     CHECK_EQ_S(wr.et_forw, ET_ANY);
     CHECK_EQ_S(wr.et_backw, ET_URBAN);
@@ -354,28 +355,29 @@ void TestCarAccess() {
 }
 
 namespace {
-void CheckRoadDirection(std::string_view tag_string, HIGHWAY_LABEL hw,
-                        DIRECTION exp_direction) {
+void CheckCarRoadDirection(std::string_view tag_string, HIGHWAY_LABEL hw,
+                           DIRECTION exp_direction) {
   OsmWayWrapper w = FillWayData(tag_string);
   DIRECTION dir =
-      build_graph::RoadDirection(*w.tagh, hw, /*way_id=*/1, w.ptags);
+      build_graph::CarRoadDirection(*w.tagh, hw, /*way_id=*/1, w.ptags);
   CHECK_EQ_S(dir + 0, exp_direction + 0) << tag_string;
 }
 }  // namespace
 
-void TestRoadDirection() {
-  FuncTimer("TestRoadDirection()");
+void TestCarRoadDirection() {
+  FuncTimer("TestCarRoadDirection()");
 
-  CheckRoadDirection("", HW_PRIMARY, DIR_BOTH);
-  CheckRoadDirection("", HW_MOTORWAY, DIR_FORWARD);
-  CheckRoadDirection("oneway=no", HW_MOTORWAY, DIR_BOTH);
-  CheckRoadDirection("junction=roundabout", HW_PRIMARY, DIR_FORWARD);
-  CheckRoadDirection("junction=roundabout :: oneway=no", HW_PRIMARY, DIR_BOTH);
-  CheckRoadDirection("oneway=yes", HW_PRIMARY, DIR_FORWARD);
-  CheckRoadDirection("oneway=no", HW_PRIMARY, DIR_BOTH);
-  CheckRoadDirection("oneway=-1", HW_PRIMARY, DIR_BACKWARD);
+  CheckCarRoadDirection("", HW_PRIMARY, DIR_BOTH);
+  CheckCarRoadDirection("", HW_MOTORWAY, DIR_FORWARD);
+  CheckCarRoadDirection("oneway=no", HW_MOTORWAY, DIR_BOTH);
+  CheckCarRoadDirection("junction=roundabout", HW_PRIMARY, DIR_FORWARD);
+  CheckCarRoadDirection("junction=roundabout :: oneway=no", HW_PRIMARY,
+                        DIR_BOTH);
+  CheckCarRoadDirection("oneway=yes", HW_PRIMARY, DIR_FORWARD);
+  CheckCarRoadDirection("oneway=no", HW_PRIMARY, DIR_BOTH);
+  CheckCarRoadDirection("oneway=-1", HW_PRIMARY, DIR_BACKWARD);
   // Unknown value is interpreted as "both ways blocked".
-  CheckRoadDirection("oneway=blabla", HW_PRIMARY, DIR_MAX);
+  CheckCarRoadDirection("oneway=blabla", HW_PRIMARY, DIR_MAX);
 }
 
 std::vector<HIGHWAY_LABEL> AllHws() {
@@ -432,8 +434,8 @@ void TestRoutingConfig() {
     config.ReadConfig("../config/routing.cfg");
     LOG_S(INFO) << "*** " << VehicleToString(VH_MOTOR_VEHICLE);
     for (HIGHWAY_LABEL hw : AllHws()) {
-      LogRoutingAttrs(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_URBAN, IM_YES, config);
-      LogRoutingAttrs(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_RURAL, IM_YES, config);
+      LogRoutingAttrs(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_URBAN, IM_NO, config);
+      LogRoutingAttrs(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_RURAL, IM_NO, config);
     }
   }
   LOG_S(INFO) << "TestRoutingConfig() finished";
@@ -1142,6 +1144,63 @@ void TestCalculateDistance() {
   LOG_S(INFO) << "TestCalculateDistance() finished";
 }
 
+void TestDeDuperWithIdsInt() {
+  DeDuperWithIds<int> dd;
+
+  CHECK_EQ_S(dd.Add(0), 0);
+  CHECK_EQ_S(dd.Add(1), 1);
+  for (int i = 0; i < 5; ++i) {
+    CHECK_EQ_S(dd.Add(2), 2);
+  }
+
+  CHECK_EQ_S(dd.GetObjAt(0), 0);
+  CHECK_EQ_S(dd.GetEntryAt(0).id, 0);
+  CHECK_EQ_S(dd.GetEntryAt(0).ref_count, 1);
+
+  CHECK_EQ_S(dd.GetObjAt(1), 1);
+  CHECK_EQ_S(dd.GetEntryAt(1).id, 1);
+  CHECK_EQ_S(dd.GetEntryAt(1).ref_count, 1);
+
+  CHECK_EQ_S(dd.GetObjAt(2), 2);
+  CHECK_EQ_S(dd.GetEntryAt(2).id, 2);
+  CHECK_EQ_S(dd.GetEntryAt(2).ref_count, 5);
+
+  dd.SortByPopularity();
+  std::vector<int> els = dd.GetObjVector();
+  CHECK_EQ_S(els.size(), 3);
+  CHECK_EQ_S(els.at(0), 2);
+  CHECK_EQ_S(els.at(1), 0);
+  CHECK_EQ_S(els.at(2), 1);
+
+  std::vector<uint32_t> redir = dd.GetSortMapping();
+  CHECK_EQ_S(redir.size(), 3);
+  CHECK_EQ_S(redir.at(0), 1);
+  CHECK_EQ_S(redir.at(1), 2);
+  CHECK_EQ_S(redir.at(2), 0);
+}
+
+void TestDeDuperWithIdsString() {
+  DeDuperWithIds<std::string> dd;
+
+  for (int i = 0; i < 5; ++i) {
+    CHECK_EQ_S(dd.Add("aaa"), 0);
+  }
+  CHECK_EQ_S(dd.Add("bbb"), 1);
+  CHECK_EQ_S(dd.Add("ccc"), 2);
+
+  CHECK_EQ_S(dd.GetObjAt(0), "aaa");
+  CHECK_EQ_S(dd.GetObjAt(1), "bbb");
+  CHECK_EQ_S(dd.GetObjAt(2), "ccc");
+  CHECK_EQ_S(dd.num_unique(), 3);
+  CHECK_EQ_S(dd.num_added(), 7);
+
+  std::vector<std::string> els = dd.GetObjVector();
+  CHECK_EQ_S(els.size(), 3);
+  CHECK_EQ_S(els.at(0), "aaa");
+  CHECK_EQ_S(els.at(1), "bbb");
+  CHECK_EQ_S(els.at(2), "ccc");
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1168,10 +1227,13 @@ int main(int argc, char* argv[]) {
 
   TestKeyPartBits();
   TestParseTags();
-  TestWayRural();
+  TestWayZones();
   TestCarMaxspeed();
   TestCarAccess();
-  TestRoadDirection();
+  TestCarRoadDirection();
+
+  TestDeDuperWithIdsInt();
+  TestDeDuperWithIdsString();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

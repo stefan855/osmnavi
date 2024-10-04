@@ -1,5 +1,6 @@
 #pragma once
 
+#include <type_traits>
 #include <vector>
 
 #include "base/constants.h"
@@ -33,6 +34,37 @@ struct TurnRestriction {
   TurnDirection direction : 2;
 };
 
+struct WaySharedAttrs {
+  // Vehicles types used in the ri array.
+  static constexpr VEHICLE RI_VEHICLES[3] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
+                                             VH_FOOT};
+  static constexpr uint32_t RI_MAX =
+      2 * sizeof(RI_VEHICLES) / sizeof(RI_VEHICLES[0]);
+  // Routing info in forward and backward direction.
+  RoutingAttrs ri[RI_MAX];
+};
+
+// Check that WaySharedAttrs is POD. Note the struct has to be completely zeroed
+// when creating one, because bot the equal operator and hash function below
+// assume there are no unset areas in the data structure.
+static_assert(std::is_standard_layout_v<WaySharedAttrs> == true);
+static_assert(std::is_trivial_v<WaySharedAttrs> == true);
+
+inline bool operator==(const WaySharedAttrs& a, const WaySharedAttrs& b) {
+  return memcmp(&a, &b, sizeof(WaySharedAttrs)) == 0;
+}
+
+namespace std {
+template <>
+struct hash<WaySharedAttrs> {
+  size_t operator()(const WaySharedAttrs& wsa) const {
+    // Use already defined std::string_view hashes.
+    return std::hash<std::string_view>{}(
+        std::string_view((char*)&wsa, sizeof(wsa)));
+  }
+};
+}  // namespace std
+
 struct GWay {
   std::int64_t id : 40;
   HIGHWAY_LABEL highway_label : 5 = HW_MAX;
@@ -40,35 +72,23 @@ struct GWay {
   // 'uniform_country' is 0 if more than one country_num exists for the nodes in
   // the way, 1 if all the nodes belong to the same country.
   std::uint16_t uniform_country : 1 = 0;
+  // Country of the first node in the way.
   // If uniform_country==1, then this value is the country of all the nodes.
   std::uint16_t ncc : 10 = INVALID_NCC;
 
-  // Vehicle Type/Lane information here.
-  // Directions directions : 2 = Directions::Both;
-  DIRECTION dir_obsolete : 2 = DIR_BOTH;
-  // std::uint32_t maxspeed : 10 = 0;  // 0..1023 km/h
+  // position of the WaySharedAttrs data in vector g.way_shared_attrs.
+  std::uint32_t wsa_id = INFU32;
 
-  RoutingAttrs ri[2];  // Routing info in forward and backward direction.
+  // TODO: encode streetname and node_ids into the same buffer, such that we
+  // need only one pointer here.
 
-  // TODO: encode streetname and node_ids into the same buffer.
-  // 0-terminated street name. The memory is allocated in graph.unaligned_pool_.
-  char* streetname;
+  // 0-terminated street name. The memory is
+  // allocated in graph.unaligned_pool_.
+  char* streetname = nullptr;
   // Varbyte encoded node ids of the way. The memory is allocated in
   // graph.unaligned_pool_.
-  uint8_t* node_ids;
+  uint8_t* node_ids = nullptr;
 };
-
-inline bool RoutableAccess(ACCESS acc) {
-  return acc >= ACC_CUSTOMERS && acc < ACC_MAX;
-}
-
-inline bool RoutableForward(const GWay& way) {
-  return RoutableAccess(way.ri[0].access);
-}
-
-inline bool RoutableBackward(const GWay& way) {
-  return RoutableAccess(way.ri[1].access);
-}
 
 constexpr std::uint32_t INVALID_CLUSTER_ID = (1 << 22) - 1;
 
@@ -152,6 +172,7 @@ struct Graph {
 
   static constexpr uint32_t kLargeComponentMinSize = 10000;
 
+  std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
   // Large components, sorted by decreasing size.
@@ -218,3 +239,41 @@ struct Graph {
     return node_idx;
   }
 };
+
+inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_id) {
+  return g.way_shared_attrs.at(g.ways.at(way_id).wsa_id);
+}
+
+inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
+  return g.way_shared_attrs.at(way.wsa_id);
+}
+
+inline RoutingAttrs GetRA(const WaySharedAttrs& wsa, VEHICLE vt, uint32_t dir) {
+  const uint32_t pos = vt * 2 + dir;
+  CHECK_LE_S(vt, VH_FOOT);  //   VH_MOTOR_VEHICLE, VH_BICYCLE, VH_FOOT,
+  CHECK_LT_S(dir, 2);
+  CHECK_LT_S(pos, WaySharedAttrs::RI_MAX);
+  return wsa.ri[pos];
+}
+
+inline RoutingAttrs GetRA(const Graph& g, uint32_t way_id, VEHICLE vt,
+                          uint32_t dir) {
+  return GetRA(GetWSA(g, way_id), vt, dir);
+}
+
+inline RoutingAttrs GetRA(const Graph& g, const GWay& way, VEHICLE vt,
+                          uint32_t dir) {
+  return GetRA(GetWSA(g, way), vt, dir);
+}
+
+inline bool RoutableAccess(ACCESS acc) {
+  return acc >= ACC_CUSTOMERS && acc < ACC_MAX;
+}
+
+inline bool RoutableForward(const Graph& g, const GWay& way, VEHICLE vt) {
+  return RoutableAccess(GetRA(g, way, vt, 0).access);
+}
+
+inline bool RoutableBackward(const Graph& g, const GWay& way, VEHICLE vt) {
+  return RoutableAccess(GetRA(g, way, vt, 1).access);
+}

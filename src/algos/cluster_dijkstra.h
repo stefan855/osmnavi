@@ -76,7 +76,7 @@ void CollectClusterEdges(
       }
 
       full_edges->push_back(
-          {mini_idx, other_idx, metric.Compute(g.ways.at(edge.way_idx), edge)});
+          {mini_idx, other_idx, metric.Compute(GetWSA(g, edge.way_idx), edge)});
     }
   }
   // TODO: nodemap.size() is sometimes smaller than cluster.num_nodes.
@@ -125,8 +125,8 @@ struct MetricCmp {
 std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
                                       uint32_t num_border_nodes,
                                       std::uint32_t start_idx) {
-  LOG_S(INFO) << "Start routing from " << start_idx << " to "
-              << num_border_nodes << " border nodes";
+  // LOG_S(INFO) << "Start routing from " << start_idx << " to "
+  //             << num_border_nodes << " border nodes";
 
   std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {INFU32, 0});
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, MetricCmp> pq;
@@ -172,7 +172,7 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
       }
     }
   }
-  LOG_S(INFO) << "Finished loops:" << count;
+  // LOG_S(INFO) << "Finished loops:" << count;
 
   std::vector<uint32_t> res;
   for (size_t i = 0; i < num_border_nodes; ++i) {

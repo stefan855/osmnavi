@@ -6,13 +6,15 @@
 
 class RoutingMetric {
  public:
-  virtual int32_t Compute(const GWay& way, const GEdge& edge) const = 0;
+  virtual int32_t Compute(const WaySharedAttrs& wsa,
+                          const GEdge& edge) const = 0;
   virtual std::string_view Name() const = 0;
 };
 
 class RoutingMetricDistance : public RoutingMetric {
  public:
-  int32_t Compute(const GWay& way, const GEdge& edge) const override final {
+  int32_t Compute(const WaySharedAttrs& wsa,
+                  const GEdge& edge) const override final {
     return edge.distance_cm;
   }
 
@@ -21,10 +23,11 @@ class RoutingMetricDistance : public RoutingMetric {
 
 class RoutingMetricTime : public RoutingMetric {
  public:
-  int32_t Compute(const GWay& way, const GEdge& edge) const override final {
-    uint32_t km_per_hour = way.ri[edge.contra_way].maxspeed;
+  int32_t Compute(const WaySharedAttrs& wsa,
+                  const GEdge& edge) const override final {
+    uint32_t km_per_hour = wsa.ri[edge.contra_way].maxspeed;
     CHECK_GT_S(km_per_hour, 0)
-        << "Way " << way.id << " has no maxspeed dir " << edge.contra_way;
+        << RoutingAttrsDebugString(wsa.ri[edge.contra_way]);
 #if 0
     km_per_hour = 50u;
     if (way.highway_label == HW_MOTORWAY ||

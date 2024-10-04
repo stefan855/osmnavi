@@ -401,6 +401,6 @@ inline bool ParseNumericMaxspeed(std::string_view val,
 }
 
 inline std::string RoutingAttrsDebugString(RoutingAttrs ra) {
-  return absl::StrFormat("dir:%s acc:%s maxsp:%u",
+  return absl::StrFormat("acc:%s maxsp:%u",
                          AccessToString(ra.access).substr(0, 4), ra.maxspeed);
 }

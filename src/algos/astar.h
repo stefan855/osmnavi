@@ -125,8 +125,10 @@ class AStarRouter {
         if (vother.done) {
           continue;
         }
+        const GWay& way = g_.ways.at(edge.way_idx);
         std::uint32_t new_metric =
-            min_metric + metric.Compute(g_.ways.at(edge.way_idx), edge);
+            min_metric +
+            metric.Compute(g_.way_shared_attrs.at(way.wsa_id), edge);
         if (new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;
@@ -136,10 +138,11 @@ class AStarRouter {
             // TODO: use country specific maxspeed.
             static const RoutingAttrs g_ri = {.access = ACC_YES,
                                               .maxspeed = 120};
-            static const GWay g_way = {.ri = g_ri};  // Sets .ri[0] and .ri[1]!
+            static const WaySharedAttrs g_wsa = {
+                .ri = g_ri};  // Sets .ri[0] and .ri[1]!
             const GNode& other_node = g_.nodes.at(edge.other_node_idx);
             vother.heuristic_to_target = metric.Compute(
-                g_way,
+                g_wsa,
                 {.distance_cm = static_cast<uint64_t>(
                      1.00 * calculate_distance(other_node.lat /* / 10000000.0*/,
                                                other_node.lon /* / 10000000.0*/,

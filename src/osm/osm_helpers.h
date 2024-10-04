@@ -148,6 +148,7 @@ class OSMTagHelper {
       exp.match_val = ConsumePrefixIf("val:", &str);
       exp.match_key = !exp.match_val && ConsumePrefixIf("key:", &str);
       if (!exp.match_val && !exp.match_key) {
+        /*
         if (ConsumePrefixIf("keyval:", &str)) {
           exp.match_val = true;
           exp.match_key = true;
@@ -155,8 +156,12 @@ class OSMTagHelper {
           ABORT_S() << "wrong syntax in filter expression <" << expression
                     << ">";
         }
+        */
+        ConsumePrefixIf("keyval:", &str);
+        exp.match_val = true;
+        exp.match_key = true;
       }
-      CHECK_S(!str.empty());
+      CHECK_S(!str.empty()) << "Empty regexp not allowed";
       exp.re = std::regex(std::string(str), std::regex_constants::icase);
       res.push_back(exp);
     }
@@ -398,7 +403,7 @@ inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
 
 // Parse speed in the format [<country_code>:][rural|urban|[[zone]<maxspeed>]].
 // <country_code> is a two letter code such as "DE" or "CH".
-// 'maxspeed' can be ommitted, the ther return attributes have to be set.
+// 'maxspeed' can be omitted, the other returned attributes have to be set.
 // Returns true if at least one of the components has been parsed successfully.
 inline bool ParseCountrySpeedParts(std::string_view val, uint16_t* ncc,
                                    ENVIRONMENT_TYPE* et,

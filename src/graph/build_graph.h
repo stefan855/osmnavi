@@ -3,6 +3,7 @@
 #include <map>
 #include <mutex>
 
+#include "base/deduper_with_ids.h"
 #include "base/huge_bitset.h"
 #include "geometry/tiled_country_lookup.h"
 #include "graph/data_block.h"
@@ -18,10 +19,12 @@ struct WayTagStat {
   int64_t example_way_id = 0;
 };
 
-struct HelperData {
-  int64_t num_ways_selected = 0;
+struct MetaStatsData {
+  int64_t num_ways_with_highway_tag = 0;
+  int64_t num_edges_with_highway_tag = 0;
+  int64_t num_noderefs_with_highway_tag = 0;
   int64_t num_ways_closed = 0;
-  int64_t num_ways_deleted = 0;
+  int64_t num_ways_missing_nodes = 0;
 
   int64_t num_way_node_lookups = 0;
   int64_t num_way_node_lookups_found = 0;
@@ -36,22 +39,26 @@ struct HelperData {
   std::map<std::string, WayTagStat> way_tag_statmap;
 
   bool log_turn_restrictions = false;
+
+  // TODO: may help improve multithreading:
+  // void AddStats(const MetaStatsData& other);
 };
 
 struct MetaData {
-  int n_threads = 16;
+  int n_threads = 6;
   // Assigns country codes to lon/lat positions. Used to assign countries to
-  // ways.
+  // nodes and ways.
   TiledCountryLookup* tiler = nullptr;
 
-  // Default RoutingAttrs records percountry, highway type, rural/urban, ...
+  // Default RoutingAttrs records per country, highway type, rural/urban, ...
   PerCountryConfig per_country_config;
 
-  // Nodes in-memory table. This contains all node coordinates loaded from pbf
-  // file.
+  // Nodes in-memory table. This contains node coordinates loaded from pbf
+  // file. All nodes in 'way_nodes_seen' are present.
   DataBlockTable nodes;
 
-  // Nodes that are referenced by a way used for routing.
+  // Nodes that are referenced by a way potentially used for routing. Currently
+  // this is all ways that have a non-empty 'highway' tag.
   HugeBitset way_nodes_seen;
   // Nodes that are needed for routing, i.e. start/end of a way, crossings etc.
   HugeBitset way_nodes_needed;
@@ -62,17 +69,21 @@ struct MetaData {
   // Currently not used.
   std::vector<TurnRestriction> turn_restrictions;
 
-  HelperData hlp;
+  MetaStatsData stats;
 };
 
 struct ParsedTag {
-  // Bits of the key.
+  // A bit set representing the components in the parsed key.
+  // See osm/key_bits.h.
   uint64_t bits;
-  // Index into the osm string table.
+  // String value, given as index into the osm string table.
   uint32_t val_st_idx;
 };
 
-struct WayRural {
+// Way attributes country code, rural/urban and is_motorroad as extracted from
+// tags. Note that country code is only used for error reporting, since we
+// derive the country from lat/lon of the nodes.
+struct WayTaggedZones {
   uint16_t ncc = INVALID_NCC;
   ENVIRONMENT_TYPE et_forw = ET_ANY;
   ENVIRONMENT_TYPE et_backw = ET_ANY;
@@ -85,7 +96,7 @@ std::vector<ParsedTag> ParseTags(const OSMTagHelper& tagh,
 
 void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,
-                                    HugeBitset* node_ids);
+                                    HugeBitset* node_ids, MetaStatsData* stats);
 
 void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
@@ -93,7 +104,7 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      DataBlockTable* node_table);
 
 // Extract country, rural/urban and motorroad information from way tags.
-// This is needed to get the country specific config defaults for cwa given
+// This is needed to get the country specific config defaults for a given
 // highway type.
 // Handles the following keys:
 //   maxspeed
@@ -103,8 +114,8 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
 //   zone:maxspeed
 //   zone:traffic
 //   traffic:zone
-WayRural ExtractWayRural(const OSMTagHelper& tagh,
-                         const std::vector<ParsedTag>& ptags);
+WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
+                               const std::vector<ParsedTag>& ptags);
 
 // Extract the maxspeed from an osm way, in both directions. If there arre
 // lanes, then the highest maxspeed is returned. If no maxspeed is set, then 0
@@ -118,14 +129,15 @@ void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
                const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
                RoutingAttrs* ra_backw, bool logging_on = false);
 
-DIRECTION RoadDirection(const OSMTagHelper& tagh, HIGHWAY_LABEL hw,
-                        int64_t way_id, const std::vector<ParsedTag>& ptags,
-                        bool logging_on = false);
+DIRECTION CarRoadDirection(const OSMTagHelper& tagh, HIGHWAY_LABEL hw,
+                           int64_t way_id, const std::vector<ParsedTag>& ptags,
+                           bool logging_on = false);
 
 bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
                            const OSMPBF::Way& osm_way, GWay* way);
 
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                      std::mutex& mut, MetaData* meta);
+                      std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
+                      MetaData* meta);
 
 }  // namespace build_graph
