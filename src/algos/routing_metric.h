@@ -25,9 +25,9 @@ class RoutingMetricTime : public RoutingMetric {
  public:
   int32_t Compute(const WaySharedAttrs& wsa,
                   const GEdge& edge) const override final {
-    uint32_t km_per_hour = wsa.ri[edge.contra_way].maxspeed;
+    uint32_t km_per_hour = wsa.ra[edge.contra_way].maxspeed;
     CHECK_GT_S(km_per_hour, 0)
-        << RoutingAttrsDebugString(wsa.ri[edge.contra_way]);
+        << RoutingAttrsDebugString(wsa.ra[edge.contra_way]);
 #if 0
     km_per_hour = 50u;
     if (way.highway_label == HW_MOTORWAY ||

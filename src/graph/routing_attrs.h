@@ -104,11 +104,14 @@ inline std::vector<HIGHWAY_LABEL> HighwayLabelsByPrefix(
   return hws;
 }
 
+// Direction of a way, deduced from the oneway and related tags.
+// DIR_FORWARD and DIR_BACKWARD are used as array indices in the code and should
+// be kept stable. The invalid direction attribute is indicated by DIR_MAX.
 enum DIRECTION : uint8_t {
-  DIR_BOTH = 0,
-  DIR_FORWARD,
-  DIR_BACKWARD,
-  DIR_MAX,
+  DIR_FORWARD = 0,
+  DIR_BACKWARD = 1,
+  DIR_BOTH = 2,
+  DIR_MAX = 3,
 };
 
 namespace {

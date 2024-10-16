@@ -30,11 +30,13 @@ class AStarRouter {
   };
 
   struct Filter {
+    VEHICLE vt;
     bool avoid_dead_end;
     bool restrict_to_cluster;
     std::uint32_t cluster_id;
   };
-  static constexpr Filter standard_filter = {.avoid_dead_end = true,
+  static constexpr Filter standard_filter = {.vt = VH_MOTOR_VEHICLE,
+                                             .avoid_dead_end = true,
                                              .restrict_to_cluster = false,
                                              .cluster_id = INFU32};
 
@@ -111,6 +113,18 @@ class AStarRouter {
       // FindOrAddVisitedNode() in the loop below might invalidate it.
       for (size_t i = 0; i < node.num_edges_out; ++i) {
         const GEdge& edge = node.edges[i];
+        const GWay& way = g_.ways.at(edge.way_idx);
+        const WaySharedAttrs& wsa = GetWSA(g_, way);
+
+        // Is edge routable for the given vehicle type in the filter?
+        if (RoutableAccess(GetRAFromWSA(wsa, filter.vt,
+                                        edge.contra_way == DIR_FORWARD
+                                            ? DIR_FORWARD
+                                            : DIR_BACKWARD)
+                               .access)) {
+          continue;
+        }
+
         if (filter.avoid_dead_end && edge.bridge && !node.dead_end) {
           // Node is in the non-dead-end side of the bridge, so ignore edge and
           // do not enter the dead end.
@@ -125,10 +139,7 @@ class AStarRouter {
         if (vother.done) {
           continue;
         }
-        const GWay& way = g_.ways.at(edge.way_idx);
-        std::uint32_t new_metric =
-            min_metric +
-            metric.Compute(g_.way_shared_attrs.at(way.wsa_id), edge);
+        std::uint32_t new_metric = min_metric + metric.Compute(wsa, edge);
         if (new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;
@@ -136,10 +147,10 @@ class AStarRouter {
           // Compute heuristic distance from new node to target.
           if (vother.heuristic_to_target == INF32) {
             // TODO: use country specific maxspeed.
-            static const RoutingAttrs g_ri = {.access = ACC_YES,
+            static const RoutingAttrs g_ra = {.access = ACC_YES,
                                               .maxspeed = 120};
             static const WaySharedAttrs g_wsa = {
-                .ri = g_ri};  // Sets .ri[0] and .ri[1]!
+                .ra = g_ra};  // Sets .ra[0] and .ra[1]!
             const GNode& other_node = g_.nodes.at(edge.other_node_idx);
             vother.heuristic_to_target = metric.Compute(
                 g_wsa,

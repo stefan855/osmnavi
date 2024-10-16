@@ -34,14 +34,19 @@ struct TurnRestriction {
   TurnDirection direction : 2;
 };
 
+// WaySharedAttrs (=WSA) contains many of the way attributes in a
+// data structure that is shared between ways. The shared data is stored in
+// Graph::way_shared_attrs vector and accessed through GWay::wsa_id.
+// Used to decrease the storage needed to store ways, both in ram and on disk.
+// Also see base/deduper_with_ids.h.
 struct WaySharedAttrs {
-  // Vehicles types used in the ri array.
-  static constexpr VEHICLE RI_VEHICLES[3] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
+  // Vehicles types used in the ra array.
+  static constexpr VEHICLE RA_VEHICLES[3] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
                                              VH_FOOT};
-  static constexpr uint32_t RI_MAX =
-      2 * sizeof(RI_VEHICLES) / sizeof(RI_VEHICLES[0]);
+  static constexpr uint32_t RA_MAX =
+      2 * sizeof(RA_VEHICLES) / sizeof(RA_VEHICLES[0]);
   // Routing info in forward and backward direction.
-  RoutingAttrs ri[RI_MAX];
+  RoutingAttrs ra[RA_MAX];
 };
 
 // Check that WaySharedAttrs is POD. Note the struct has to be completely zeroed
@@ -136,9 +141,10 @@ struct GEdge {
   // to 0 for all nodes.
   // Note: Only bridges connect dead-end with non-dead-end nodes.
   std::uint64_t bridge : 1;
-  // 1 if the edge goes against the direction of the way, 0 if it goes in the
-  // way's direction.
-  // Important for example when selecting forward/backward speed.
+  // DIR_FORWARD (==0) or DIR_BACKWARD (==1), to indicate the direction of the
+  // edge relative to the direction of the way. Is not typed 'DIRECTION' because
+  // it can not hold all values of that enum. Important for example when
+  // selecting forward/backward speed.
   std::uint64_t contra_way : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
@@ -248,32 +254,56 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
   return g.way_shared_attrs.at(way.wsa_id);
 }
 
-inline RoutingAttrs GetRA(const WaySharedAttrs& wsa, VEHICLE vt, uint32_t dir) {
+// Returns the position of routing attrs for vehicle type 'vt' and direction
+// 'dir'. The allowed values for 'vt' are VH_MOTOR_VEHICLE, VH_BICYCLE, VH_FOOT,
+// for 'dir' they are DIR_FORWARD, DIR_BACKWARD. Check-fails if an attribute is
+// not valid.
+inline uint32_t RAinWSAIndex(VEHICLE vt, DIRECTION dir) {
   const uint32_t pos = vt * 2 + dir;
   CHECK_LE_S(vt, VH_FOOT);  //   VH_MOTOR_VEHICLE, VH_BICYCLE, VH_FOOT,
   CHECK_LT_S(dir, 2);
-  CHECK_LT_S(pos, WaySharedAttrs::RI_MAX);
-  return wsa.ri[pos];
+  CHECK_LT_S(pos, WaySharedAttrs::RA_MAX);
+  return pos;
 }
 
-inline RoutingAttrs GetRA(const Graph& g, uint32_t way_id, VEHICLE vt,
-                          uint32_t dir) {
-  return GetRA(GetWSA(g, way_id), vt, dir);
+inline RoutingAttrs GetRAFromWSA(const WaySharedAttrs& wsa, VEHICLE vt,
+                                 DIRECTION dir) {
+  return wsa.ra[RAinWSAIndex(vt, dir)];
 }
 
-inline RoutingAttrs GetRA(const Graph& g, const GWay& way, VEHICLE vt,
-                          uint32_t dir) {
-  return GetRA(GetWSA(g, way), vt, dir);
+inline RoutingAttrs GetRAFromWSA(const Graph& g, uint32_t way_id, VEHICLE vt,
+                                 DIRECTION dir) {
+  return GetRAFromWSA(GetWSA(g, way_id), vt, dir);
+}
+
+inline RoutingAttrs GetRAFromWSA(const Graph& g, const GWay& way, VEHICLE vt,
+                                 DIRECTION dir) {
+  return GetRAFromWSA(GetWSA(g, way), vt, dir);
 }
 
 inline bool RoutableAccess(ACCESS acc) {
   return acc >= ACC_CUSTOMERS && acc < ACC_MAX;
 }
 
+// Return true if any vehicle is routable in direction 'dir', false if not.
+inline bool WSAAnyRoutable(const WaySharedAttrs& wsa, DIRECTION dir) {
+  for (const VEHICLE vt : WaySharedAttrs::RA_VEHICLES) {
+    if (RoutableAccess(GetRAFromWSA(wsa, vt, dir).access)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Return true if any vehicle is routable, false if not.
+inline bool WSAAnyRoutable(const WaySharedAttrs& wsa) {
+  return WSAAnyRoutable(wsa, DIR_FORWARD) || WSAAnyRoutable(wsa, DIR_BACKWARD);
+}
+
 inline bool RoutableForward(const Graph& g, const GWay& way, VEHICLE vt) {
-  return RoutableAccess(GetRA(g, way, vt, 0).access);
+  return RoutableAccess(GetRAFromWSA(g, way, vt, DIR_FORWARD).access);
 }
 
 inline bool RoutableBackward(const Graph& g, const GWay& way, VEHICLE vt) {
-  return RoutableAccess(GetRA(g, way, vt, 1).access);
+  return RoutableAccess(GetRAFromWSA(g, way, vt, DIR_BACKWARD).access);
 }

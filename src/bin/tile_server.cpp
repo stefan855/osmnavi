@@ -340,7 +340,8 @@ int main(int argc, char* argv[]) {
   LOG_S(INFO) << "sizeof(LineSegment):" << sizeof(LineSegment);
 
   std::map<std::string, LayerData> layers;
-  LoadFiles(root + "/graph.csv", &layers["graph"]);
+  LoadFiles(root + "/graph_motor_vehicle.csv", &layers["graph_motor_vehicle"]);
+  LoadFiles(root + "/graph_bicycle.csv", &layers["graph_bicycle"]);
   LoadFiles(root + "/route_time.csv", &layers["route"]);
   LoadFiles(root + "/astar_route_time.csv", &layers["astar_route"]);
   LoadFiles(admin_root + "/admin/??_*.csv", &layers["ALL"]);

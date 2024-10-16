@@ -8,17 +8,17 @@
 // 'maxspeed:forward'. Note that other keys exist, but we're not interested in
 // them.
 constexpr const std::string_view kKeyParts[] = {
-    "access",        "advisory",  "backward",    "bicycle",       "both",
-    "both_ways",     "bridge",    "bus",         "change",        "conditional",
-    "cycleway",      "foot",      "footway",     "forward",       "hgv",
-    "highway",       "horse",     "incline",     "junction",      "lane",
-    "lane_markings", "lanes",     "lanes_inner", "layer",         "left",
-    "lit",           "maxspeed",  "moped",       "motor_vehicle", "motorcar",
-    "motorcycle",    "motorroad", "name",        "oneway",        "practical",
-    "psv",           "right",     "service",     "sidewalk",      "smoothness",
-    "source",        "surface",   "toll",        "tracktype",     "traffic",
-    "tunnel",        "turn",      "type",        "variable",      "vehicle",
-    "width",         "zone",
+    "access",      "advisory",      "backward",  "bicycle",     "bicycle_road",
+    "both",        "both_ways",     "bridge",    "bus",         "change",
+    "conditional", "cycleway",      "foot",      "footway",     "forward",
+    "hgv",         "highway",       "horse",     "incline",     "junction",
+    "lane",        "lane_markings", "lanes",     "lanes_inner", "layer",
+    "left",        "lit",           "maxspeed",  "moped",       "motor_vehicle",
+    "motorcar",    "motorcycle",    "motorroad", "name",        "oneway",
+    "practical",   "psv",           "right",     "service",     "sidewalk",
+    "smoothness",  "source",        "surface",   "toll",        "tracktype",
+    "traffic",     "tunnel",        "turn",      "type",        "variable",
+    "vehicle",     "width",         "zone",
 };
 
 namespace {
@@ -40,6 +40,7 @@ constexpr uint8_t KEY_BIT_ACCESS = GetMandatoryKeyPartBit("access");
 constexpr uint8_t KEY_BIT_ADVISORY = GetMandatoryKeyPartBit("advisory");
 constexpr uint8_t KEY_BIT_BACKWARD = GetMandatoryKeyPartBit("backward");
 constexpr uint8_t KEY_BIT_BICYCLE = GetMandatoryKeyPartBit("bicycle");
+constexpr uint8_t KEY_BIT_BICYCLE_ROAD = GetMandatoryKeyPartBit("bicycle_road");
 constexpr uint8_t KEY_BIT_BOTH = GetMandatoryKeyPartBit("both");
 constexpr uint8_t KEY_BIT_BOTH_WAYS = GetMandatoryKeyPartBit("both_ways");
 constexpr uint8_t KEY_BIT_BRIDGE = GetMandatoryKeyPartBit("bridge");
@@ -118,10 +119,6 @@ constexpr uint64_t BITSET_VEHICLES =
     GetBitMask(KEY_BIT_FOOT) | GetBitMask(KEY_BIT_BUS) |
     GetBitMask(KEY_BIT_HGV) | GetBitMask(KEY_BIT_BICYCLE);
 
-constexpr uint64_t BITSET_VEHICLE_CLASSES = GetBitMask(KEY_BIT_MOTOR_VEHICLE) |
-                                            GetBitMask(KEY_BIT_VEHICLE) |
-                                            GetBitMask(KEY_BIT_PSV);
-
 constexpr uint64_t BITSET_MODIFIERS =
     GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
     GetBitMask(KEY_BIT_LEFT) | GetBitMask(KEY_BIT_RIGHT) |
@@ -156,6 +153,7 @@ constexpr int GetKeyPartBitFast(std::string_view k) {
       if (k[1] < 'r') {
         if (k == "backward") return KEY_BIT_BACKWARD;
         if (k == "bicycle") return KEY_BIT_BICYCLE;
+        if (k == "bicycle_road") return KEY_BIT_BICYCLE_ROAD;
         if (k == "both") return KEY_BIT_BOTH;
         if (k == "both_ways") return KEY_BIT_BOTH_WAYS;
       } else {

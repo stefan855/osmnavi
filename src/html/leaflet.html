@@ -34,7 +34,12 @@
         attribution: '&copy; Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community</a>'
       });
 
-      var graph = L.tileLayer('http://localhost:8080/tiles/graph/{z}/{x}/{y}.png', {
+      var graph_motor_vehicle = L.tileLayer('http://localhost:8080/tiles/graph_motor_vehicle/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
+      var graph_bicycle = L.tileLayer('http://localhost:8080/tiles/graph_bicycle/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -110,7 +115,7 @@
       var map = L.map('map', {
         center: [46.78566, 8.1596],
         zoom: 9,
-        layers: [osm, graph]
+        layers: [osm, graph_motor_vehicle]
       });
 
       var baseMaps = {
@@ -119,7 +124,8 @@
       var overlayMaps = {
         "OpenStreetMap": osm,
         "ArcGis": arcgis,
-        "Graph": graph,
+        "Graph Cars": graph_motor_vehicle,
+        "Graph Bicycles": graph_bicycle,
         "Louvain": louvain,
         "Route": route,
         "A*-Route": astar_route,

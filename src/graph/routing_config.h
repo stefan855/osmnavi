@@ -116,10 +116,10 @@ class PerCountryConfig {
       for (size_t vh = 0; vh < VH_MAX; ++vh) {
         for (size_t et = ET_ANY; et < ET_MAX; ++et) {
           for (size_t im = 0; im < IM_MAX; ++im) {
-            ConfigValue& ri = arr[hw][vh][et][im];
-            if (ri.dflt.access == ACC_NO) {
-              ri.dflt.maxspeed = 0;
-              ri.speed_limit = 0;
+            ConfigValue& cfg = arr[hw][vh][et][im];
+            if (cfg.dflt.access == ACC_NO) {
+              cfg.dflt.maxspeed = 0;
+              cfg.speed_limit = 0;
             }
           }
         }

@@ -29,11 +29,13 @@ class DijkstraRouter {
   };
 
   struct Filter {
+    VEHICLE vt;
     bool avoid_dead_end;
     bool restrict_to_cluster;
     std::uint32_t cluster_id;
   };
-  static constexpr Filter standard_filter = {.avoid_dead_end = true,
+  static constexpr Filter standard_filter = {.vt = VH_MOTOR_VEHICLE,
+                                             .avoid_dead_end = true,
                                              .restrict_to_cluster = false,
                                              .cluster_id = INFU32};
 
@@ -111,6 +113,17 @@ class DijkstraRouter {
       // FindOrAddVisitedNode() in the loop below might invalidate it.
       for (size_t i = 0; i < node.num_edges_out; ++i) {
         const GEdge& edge = node.edges[i];
+        const GWay& way = g_.ways.at(edge.way_idx);
+        const WaySharedAttrs& wsa = GetWSA(g_, way);
+
+        if (RoutableAccess(GetRAFromWSA(wsa, filter.vt,
+                                        edge.contra_way == DIR_FORWARD
+                                            ? DIR_FORWARD
+                                            : DIR_BACKWARD)
+                               .access)) {
+          continue;
+        }
+
         // Even if we want to avoid dead ends, still allow to leave a dead end
         // but not *entering* one. This way, the start node can reside in a dead
         // end and routing still works. To achieve this behavior, we allow to
@@ -124,10 +137,7 @@ class DijkstraRouter {
         }
         std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx);
         VisitedNode& vother = visited_nodes_.at(v_idx);
-        const GWay& way = g_.ways.at(edge.way_idx);
-        std::uint32_t new_metric =
-            min_metric +
-            metric.Compute(g_.way_shared_attrs.at(way.wsa_id), edge);
+        std::uint32_t new_metric = min_metric + metric.Compute(wsa, edge);
         if (!vother.done && new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;

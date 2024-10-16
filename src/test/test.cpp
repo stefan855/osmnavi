@@ -16,9 +16,12 @@
 #include "geometry/distance.h"
 #include "geometry/line_clipping.h"
 #include "geometry/polygon.h"
+#include "graph/access.h"
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
+#include "graph/maxspeed.h"
+#include "graph/oneway.h"
 #include "graph/routing_config.h"
 #include "osm/admin_boundary.h"
 #include "osm/key_bits.h"
@@ -27,7 +30,7 @@
 struct OsmWayWrapper {
   std::unique_ptr<OSMPBF::StringTable> t;
   std::unique_ptr<OSMTagHelper> tagh;
-  std::vector<build_graph::ParsedTag> ptags;
+  std::vector<ParsedTag> ptags;
 
   OSMPBF::Way osm_way;
 
@@ -68,7 +71,7 @@ OsmWayWrapper FillWayData(std::string_view tags) {
   }
   w.osm_way.set_id(1);
   w.tagh.reset(new OSMTagHelper(*w.t));
-  w.ptags = build_graph::ParseTags(*w.tagh, w.osm_way);
+  w.ptags = ParseTags(*w.tagh, w.osm_way);
   return w;
 }
 
@@ -79,6 +82,7 @@ void TestKeyPartBits() {
   CHECK_EQ_S(KEY_BIT_ADVISORY, GetKeyPartBitFast("advisory"));
   CHECK_EQ_S(KEY_BIT_BACKWARD, GetKeyPartBitFast("backward"));
   CHECK_EQ_S(KEY_BIT_BICYCLE, GetKeyPartBitFast("bicycle"));
+  CHECK_EQ_S(KEY_BIT_BICYCLE_ROAD, GetKeyPartBitFast("bicycle_road"));
   CHECK_EQ_S(KEY_BIT_BOTH, GetKeyPartBitFast("both"));
   CHECK_EQ_S(KEY_BIT_BOTH_WAYS, GetKeyPartBitFast("both_ways"));
   CHECK_EQ_S(KEY_BIT_BRIDGE, GetKeyPartBitFast("bridge"));
@@ -236,7 +240,7 @@ void TestWayZones() {
   build_graph::WayTaggedZones wr;
 
   w = FillWayData("");
-  wr = ExtractWayZones(*w.tagh, w.ptags);
+  wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, INVALID_NCC);
   CHECK_EQ_S(wr.et_forw, ET_ANY);
   CHECK_EQ_S(wr.et_backw, ET_ANY);
@@ -244,7 +248,7 @@ void TestWayZones() {
   CHECK_EQ_S(wr.im_backw, IM_NO);
 
   w = FillWayData("maxspeed:source=FR:rural");
-  wr = ExtractWayZones(*w.tagh, w.ptags);
+  wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, NCC_FR);
   CHECK_EQ_S(wr.et_forw, ET_RURAL);
   CHECK_EQ_S(wr.et_backw, ET_RURAL);
@@ -252,7 +256,7 @@ void TestWayZones() {
   CHECK_EQ_S(wr.im_backw, IM_NO);
 
   w = FillWayData("motorroad=yes");
-  wr = ExtractWayZones(*w.tagh, w.ptags);
+  wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, INVALID_NCC);
   CHECK_EQ_S(wr.et_forw, ET_ANY);
   CHECK_EQ_S(wr.et_backw, ET_ANY);
@@ -260,36 +264,36 @@ void TestWayZones() {
   CHECK_EQ_S(wr.im_backw, IM_YES);
 
   w = FillWayData("motorroad:forward=yes");
-  wr = ExtractWayZones(*w.tagh, w.ptags);
+  wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.im_forw, IM_YES);
   CHECK_EQ_S(wr.im_backw, IM_NO);
 
   w = FillWayData("motorroad:backward=yes");
-  wr = ExtractWayZones(*w.tagh, w.ptags);
+  wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.im_forw, IM_NO);
   CHECK_EQ_S(wr.im_backw, IM_YES);
 
   w = FillWayData("maxspeed:source=??:urban");
-  wr = ExtractWayZones(*w.tagh, w.ptags);
+  wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
   CHECK_EQ_S(wr.ncc, INVALID_NCC);
 
   for (std::string_view key :
        {"maxspeed", "maxspeed:source", "maxspeed:type", "source:maxspeed",
         "zone:maxspeed", "zone:traffic", "traffic:zone"}) {
     w = FillWayData(absl::StrCat(key, "=FR:urban"));
-    wr = ExtractWayZones(*w.tagh, w.ptags);
+    wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
     CHECK_EQ_S(wr.ncc, NCC_FR);
     CHECK_EQ_S(wr.et_forw, ET_URBAN);
     CHECK_EQ_S(wr.et_backw, ET_URBAN);
 
     w = FillWayData(absl::StrCat(key, ":forward=FR:urban"));
-    wr = ExtractWayZones(*w.tagh, w.ptags);
+    wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
     CHECK_EQ_S(wr.ncc, NCC_FR);
     CHECK_EQ_S(wr.et_forw, ET_URBAN);
     CHECK_EQ_S(wr.et_backw, ET_ANY);
 
     w = FillWayData(absl::StrCat(key, ":backward=FR:urban"));
-    wr = ExtractWayZones(*w.tagh, w.ptags);
+    wr = build_graph::ExtractWayZones(*w.tagh, w.ptags);
     CHECK_EQ_S(wr.ncc, NCC_FR);
     CHECK_EQ_S(wr.et_forw, ET_ANY);
     CHECK_EQ_S(wr.et_backw, ET_URBAN);
@@ -302,8 +306,7 @@ void CheckCarMaxspeed(std::string_view tag_string, uint16_t exp_maxspeed_forw,
   std::uint16_t speed_forw = 0;
   std::uint16_t speed_backw = 0;
   OsmWayWrapper w = FillWayData(tag_string);
-  build_graph::CarMaxspeedFromWay(*w.tagh, /*way_id=*/1, w.ptags, &speed_forw,
-                                  &speed_backw);
+  CarMaxspeedFromWay(*w.tagh, /*way_id=*/1, w.ptags, &speed_forw, &speed_backw);
   CHECK_EQ_S(speed_forw, exp_maxspeed_forw) << tag_string;
   CHECK_EQ_S(speed_backw, exp_maxspeed_backw) << tag_string;
 }
@@ -333,7 +336,7 @@ void CheckCarAccess(std::string_view tag_string, ACCESS exp_access_forw,
                     ACCESS exp_access_backw) {
   RoutingAttrs forw = {.access = ACC_NO}, backw = {.access = ACC_NO};
   OsmWayWrapper w = FillWayData(tag_string);
-  build_graph::CarAccess(*w.tagh, /*way_id=*/1, w.ptags, &forw, &backw);
+  CarAccess(*w.tagh, /*way_id=*/1, w.ptags, &forw, &backw);
   CHECK_EQ_S(forw.access, exp_access_forw) << tag_string;
   CHECK_EQ_S(backw.access, exp_access_backw) << tag_string;
 }
@@ -358,8 +361,7 @@ namespace {
 void CheckCarRoadDirection(std::string_view tag_string, HIGHWAY_LABEL hw,
                            DIRECTION exp_direction) {
   OsmWayWrapper w = FillWayData(tag_string);
-  DIRECTION dir =
-      build_graph::CarRoadDirection(*w.tagh, hw, /*way_id=*/1, w.ptags);
+  DIRECTION dir = CarRoadDirection(*w.tagh, hw, /*way_id=*/1, w.ptags);
   CHECK_EQ_S(dir + 0, exp_direction + 0) << tag_string;
 }
 }  // namespace

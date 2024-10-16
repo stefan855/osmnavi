@@ -11,6 +11,7 @@
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
 #include "osm/osm_helpers.h"
+#include "osm/parsed_tag.h"
 
 namespace build_graph {
 
@@ -72,6 +73,7 @@ struct MetaData {
   MetaStatsData stats;
 };
 
+#if 0
 struct ParsedTag {
   // A bit set representing the components in the parsed key.
   // See osm/key_bits.h.
@@ -79,6 +81,7 @@ struct ParsedTag {
   // String value, given as index into the osm string table.
   uint32_t val_st_idx;
 };
+#endif
 
 // Way attributes country code, rural/urban and is_motorroad as extracted from
 // tags. Note that country code is only used for error reporting, since we
@@ -91,8 +94,8 @@ struct WayTaggedZones {
   IS_MOTORROAD im_backw = IM_NO;
 };
 
-std::vector<ParsedTag> ParseTags(const OSMTagHelper& tagh,
-                                 const OSMPBF::Way& osm_way);
+// std::vector<ParsedTag> ParseTags(const OSMTagHelper& tagh,
+//                                  const OSMPBF::Way& osm_way);
 
 void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,
@@ -120,21 +123,21 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
 // Extract the maxspeed from an osm way, in both directions. If there arre
 // lanes, then the highest maxspeed is returned. If no maxspeed is set, then 0
 // is returned.
-void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
-                        const std::vector<ParsedTag>& ptags,
-                        std::uint16_t* maxspeed_forw,
-                        std::uint16_t* maxspeed_backw, bool logging_on = false);
+// void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
+//                         const std::vector<ParsedTag>& ptags,
+//                         std::uint16_t* maxspeed_forw,
+//                         std::uint16_t* maxspeed_backw, bool logging_on = false);
 
-void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
-               const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
-               RoutingAttrs* ra_backw, bool logging_on = false);
+// void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
+//                const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
+//                RoutingAttrs* ra_backw, bool logging_on = false);
 
-DIRECTION CarRoadDirection(const OSMTagHelper& tagh, HIGHWAY_LABEL hw,
-                           int64_t way_id, const std::vector<ParsedTag>& ptags,
-                           bool logging_on = false);
+// DIRECTION CarRoadDirection(const OSMTagHelper& tagh, HIGHWAY_LABEL hw,
+//                            int64_t way_id, const std::vector<ParsedTag>& ptags,
+//                            bool logging_on = false);
 
-bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
-                           const OSMPBF::Way& osm_way, GWay* way);
+// bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
+//                            const OSMPBF::Way& osm_way, GWay* way);
 
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,

@@ -89,7 +89,7 @@ void FindLargeComponents(Graph* g) {
   ComponentAnalyzer::MarkLargeComponents(g);
 }
 
-void WriteGraphToCSV(const Graph& g, const std::string& filename) {
+void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
   FuncTimer timer(absl::StrFormat("Write graph to %s", filename.c_str()));
   std::ofstream myfile;
   myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
@@ -101,6 +101,9 @@ void WriteGraphToCSV(const Graph& g, const std::string& filename) {
       if (!e.unique_other) continue;
       const GNode& other = g.nodes.at(e.other_node_idx);
       const GWay& w = g.ways.at(e.way_idx);
+      if (!RoutableForward(g, w, vt) && !RoutableBackward(g, w, vt)) {
+        continue;
+      }
       /*
       if (n.node_id == other.node_id) {
         LOG_S(INFO) << absl::StrFormat("Node %lld length %fm way %lld name %s",
@@ -108,8 +111,8 @@ void WriteGraphToCSV(const Graph& g, const std::string& filename) {
       w.streetname : "n/a");
       }
       */
-      if (RoutableForward(g, w, VH_MOTOR_VEHICLE) &&
-          RoutableBackward(g, w, VH_MOTOR_VEHICLE) && n.lat > other.lat) {
+      if (RoutableForward(g, w, vt) && RoutableBackward(g, w, vt) &&
+          n.lat > other.lat) {
         // Edges that have both directions will show up twice when iterating, so
         // ignore one of the two edges for this case.
         continue;
@@ -118,7 +121,9 @@ void WriteGraphToCSV(const Graph& g, const std::string& filename) {
         color = "mag";
       } else {
         bool has_maxspeed =
-            GetRA(g, e.way_idx, VH_MOTOR_VEHICLE, e.contra_way).maxspeed > 0;
+            GetRAFromWSA(g, e.way_idx, VH_MOTOR_VEHICLE,
+                         e.contra_way == 0 ? DIR_FORWARD : DIR_BACKWARD)
+                .maxspeed > 0;
         if (has_maxspeed) {
           color = "blue";
         } else {
@@ -379,6 +384,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
 
   for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
     const GWay& way = graph.ways.at(way_idx);
+    const WaySharedAttrs& wsa = GetWSA(graph, way);
     std::vector<size_t> node_idx =
         meta->graph.GetGWayNodeIndexes(meta->way_nodes_needed, way);
     {
@@ -390,6 +396,19 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
           // TODO: self edges?
           // CHECK_NE_S(idx1, idx2) << way.id;
 
+          if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
+              WSAAnyRoutable(wsa, DIR_BACKWARD)) {
+            graph.nodes.at(prev_idx).num_edges_out++;
+            graph.nodes.at(idx).num_edges_out++;
+          } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
+            graph.nodes.at(prev_idx).num_edges_out++;
+            graph.nodes.at(idx).num_edges_in++;
+          } else {
+            CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
+            graph.nodes.at(prev_idx).num_edges_in++;
+            graph.nodes.at(idx).num_edges_out++;
+          }
+#if 0
           if (RoutableForward(graph, way, VH_MOTOR_VEHICLE) &&
               RoutableBackward(graph, way, VH_MOTOR_VEHICLE)) {
             graph.nodes.at(prev_idx).num_edges_out++;
@@ -402,6 +421,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
             graph.nodes.at(prev_idx).num_edges_in++;
             graph.nodes.at(idx).num_edges_out++;
           }
+#endif
         }
         prev_idx = idx;
       }
@@ -494,6 +514,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
 
     // Go through 'needed' nodes (skip the others) and output edges.
     {
+      const WaySharedAttrs& wsa = GetWSA(graph, way);
       std::unique_lock<std::mutex> l(mut);
       int last_pos = -1;
       for (size_t pos = 0; pos < ids.size(); ++pos) {
@@ -506,19 +527,19 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
             uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(last_pos);
             // Store edges with the summed up distance.
 
-            if (RoutableForward(graph, way, VH_MOTOR_VEHICLE) &&
-                RoutableBackward(graph, way, VH_MOTOR_VEHICLE)) {
+            if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
+                WSAAnyRoutable(wsa, DIR_BACKWARD)) {
               AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
                       way_idx, distance_cm);
               AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
                       way_idx, distance_cm);
-            } else if (RoutableForward(graph, way, VH_MOTOR_VEHICLE)) {
+            } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
               AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
                       way_idx, distance_cm);
               AddEdge(graph, idx2, idx1, /*out=*/false, /*contra_way=*/false,
                       way_idx, distance_cm);
             } else {
-              CHECK_S(RoutableBackward(graph, way, VH_MOTOR_VEHICLE)) << way.id;
+              CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
               AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
                       way_idx, distance_cm);
               AddEdge(graph, idx1, idx2, /*out=*/false, /*contra_way=*/true,
@@ -615,6 +636,7 @@ void ExecuteLouvain(MetaData* meta) {
   build_clusters::PrintClusterInformation(meta->graph, gvec);
   build_clusters::WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
 
+#if 0
   RoutingMetricTime metric;
   if (!meta->graph.clusters.empty()) {
     FuncTimer timer("ExecuteLouvain()::ComputeShortestClusterPaths");
@@ -630,6 +652,7 @@ void ExecuteLouvain(MetaData* meta) {
   }
   // Check if astar and dijkstra find the same shortest paths.
   // CheckShortestClusterPaths(meta->n_threads, meta->graph, metric);
+#endif
 }
 
 void PrintStructSizes() {
@@ -707,8 +730,10 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   uint64_t num_oneway_car = 0;
   for (const GWay& w : graph.ways) {
     const WaySharedAttrs& wsa = GetWSA(graph, w);
-    const RoutingAttrs ra_forw = GetRA(wsa, VH_MOTOR_VEHICLE, 0);
-    const RoutingAttrs ra_backw = GetRA(wsa, VH_MOTOR_VEHICLE, 1);
+    const RoutingAttrs ra_forw =
+        GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_FORWARD);
+    const RoutingAttrs ra_backw =
+        GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_BACKWARD);
 
     if (RoutableAccess(ra_forw.access) && RoutableAccess(ra_backw.access) &&
         ra_forw.maxspeed != ra_backw.maxspeed) {
@@ -721,7 +746,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
     num_has_country += w.uniform_country;
     num_has_streetname += w.streetname == nullptr ? 0 : 1;
     num_oneway_car +=
-        (wsa.ri[0].access == ACC_NO) != (wsa.ri[1].access == ACC_NO);
+        (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
   }
 
   LOG_S(INFO) << absl::StrFormat("  No maxspeed:      %12lld", num_no_maxspeed);
@@ -885,8 +910,8 @@ void DoIt(const Argli& argli) {
       for (GWay& w : meta.graph.ways) {
         w.wsa_id = mapping.at(w.wsa_id);
 #if 0
-        CHECK_S(memcmp(w.ri, meta.graph.way_shared_attrs.at(w.wsa_id).ri,
-                       sizeof(w.ri)) == 0)
+        CHECK_S(memcmp(w.ra, meta.graph.way_shared_attrs.at(w.wsa_id).ra,
+                       sizeof(w.ra)) == 0)
             << w.id;
 #endif
       }
@@ -932,7 +957,8 @@ void DoIt(const Argli& argli) {
   if (meta.stats.log_way_tag_stats) {
     PrintWayTagStats(meta);
   }
-  WriteGraphToCSV(meta.graph, "/tmp/graph.csv");
+  WriteGraphToCSV(meta.graph, VH_MOTOR_VEHICLE, "/tmp/graph_motor_vehicle.csv");
+  WriteGraphToCSV(meta.graph, VH_BICYCLE, "/tmp/graph_bicycle.csv");
   WriteCrossCountryEdges(&meta, "/tmp/cross.csv");
   PrintStructSizes();
   PrintStats(reader, meta);
