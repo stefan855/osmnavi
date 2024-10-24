@@ -417,7 +417,8 @@ inline bool ParseCountrySpeedParts(std::string_view val, uint16_t* ncc,
   if (colon_pos != std::string_view::npos) {
     *ncc = TwoLetterCountryCodeToNum(val.substr(0, colon_pos));
     if (*ncc == 0) {
-      LOG_S(INFO) << "Invalid CC in " << val;
+      // TODO: optional logging mode needed 
+      // LOG_S(INFO) << "Invalid CC in " << val;
     }
     val = val.substr(colon_pos + 1);
   }

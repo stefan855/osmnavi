@@ -41,7 +41,7 @@ struct TurnRestriction {
 // Also see base/deduper_with_ids.h.
 struct WaySharedAttrs {
   // Vehicles types used in the ra array.
-  static constexpr VEHICLE RA_VEHICLES[3] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
+  static constexpr VEHICLE RA_VEHICLES[] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
                                              VH_FOOT};
   static constexpr uint32_t RA_MAX =
       2 * sizeof(RA_VEHICLES) / sizeof(RA_VEHICLES[0]);
@@ -130,6 +130,7 @@ inline size_t gnode_num_edges(const GNode& n) {
 struct GEdge {
   std::uint32_t other_node_idx;
   std::int32_t way_idx;
+  // Distance between start and end point of the edge, in centimeters.
   std::uint64_t distance_cm : 40;
   // True iff this is the first time 'other_node_idx' has this value in the list
   // of edges of the node.

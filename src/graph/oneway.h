@@ -9,24 +9,47 @@
 
 namespace {
 
-inline DIRECTION DefaultHighwayDirection(const HIGHWAY_LABEL hw) {
-  if (hw != HW_MOTORWAY && hw != HW_MOTORWAY_JUNCTION &&
-      hw != HW_MOTORWAY_LINK) {
-    return DIR_BOTH;
+inline DIRECTION DefaultDirection(const OSMTagHelper& tagh,
+                                  const HIGHWAY_LABEL hw,
+                                  const std::vector<ParsedTag>& ptags) {
+  if (hw == HW_MOTORWAY || hw == HW_MOTORWAY_JUNCTION ||
+      hw == HW_MOTORWAY_LINK) {
+    return DIR_FORWARD;
   }
-  return DIR_FORWARD;
+
+  // For roundabouts (and circular), the default direction is forward. This
+  // should be used if no explicit oneway tag is present. See
+  // https://wiki.openstreetmap.org/wiki/DE:Tag:junction=roundabout See
+  // https://wiki.openstreetmap.org/wiki/DE:Tag:junction=circular
+  for (const ParsedTag& pt : ptags) {
+    if (pt.bits == GetBitMask(KEY_BIT_JUNCTION) &&
+        (tagh.ToString(pt.val_st_idx) == "roundabout" ||
+         tagh.ToString(pt.val_st_idx) == "circular")) {
+      return DIR_FORWARD;
+    }
+  }
+  return DIR_BOTH;
 }
 
-// For roundabouts (and circular), the default direction is forward. This should
-// be used if no explicit oneway tag is present.
+// Special case cycleway[:[right|left]]=opposite*.
 //
-// See https://wiki.openstreetmap.org/wiki/DE:Tag:junction=roundabout
-// See https://wiki.openstreetmap.org/wiki/DE:Tag:junction=circular
-inline bool IsDefaultForwardJunction(const OSMTagHelper& tagh,
-                                     const ParsedTag& pt) {
-  return pt.bits == GetBitMask(KEY_BIT_JUNCTION) &&
-         (tagh.ToString(pt.val_st_idx) == "roundabout" ||
-          tagh.ToString(pt.val_st_idx) == "circular");
+// See https://wiki.openstreetmap.org/wiki/DE:Key:cycleway
+// cycleway[:[right|left]]=opposite* is obsolete but still exists. Do not handle
+// "cycleway:*:oneway=", because this might be for a separate way.
+inline bool HasCyclewayOppositeTag(const OSMTagHelper& tagh,
+                                   const std::vector<ParsedTag>& ptags) {
+  constexpr uint64_t cycleway_bits = GetBitMask(KEY_BIT_CYCLEWAY) |
+                                     GetBitMask(KEY_BIT_LEFT) |
+                                     GetBitMask(KEY_BIT_RIGHT);
+  for (const ParsedTag& pt : ptags) {
+    if (pt.first == KEY_BIT_CYCLEWAY &&
+        BitsetIncludedIn(pt.bits, cycleway_bits)) {
+      if (absl::StartsWith(tagh.ToString(pt.val_st_idx), "opposite")) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 inline DIRECTION ExtractOnewayValue(std::string_view oneway_val) {
@@ -52,20 +75,11 @@ inline DIRECTION CarRoadDirection(const OSMTagHelper& tagh,
       GetBitMask(KEY_BIT_ONEWAY) | GetBitMask(KEY_BIT_VEHICLE) |
       GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
 
-  DIRECTION dir = DefaultHighwayDirection(hw);
-  bool found_oneway = false;
+  DIRECTION dir = DefaultDirection(tagh, hw, ptags);
   for (const ParsedTag& pt : ptags) {
-    // Roundabouts (and circular) have DIR_FORWARD as default.
-    // "!found_oneway" makes sure that the oneway tag always overrides this.
-    if (!found_oneway && IsDefaultForwardJunction(tagh, pt)) {
-      dir = DIR_FORWARD;
-      continue;
-    }
-
     if (pt.first == KEY_BIT_ONEWAY) {
       if (BitsetIncludedIn(pt.bits, selector_bits)) {
         dir = ExtractOnewayValue(tagh.ToString(pt.val_st_idx));
-        found_oneway = true;
       }
     }
   }
@@ -73,16 +87,17 @@ inline DIRECTION CarRoadDirection(const OSMTagHelper& tagh,
 }
 
 // Find out if this way is oneway or bothways for bicycles.
-// Does not find out if bicycles have access, i.e. "oneway=no access:bicycle=no"
-// yields that both directions are possible.
+// Does not find out if bicycles have access, i.e. "oneway=no
+// access:bicycle=no" yields that both directions are possible.
+//
 // 9428840:   oneway:bicycle=no ## oneway:psv=no ## oneway=yes
 // 684582393: cycleway:left=opposite_lane ## highway=residential ##
 //            maxspeed=30 ## oneway:bicycle=no ## oneway=yes ##
 // 77910473:  busway:left=lane ## cycleway:left=share_busway ##
 //            cycleway:right:lane=advisory ## cycleway:right=lane ##
-//            highway=residential ## lanes:bus:backward=1 ## lanes:forward=1 ##
-//            lanes=2 ## maxspeed=50 ## oneway:bicycle=no ## oneway:bus=no ##
-//            oneway=yes ## surface=asphalt ##
+//            highway=residential ## lanes:bus:backward=1 ## lanes:forward=1
+//            ## lanes=2 ## maxspeed=50 ## oneway:bicycle=no ##
+//            oneway:bus=no ## oneway=yes ## surface=asphalt ##
 // 28047081:  bicycle:forward=no ## highway=track ## oneway:bicycle=-1 ##
 //            tracktype=grade2 ##
 // 519927818: cycleway=opposite ## highway=residential ## maxspeed=30 ##
@@ -104,37 +119,19 @@ inline DIRECTION BicycleRoadDirection(const OSMTagHelper& tagh,
                                      GetBitMask(KEY_BIT_VEHICLE) |
                                      GetBitMask(KEY_BIT_BICYCLE);
 
-  constexpr uint64_t cycleway_bits = GetBitMask(KEY_BIT_CYCLEWAY) |
-                                     GetBitMask(KEY_BIT_LEFT) |
-                                     GetBitMask(KEY_BIT_RIGHT);
-
-  DIRECTION dir = DefaultHighwayDirection(hw);
-  bool found_oneway = false;
+  DIRECTION dir = DefaultDirection(tagh, hw, ptags);
   for (const ParsedTag& pt : ptags) {
-    // Roundabouts (and circular) have DIR_FORWARD as default.
-    // "!found_oneway" makes sure that the oneway tag always overrides this.
-    if (!found_oneway && IsDefaultForwardJunction(tagh, pt)) {
-      dir = DIR_FORWARD;
-      continue;
-    }
-
-    // See https://wiki.openstreetmap.org/wiki/DE:Key:cycleway
-    // Handle cycleway[:[right|left]]=opposite*, which is obsolete but still
-    // exists. Do not handle "cycleway:*:oneway=", because this might be for a
-    // separate way.
-    if (pt.first == KEY_BIT_CYCLEWAY &&
-        BitsetIncludedIn(pt.bits, cycleway_bits)) {
-      if (absl::StartsWith(tagh.ToString(pt.val_st_idx), "opposite")) {
-        if (dir == DIR_FORWARD || dir == DIR_BACKWARD) {
-          dir = DIR_BOTH;
-        }
-      }
-    } else if (pt.first == KEY_BIT_ONEWAY) {
+    if (pt.first == KEY_BIT_ONEWAY) {
       if (BitsetIncludedIn(pt.bits, selector_bits)) {
         dir = ExtractOnewayValue(tagh.ToString(pt.val_st_idx));
-        found_oneway = true;
       }
     }
+  }
+  if (dir != DIR_BOTH && HasCyclewayOppositeTag(tagh, ptags)) {
+    if (dir == DIR_MAX) {
+      return DIR_BACKWARD;
+    }
+    return DIR_BOTH;
   }
   return dir;
 }

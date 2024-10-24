@@ -144,7 +144,7 @@ void FindClosestHist(const std::uint64_t* hist, const std::uint64_t value,
 
 }  // namespace
 
-// Encode way nodes, using a compression window to take adavantage of similar
+// Encode way nodes, using a compression window to take advantage of similar
 // but non-consecutive values. The maximal theoretical space needed is 10 + 11 *
 // node_ids.size() bytes.
 // Note: The number of nodes is not encoded, this has to be done separately if

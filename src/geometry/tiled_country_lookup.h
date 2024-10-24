@@ -45,13 +45,13 @@ class TiledCountryLookup {
     InitTiles();
   }
 
-  // Get country code (or 0) for a point in lon/lat coordinates. The coordinates
-  // are in 'kDegreeUnits', see above.
+  // Get country code (INVALID_NCC) for a point in lon/lat coordinates. The
+  // coordinates are in 'kDegreeUnits', see above.
   uint16_t GetCountryNum(const int32_t p_x, const int32_t p_y,
                          const int64_t debug_id = 0) const {
     auto it = tile_to_country_.find(TileKey(p_x, p_y));
     if (it == tile_to_country_.end()) {
-      return 0;
+      return INVALID_NCC;
     } else if (it->second > 0) {
       return it->second;
     }

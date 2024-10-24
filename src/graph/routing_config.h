@@ -36,7 +36,7 @@ class PerCountryConfig {
       }
       ApplyConfigLine(line);
     }
-    PostProcess();
+    // PostProcess();
     LOG_S(INFO) << "Finished loading config";
   }
 
@@ -63,11 +63,12 @@ class PerCountryConfig {
       }
       arr = country_defaults_.at(cc_num);
     }
-    const Selector sel = ParseKeys(keys, line);
+    const Selector sel = ParseKeyParts(keys, line);
     Apply(sel, op, *arr);
     return true;
   }
 
+#if 0
   void PostProcess() {
     PostProcessRoutingAttrs(global_defaults_);
     for (auto ptr : country_defaults_) {
@@ -76,6 +77,7 @@ class PerCountryConfig {
       }
     }
   }
+#endif
 
   ConfigValue GetDefault(uint16_t cc_num, HIGHWAY_LABEL hw, VEHICLE vh,
                          ENVIRONMENT_TYPE et, IS_MOTORROAD im) const {
@@ -110,8 +112,11 @@ class PerCountryConfig {
     uint16_t maxspeed = 0;
   };
 
+#if 0
+  == maxspeed and speed limit must not deleted even if access is false. There might be a flag that turns access on in the data, and then we would be without default speed information.
   // Set speed to 0 whenever there is no access.
   void PostProcessRoutingAttrs(CountryDefaults& arr) {
+    return;
     for (size_t hw = 0; hw < HW_MAX; ++hw) {
       for (size_t vh = 0; vh < VH_MAX; ++vh) {
         for (size_t et = ET_ANY; et < ET_MAX; ++et) {
@@ -126,6 +131,7 @@ class PerCountryConfig {
       }
     }
   }
+#endif
 
   static ConfigValue GetDefaultsFrom(HIGHWAY_LABEL hw, VEHICLE vh,
                                      ENVIRONMENT_TYPE et, IS_MOTORROAD im,
@@ -144,8 +150,8 @@ class PerCountryConfig {
     }
   }
 
-  Selector ParseKeys(const std::vector<std::string_view>& keys,
-                     std::string_view line) {
+  Selector ParseKeyParts(const std::vector<std::string_view>& keys,
+                         std::string_view line) {
     Selector sel;
     for (size_t i = 1; i < keys.size(); ++i) {
       if (keys[i] == "*") {

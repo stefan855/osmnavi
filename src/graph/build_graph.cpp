@@ -565,8 +565,8 @@ inline void ComputeBicycleWayRoutingData(const MetaData& meta,
                                          WaySharedAttrs* wsa) {
   RoutingAttrs ra_forw = wc.config_forw.dflt;
   RoutingAttrs ra_backw = wc.config_backw.dflt;
-  ra_forw.maxspeed = 11;
-  ra_backw.maxspeed = 11;
+  // ra_forw.maxspeed = 11;
+  // ra_backw.maxspeed = 11;
 
   const DIRECTION direction =
       BicycleRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.ptags);
@@ -704,6 +704,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   WayContext wc = {.osm_way = osm_way,
                    .ptags = ParseTags(tagh, osm_way),
+                   // TODO: do this after the way has been accepted.
                    .node_countries = ExtractNodeCountries(*meta, osm_way)};
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
@@ -734,6 +735,10 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
       ComputeCarWayRoutingData(*meta, tagh, wc, &wsa);
     } else if (vt == VH_BICYCLE) {
       ComputeBicycleWayRoutingData(*meta, tagh, wc, &wsa);
+    } else if (vt == VH_FOOT) {
+      // TODO
+    } else {
+      ABORT_S() << "Invalid vehicle type " << vt;
     }
   }
 

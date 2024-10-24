@@ -36,7 +36,7 @@ uint32_t ComputeTagSelectivity(uint64_t bitset) {
   if (bitset & (GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_PSV))) {
     selectivity += 1000;
   }
-  if (bitset & (BITSET_VEHICLES | GetBitMask(KEY_BIT_CYCLEWAY))) {
+  if (bitset & BITSET_VEHICLES) {
     selectivity += 10000;
   }
   return selectivity;

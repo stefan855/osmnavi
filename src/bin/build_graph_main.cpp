@@ -121,7 +121,7 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
         color = "mag";
       } else {
         bool has_maxspeed =
-            GetRAFromWSA(g, e.way_idx, VH_MOTOR_VEHICLE,
+            GetRAFromWSA(g, e.way_idx, vt,
                          e.contra_way == 0 ? DIR_FORWARD : DIR_BACKWARD)
                 .maxspeed > 0;
         if (has_maxspeed) {
@@ -753,6 +753,8 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Diff maxspeed/dir:%12lld",
                                  num_diff_maxspeed);
   LOG_S(INFO) << absl::StrFormat("  Has country:      %12lld", num_has_country);
+  LOG_S(INFO) << absl::StrFormat("  Has no country:   %12lld",
+                                 graph.ways.size() - num_has_country);
   LOG_S(INFO) << absl::StrFormat("  Has streetname:   %12lld",
                                  num_has_streetname);
   LOG_S(INFO) << absl::StrFormat("  Oneway for cars:  %12lld", num_oneway_car);
@@ -770,6 +772,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   size_t num_edges_in = 0;
   size_t num_edges_out = 0;
   size_t num_non_unique_edges = 0;
+  size_t num_no_country = 0;
   size_t num_cross_cluster_edges = 0;
   size_t max_edges_in = 0;
   size_t max_edges_out = 0;
@@ -786,6 +789,8 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
         num_cross_cluster_edges++;
       }
     }
+    uint16_t ncc = meta.tiler->GetCountryNum(n.lon, n.lat);
+    num_no_country += (ncc == INVALID_NCC ? 1 : 0);
   }
 
   LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld",
@@ -803,7 +808,8 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Max edges in:     %12lld", max_edges_in);
   LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  meta.stats.num_cross_country_edges);
-
+  LOG_S(INFO) << absl::StrFormat("  Num no country:   %12lld",
+                                 num_no_country);
   LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  meta.stats.num_dead_end_nodes);
 

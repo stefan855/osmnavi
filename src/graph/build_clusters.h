@@ -26,6 +26,9 @@ void StoreClusterInformation(
   }
 
   // Store cluster_id in all clustered nodes.
+  // The clustering is hierarchical, therefore we need the function
+  // FindFinalCluster() which climbs all clustering from the bottom graph to the
+  // top cluster graph to get the final cluster_id of a node.
   for (uint32_t node_pos = 0; node_pos < lg.nodes.size(); ++node_pos) {
     const louvain::LouvainNode& n = lg.nodes.at(node_pos);
     const uint32_t cluster_id = FindFinalCluster(gvec, node_pos);
@@ -230,7 +233,7 @@ std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
 
   // 'np_to_louvain_pos' contains a mapping from a node position in
   // graph.nodes to the precomputed node position in the louvain graph.
-  // The map is sorted by key and ascending order, and by construction, the
+  // The map is sorted by key in ascending order, and by construction, the
   // pointed to values are also sorted.
   //
   // Keys are only inserted for eligible nodes that have at least one edge to
@@ -238,12 +241,17 @@ std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
   //
   // Note that when iterating, the keys *and* the values will appear in
   // increasing order.
+  //
+  // Instead of a btree a vector could be used. Binary search is used to find
+  // a node. It is not clear if this would be faster though, because lookup in
+  // btrees is more cpu-cache friendly than binary search in a vector.
   absl::btree_map<uint32_t, uint32_t> np_to_louvain_pos;
   for (uint32_t np = 0; np < graph.nodes.size(); ++np) {
     if (eligible_nodes.GetBit(np)) {
       const GNode& n = graph.nodes.at(np);
       for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
         const GEdge& e = n.edges[ep];
+        // Check if this edge is in the louvain graph.
         if (e.unique_other && e.other_node_idx != np &&
             eligible_nodes.GetBit(e.other_node_idx)) {
           // Edge between two eligible nodes.
@@ -294,9 +302,9 @@ std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
     g->SetTotalEdgeWeight(dfl_total_edge_weight);
   }
 
-  LOG_S(INFO) << absl::StrFormat("Louvain nodes (no line nodes): %12d",
+  LOG_S(INFO) << absl::StrFormat("Louvain nodes (line nodes removed): %12d",
                                  g->nodes.size());
-  LOG_S(INFO) << absl::StrFormat("Louvain edges (no line nodes): %12d",
+  LOG_S(INFO) << absl::StrFormat("Louvain edges (line nodes removed): %12d",
                                  g->edges.size());
 
   constexpr int MaxLevel = 20;
@@ -308,6 +316,7 @@ std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
     for (int step = 0; step < 40; ++step) {
       uint32_t moves = g->Step();
       if (g->empty_clusters_ <= prev_empty && moves >= prev_moves) {
+        // stop when empty clusters start shrinking.
         break;
       }
       prev_moves = moves;
@@ -316,7 +325,7 @@ std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
       LOG_S(INFO) << absl::StrFormat(
           "Level %d Step %d moves:%u #clusters:%u empty:%u", level, step, moves,
           g->clusters.size(), g->empty_clusters_);
-      if (moves == 0) {
+      if (moves < g->nodes.size() / 1000000) {
         if (step == 0) {
           level = MaxLevel - 1;  // Complete stop.
         }

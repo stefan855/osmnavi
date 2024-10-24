@@ -30,6 +30,16 @@ struct alignas(4) LouvainNode {
   uint32_t back_ref;        // Reference to source of this node.
 };
 
+// LouvainGraph represents one level of the hierarchical louvain clustering
+// algorithm. The initial level is created from the graph that is to be
+// clustered.
+//
+// At each step of the algorithm, the input graph is taken and the nodes are
+// clustered into a (hopefully) smaller number of clusters. Then a new
+// LouvainGraph is created, using the clusters that were built in the previous
+// level as nodes. This new graph is then clustered again, until clustering
+// stops producing less clusters (or some other criteria).
+//
 struct LouvainGraph {
   std::vector<LouvainCluster> clusters;
   std::vector<LouvainNode> nodes;
@@ -85,6 +95,9 @@ struct LouvainGraph {
     return FindEdgeInRange(n.edge_start, n.edge_start + n.num_edges, to_pos);
   }
 
+  // Check the louvain graph and fail if anything unexpected or wrong is found.
+  // This is used to find errors or issues with data. Maybe it should be used
+  // only in debug mode in the future.
   void Validate() {
     for (size_t i = 0; i < edges.size(); ++i) {
       // Edge target nodes exists?
@@ -147,6 +160,11 @@ struct LouvainGraph {
   }
 
   // Add a new node. Nodes must be added in order 0, 1, 2, ...
+  // back_ref points to the source for this node, i.e. the node position in the
+  // original graph.
+  // w_self is the weight of the node. This becomes non-zero for self-edges, for
+  // instance when a cluster is contracted into a single node for the next
+  // level.
   void AddNode(uint32_t pos, uint32_t back_ref = 0, uint32_t w_self = 0) {
     CHECK_EQ_S(pos, nodes.size());
     CHECK_EQ_S(nodes.size(), clusters.size());

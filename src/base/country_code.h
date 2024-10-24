@@ -22,7 +22,7 @@ inline constexpr uint16_t TwoLetterCountryCodeToNum(
 }
 
 constexpr uint16_t INVALID_NCC = 0;
-constexpr uint16_t MAX_NCC = (26 << 5) + 26 + 1;
+constexpr uint16_t MAX_NCC = (26 << 5) + 26 + 1; // 859, i.e. 10 bits.
 constexpr uint16_t NCC_CH = TwoLetterCountryCodeToNum("CH");
 constexpr uint16_t NCC_DE = TwoLetterCountryCodeToNum("DE");
 constexpr uint16_t NCC_AT = TwoLetterCountryCodeToNum("AT");

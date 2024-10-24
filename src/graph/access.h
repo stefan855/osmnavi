@@ -122,6 +122,10 @@ inline void BicycleAccess(const OSMTagHelper& tagh, std::int64_t way_id,
       case GetBitMask(KEY_BIT_BICYCLE): {
         std::string_view val = tagh.ToString(pt.val_st_idx);
         SetAccess(pt, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+        if (way_id == 35433970 &&
+            (pt.bits & ~modifier_bits) == GetBitMask(KEY_BIT_BICYCLE)) {
+          LOG_S(INFO) << "BlaBla:" << way_id << " " << ra_forw->access;
+        }
         break;
       }
       default:
