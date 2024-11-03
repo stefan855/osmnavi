@@ -23,17 +23,42 @@ inline void InitLogging(int argc, char* argv[]) {
 class FuncTimer {
  public:
   FuncTimer(std::string_view text) : text_(text), start_(absl::Now()) {
-    LOG_S(INFO) << text_ << " started";
+    log(text_ + " started");
   }
   ~FuncTimer() {
-    LOG_S(INFO) << absl::StrFormat("%s finished >>> secs: %.3f", text_,
-                                   ToDoubleSeconds(absl::Now() - start_));
+    log(absl::StrFormat("%s finished >>> secs: %.3f", text_,
+                        ToDoubleSeconds(absl::Now() - start_)));
   }
 
  private:
   const std::string text_;
   const absl::Time start_;
+  virtual void log(std::string_view msg) { LOG_S(INFO) << msg; }
 };
+
+// Start a FuncTimer() for the current function.
+// This macro is needed because the used macros __func__ and the expansion of
+// LOG_S depend on the place they are defined. Using a macro makes sure that the
+// correct function name, filename and line number are logged.
+#define FUNC_TIMER()                                                \
+  class FuncTimerDerived : public FuncTimer {                       \
+   public:                                                          \
+    FuncTimerDerived(std::string_view text) : FuncTimer(text) {}    \
+                                                                    \
+   private:                                                         \
+    void log(std::string_view msg) override { LOG_S(INFO) << msg; } \
+  };                                                                \
+  FuncTimerDerived func_timer_derived20241103(std::string(__func__) + "()");
+
+// Macro that returns vec[idx], after checking that idx >= 0 and idx <=
+// vec.size(). Logs a fatal error if idx >= vec.size();
+#define ATR(vec, idx)                            \
+  ({                                             \
+    if (!(idx >= 0) || idx >= vec.size()) {                     \
+      LOG_S(FATAL) << idx << " not in range " << vec.size(); \
+    }                                            \
+    vec[idx];                                    \
+  })
 
 inline bool ConsumePrefixIf(std::string_view prefix, std::string_view* str) {
   if (!str->starts_with(prefix)) {

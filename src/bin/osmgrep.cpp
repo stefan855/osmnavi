@@ -8,7 +8,7 @@
 
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
-  FuncTimer timer("main()");
+  FUNC_TIMER();
 
   Argli argli(
       argc, argv,

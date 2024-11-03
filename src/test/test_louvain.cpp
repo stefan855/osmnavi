@@ -50,7 +50,7 @@ double ComputeModularity(const LouvainGraph& g) {
 
 
 void TestLouvainTriangleGrpah() {
-  FuncTimer("TestLouvainTriangleGrpah()");
+  FUNC_TIMER();
   // These values where manually verified.
   constexpr double kExpectedModularityStart = -0.173469387755;
   constexpr double kExpectedModularityEnd = 0.357142857143;
@@ -155,7 +155,7 @@ void TestLouvainTriangleGrpah() {
 }
 
 void TestLouvainSquareGraph() {
-  FuncTimer("TestLouvainSquareGraph()");
+  FUNC_TIMER();
   constexpr double kQMaxDiff = 0.00000001;
 
   LouvainGraph g;
@@ -192,7 +192,7 @@ void TestLouvainSquareGraph() {
 }
 
 void TestLouvainSquareClusterGraph() {
-  FuncTimer("TestLouvainSquareClusterGraph()");
+  FUNC_TIMER();
 
   std::vector<std::unique_ptr<LouvainGraph>> gvec;
 
@@ -230,7 +230,7 @@ void TestLouvainSquareClusterGraph() {
 }
 
 void TestNodeLineRemover() {
-  FuncTimer("TestNodeLineRemover()");
+  FUNC_TIMER();
   LouvainGraph g;
   // A line of four nodes ending in a triangle.
   g.AddNodeAndEdges(0, {1});
@@ -282,7 +282,7 @@ void TestNodeLineRemover() {
 }
 
 void TestNodeLineRemoverDisconnectedCircle() {
-  FuncTimer("TestNodeLineRemoverDisconnectedCircle()");
+  FUNC_TIMER();
   LouvainGraph g;
   // A circle of five nodes.
   g.AddNodeAndEdges(0, {4, 1});

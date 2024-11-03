@@ -76,7 +76,7 @@ OsmWayWrapper FillWayData(std::string_view tags) {
 }
 
 void TestKeyPartBits() {
-  FuncTimer("TestKeyPartBits()");
+  FUNC_TIMER();
 
   CHECK_EQ_S(KEY_BIT_ACCESS, GetKeyPartBitFast("access"));
   CHECK_EQ_S(KEY_BIT_ADVISORY, GetKeyPartBitFast("advisory"));
@@ -138,7 +138,7 @@ void TestKeyPartBits() {
 }
 
 void TestParseTags() {
-  FuncTimer("TestParseTags()");
+  FUNC_TIMER();
   OsmWayWrapper w;
 
   w = FillWayData("");
@@ -235,7 +235,7 @@ void TestParseTags() {
 }
 
 void TestWayZones() {
-  FuncTimer("TestWayZones()");
+  FUNC_TIMER();
   OsmWayWrapper w;
   build_graph::WayTaggedZones wr;
 
@@ -313,7 +313,7 @@ void CheckCarMaxspeed(std::string_view tag_string, uint16_t exp_maxspeed_forw,
 }  // namespace
 
 void TestCarMaxspeed() {
-  FuncTimer("TestCarMaxspeed()");
+  FUNC_TIMER();
 
   CheckCarMaxspeed("", 0, 0);
   CheckCarMaxspeed("maxspeed:bicycle=20", 0, 0);
@@ -343,7 +343,7 @@ void CheckCarAccess(std::string_view tag_string, ACCESS exp_access_forw,
 }  // namespace
 
 void TestCarAccess() {
-  FuncTimer("TestCarAccess()");
+  FUNC_TIMER();
 
   CheckCarAccess("", ACC_NO, ACC_NO);
   CheckCarAccess("access:bicycle=yes", ACC_NO, ACC_NO);
@@ -367,7 +367,7 @@ void CheckCarRoadDirection(std::string_view tag_string, HIGHWAY_LABEL hw,
 }  // namespace
 
 void TestCarRoadDirection() {
-  FuncTimer("TestCarRoadDirection()");
+  FUNC_TIMER();
 
   CheckCarRoadDirection("", HW_PRIMARY, DIR_BOTH);
   CheckCarRoadDirection("", HW_MOTORWAY, DIR_FORWARD);

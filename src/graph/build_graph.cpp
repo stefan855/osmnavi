@@ -462,6 +462,12 @@ void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
   for (size_t i = 1; i < node_countries.size(); ++i) {
     if (node_countries.at(i).ncc != way->ncc) {
       way->uniform_country = 0;
+      /*
+      if (node_countries.at(i).ncc < way->ncc &&
+          node_countries.at(i).ncc != INVALID_NCC) {
+        way->ncc = node_countries.front().ncc;
+      }
+      */
       return;
     }
   }
@@ -768,7 +774,8 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     wc.way.wsa_id = deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
 
-    if (prev_num_unique != deduper->num_unique()) {
+    if (prev_num_unique != deduper->num_unique() &&
+        deduper->num_unique() % 10 == 0) {
       LOG_S(INFO) << "Number of unique way-routingattrs "
                   << deduper->num_unique() << " for way " << wc.way.id;
       for (uint32_t i = 0; i < WaySharedAttrs::RA_MAX; ++i) {

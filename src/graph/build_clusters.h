@@ -8,24 +8,145 @@
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
 #include "algos/louvain.h"
+#include "base/thread_pool.h"
 #include "graph/graph_def.h"
 #include "logging/loguru.h"
 
 namespace build_clusters {
 
+namespace {
+
+using TGraphToLouvain = absl::btree_map<uint32_t, uint32_t>;
+using TGVec = std::vector<std::unique_ptr<louvain::LouvainGraph>>;
+
+constexpr int64_t dfl_total_edge_weight = 5000000;
+
+// Check if node is eligible for louvain clustering.
+inline bool EligibleNodeForLouvain(const GNode& n) {
+  return n.dead_end == 0 && n.large_component == 1;
+}
+
+// Check if node is eligible for louvain clustering and if it has country code
+// 'ncc'.
+inline bool EligibleNodeForLouvain(const GNode& n, std::uint16_t ncc) {
+  return EligibleNodeForLouvain(n) && n.ncc == ncc;
+}
+
+// Create The first two levels of the Louvain graph and return them in a vector.
+// The first level is a straight copy of the input. The second level has lines
+// of nodes clustered.
+inline TGVec CreateInitalLouvainGraph(const Graph& graph,
+                                      const TGraphToLouvain& np_to_louvain_pos,
+                                      uint16_t ncc) {
+  TGVec gvec;
+  gvec.push_back(std::make_unique<louvain::LouvainGraph>());
+  louvain::LouvainGraph* g = gvec.back().get();
+
+  for (auto [np, louvain_pos] : np_to_louvain_pos) {
+    g->AddNode(louvain_pos, np);
+    const GNode& n = graph.nodes.at(np);
+    for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
+      const GEdge& e = n.edges[ep];
+      const GNode& other = graph.nodes.at(e.other_node_idx);
+
+      if (e.unique_other && e.other_node_idx != np &&
+          EligibleNodeForLouvain(other, n.ncc)) {
+        auto it = np_to_louvain_pos.find(e.other_node_idx);
+        CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
+        g->AddEdge(it->second, /*weight=*/n.ncc != other.ncc ? 1 : 1);
+#if 0
+        const GWay& way = graph.ways.at(e.way_idx);
+        if (way.highway_label == HW_RESIDENTIAL ||
+            way.highway_label == HW_LIVING_STREET ||
+            way.highway_label == HW_SERVICE) {
+          g->AddEdge(it->second, /*weight=*/1);
+        } else {
+          g->AddEdge(it->second, /*weight=*/1);
+        }
+#endif
+      }
+    }
+    // Check that the new node has actually some edges.
+    // CHECK_GT_S(g->nodes.back().num_edges, 0);
+  }
+
+  LOG_S(INFO) << absl::StrFormat("Louvain nodes: %12d", g->nodes.size());
+  LOG_S(INFO) << absl::StrFormat("Louvain edges: %12d", g->edges.size());
+
+  {
+    louvain::NodeLineRemover::ClusterLineNodes(g);
+    RemoveEmptyClusters(g);
+    gvec.push_back(std::make_unique<louvain::LouvainGraph>());
+    CreateClusterGraph(*g, gvec.back().get());
+    g = gvec.back().get();
+    g->SetTotalEdgeWeight(dfl_total_edge_weight);
+  }
+
+  LOG_S(INFO) << absl::StrFormat("Louvain nodes (line nodes removed): %12d",
+                                 g->nodes.size());
+  LOG_S(INFO) << absl::StrFormat("Louvain edges (line nodes removed): %12d",
+                                 g->edges.size());
+
+  return gvec;
+}
+
+void RunLouvainLevels(TGVec* gvec) {
+  louvain::LouvainGraph* g = gvec->back().get();
+  constexpr int MaxLevel = 20;
+  for (int level = 0; level < MaxLevel; ++level) {
+    g->Validate();
+
+    uint32_t prev_moves = INFU32;
+    uint32_t prev_empty = 0;
+    for (int step = 0; step < 40; ++step) {
+      uint32_t moves = g->Step();
+      if (g->empty_clusters_ <= prev_empty && moves >= prev_moves) {
+        // stop when empty clusters start shrinking.
+        break;
+      }
+      prev_moves = moves;
+      prev_empty = g->empty_clusters_;
+
+      LOG_S(INFO) << absl::StrFormat(
+          "Level %d Step %d moves:%u #clusters:%u empty:%u", level, step, moves,
+          g->clusters.size(), g->empty_clusters_);
+      if (moves == 0 || moves < g->nodes.size() / 1000000) {
+        if (step == 0) {
+          level = MaxLevel - 1;  // Complete stop.
+        }
+        break;
+      }
+    }
+    RemoveEmptyClusters(g);
+    if (level < MaxLevel - 1) {
+      // Create a new level.
+      gvec->push_back(std::make_unique<louvain::LouvainGraph>());
+      CreateClusterGraph(*g, gvec->back().get());
+      g = gvec->back().get();
+      g->SetTotalEdgeWeight(dfl_total_edge_weight);
+    }
+  }
+}
+
 // Store the cluster information in Graph g.
-void StoreClusterInformation(
+void AddClustersAndClusterIds(
+    std::uint16_t ncc,
     const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec, Graph* g) {
-  FuncTimer timer("StoreClusterInformation()");
+  FUNC_TIMER();
   const louvain::LouvainGraph& lg = *gvec.front();
 
-  // Initialise clusters vector.
-  g->clusters.resize(gvec.back()->clusters.size());
-  for (uint32_t cluster_id = 0; cluster_id < g->clusters.size(); ++cluster_id) {
+  // Add new clusters to clusters vector.
+  const size_t offset = g->clusters.size();
+  const size_t num_new = gvec.back()->clusters.size();
+
+  g->clusters.resize(offset + num_new);
+  for (uint32_t cluster_id = offset; cluster_id < g->clusters.size();
+       ++cluster_id) {
+    g->clusters.at(cluster_id).ncc = ncc;
     g->clusters.at(cluster_id).cluster_id = cluster_id;
   }
 
-  // Store cluster_id in all clustered nodes.
+  // Store adjusted cluster_id in all clustered nodes.
   // The clustering is hierarchical, therefore we need the function
   // FindFinalCluster() which climbs all clustering from the bottom graph to the
   // top cluster graph to get the final cluster_id of a node.
@@ -33,12 +154,78 @@ void StoreClusterInformation(
     const louvain::LouvainNode& n = lg.nodes.at(node_pos);
     const uint32_t cluster_id = FindFinalCluster(gvec, node_pos);
     GNode* gn = &g->nodes.at(n.back_ref);
-    gn->cluster_id = cluster_id;
+    gn->cluster_id = offset + cluster_id;
+  }
+}
+
+}  // namespace
+
+// Experimental.
+void ExecuteLouvainStages(int n_threads, Graph* graph) {
+  FUNC_TIMER();
+
+  // 'np_to_louvain_pos' contains a mapping from a node position in
+  // graph.nodes to the precomputed node position in the louvain graph.
+  // The map is sorted by key in ascending order, and by construction, the
+  // pointed to values are also sorted.
+  //
+  // Keys are only inserted for eligible nodes that have at least one edge to
+  // another eligible node.
+  //
+  // Note that when iterating, the keys *and* the values will appear in
+  // increasing order.
+  //
+  // Instead of a btree a vector could be used. Binary search is used to find
+  // a node. It is not clear if this would be faster though, because lookup in
+  // btrees is more cpu-cache friendly than binary search in a vector.
+  std::vector<TGraphToLouvain*> node_map(MAX_NCC, nullptr);
+  // absl::btree_map<uint32_t, uint32_t> np_to_louvain_pos;
+  for (uint32_t np = 0; np < graph->nodes.size(); ++np) {
+    const GNode& n = graph->nodes.at(np);
+    if (EligibleNodeForLouvain(n)) {
+      for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
+        const GEdge& e = n.edges[ep];
+        // Check if this edge is in the louvain graph.
+        if (e.unique_other && e.other_node_idx != np &&
+            EligibleNodeForLouvain(graph->nodes.at(e.other_node_idx))) {
+          // Edge between two eligible nodes.
+          // Node 'n' at position 'np' is good to use.
+          TGraphToLouvain* np_to_louvain_pos = node_map.at(n.ncc);
+          if (np_to_louvain_pos == nullptr) {
+            np_to_louvain_pos = new TGraphToLouvain();
+            node_map.at(n.ncc) = np_to_louvain_pos;
+          }
+          (*np_to_louvain_pos)[np] = np_to_louvain_pos->size();
+          break;
+        }
+      }
+    }
   }
 
+  ThreadPool pool;
+  for (size_t ncc = 0; ncc < node_map.size(); ++ncc) {
+    TGraphToLouvain* np_to_louvain_pos = node_map.at(ncc);
+    if (np_to_louvain_pos == nullptr) {
+      continue;
+    }
+    node_map.at(ncc) = nullptr;
+    pool.AddWork([ncc, graph, np_to_louvain_pos](int thread_idx) {
+      TGVec gvec = CreateInitalLouvainGraph(*graph, *np_to_louvain_pos, ncc);
+      delete np_to_louvain_pos;
+      RunLouvainLevels(&gvec);
+      AddClustersAndClusterIds(ncc, gvec, graph);
+    });
+  }
+  pool.Start(n_threads);
+  pool.WaitAllFinished();
+}
+
+void UpdateGraphClusterInformation(Graph* g) {
+  FUNC_TIMER();
   // Mark cross-cluster edges and count edge types.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
     GNode& n = g->nodes.at(node_pos);
+    n.cluster_border_node = 0;
     if (n.cluster_id == INVALID_CLUSTER_ID) {
       continue;
     }
@@ -51,17 +238,24 @@ void StoreClusterInformation(
 
       // By construction, any connection to an non-clustered node must be
       // through a bridge.
-      CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge != 0);
+      // CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge != 0);
       if (e.bridge) {
-        cluster.num_bridges++;
+        ;  // do nothing
       } else if (n.cluster_id == other.cluster_id) {
-        cluster.num_inner_edges++;
+        // Count inner edges only once (instead of twice). Self-edges are not
+        // counted.
+        if (n.node_id > other.node_id) {
+          cluster.num_inner_edges++;
+        }
       } else {
-        CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
-        e.cross_cluster = 1;
+        // TODO: if other node was not clustered, then it should be in other
+        // country.
+        if (other.cluster_id == INVALID_CLUSTER_ID) {
+          CHECK_NE_S(n.ncc, other.ncc);
+        }
+        cluster.num_outer_edges++;
         n.cluster_border_node = 1;
         other.cluster_border_node = 1;
-        cluster.num_outer_edges++;
       }
     }
   }
@@ -73,10 +267,12 @@ void StoreClusterInformation(
     if (!n.cluster_border_node) {
       continue;
     }
-    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
-    GCluster& cluster = g->clusters.at(n.cluster_id);
-    cluster.num_border_nodes++;
-    cluster.border_nodes.push_back(node_pos);
+    // CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
+    if (n.cluster_id != INVALID_CLUSTER_ID) {
+      GCluster& cluster = g->clusters.at(n.cluster_id);
+      cluster.num_border_nodes++;
+      cluster.border_nodes.push_back(node_pos);
+    }
   }
 
   for (GCluster& cluster : g->clusters) {
@@ -86,12 +282,10 @@ void StoreClusterInformation(
   }
 }
 
-void PrintClusterInformation(
-    const Graph& g,
-    const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec) {
-  const louvain::LouvainGraph& lg = *gvec.front();
+void PrintClusterInformation(const Graph& g) {
   std::vector<GCluster> stats(g.clusters.begin(), g.clusters.end());
   std::sort(stats.begin(), stats.end(), [](const auto& a, const auto& b) {
+    if (a.ncc != b.ncc) return a.ncc < b.ncc;
     double va = (100.0 * a.num_outer_edges) / std::max(a.num_inner_edges, 1u);
     double vb = (100.0 * b.num_outer_edges) / std::max(b.num_inner_edges, 1u);
     return va > vb;
@@ -131,15 +325,17 @@ void PrintClusterInformation(
         (rec.num_border_nodes * (rec.num_border_nodes - 1)) / 2;
 
     LOG_S(INFO) << absl::StrFormat(
-        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In:%5u Out:%5u  "
-        "Out/In:%2.2f%%",
-        i, rec.cluster_id, rec.num_nodes, rec.num_border_nodes,
-        rec.num_inner_edges, rec.num_outer_edges,
-        (100.0 * rec.num_outer_edges) / std::max(rec.num_inner_edges, 1u));
+        "%s Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In:%5u Out:%5u  "
+        "Out/In:%2.2f%% ex-id:%lld",
+        CountryNumToString(rec.ncc), i, rec.cluster_id, rec.num_nodes,
+        rec.num_border_nodes, rec.num_inner_edges, rec.num_outer_edges,
+        (100.0 * rec.num_outer_edges) / std::max(rec.num_inner_edges, 1u),
+        rec.border_nodes.empty() ? 0
+                                 : g.nodes.at(rec.border_nodes.at(0)).node_id);
   }
   LOG_S(INFO) << absl::StrFormat(
       "Total border distance entries:%u, %.3f per node in graph", table_size,
-      (table_size + 0.0) / lg.nodes.size());
+      (table_size + 0.0) / g.nodes.size());
   LOG_S(INFO) << absl::StrFormat(
       "  Sum nodes:%.0f sum border:%.0f sum in-edges:%.0f sum out-edges:%.0f",
       sum_nodes, sum_border_nodes, sum_in, sum_out);
@@ -186,14 +382,14 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
         continue;
       }
 
-      std::string_view color = "mag";  // edges between clusters
+      std::string_view color = "dpink";  // edges between clusters
       if (n0.cluster_id == n1.cluster_id) {
-        // edge within cluster.
-        constexpr int32_t kMaxColor = 16;
+        // Edge within cluster.
+        constexpr int32_t kMaxColor = 17;
         static std::string_view colors[kMaxColor] = {
-            "blue",  "green",  "red",    "black", "yel",   "violet",
-            "olive", "lblue",  "dgreen", "dred",  "brown", "grey",
-            "gblue", "orange", "lgreen", "pink",
+            "blue",   "green",  "red",     "yel",    "violet", "olive",
+            "lblue",  "dgreen", "dred",    "brown",  "grey",   "gblue",
+            "orange", "lgreen", "greenbl", "lbrown", "pink",
         };
         color = colors[n0.cluster_id % kMaxColor];
       }
@@ -207,141 +403,4 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
   myfile.close();
   LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
 }
-
-namespace {
-
-bool EligibleNodeForLouvain(const GNode& n) {
-  return n.dead_end == 0 && n.large_component == 1;
-}
-
-}  // namespace
-
-// Experimental.
-std::vector<std::unique_ptr<louvain::LouvainGraph>> ExecuteLouvainStages(
-    const Graph& graph) {
-  FuncTimer timer("ExecuteLouvain()");
-  constexpr int64_t dfl_total_edge_weight = 1000000;
-
-  // Nodes that are eligible because they are not in dead end, etc.
-  // TODO: This bitset can be removed if the test function is sufficiently fast.
-  HugeBitset eligible_nodes;
-  for (uint32_t np = 0; np < graph.nodes.size(); ++np) {
-    if (EligibleNodeForLouvain(graph.nodes.at(np))) {
-      eligible_nodes.SetBit(np, true);
-    }
-  }
-
-  // 'np_to_louvain_pos' contains a mapping from a node position in
-  // graph.nodes to the precomputed node position in the louvain graph.
-  // The map is sorted by key in ascending order, and by construction, the
-  // pointed to values are also sorted.
-  //
-  // Keys are only inserted for eligible nodes that have at least one edge to
-  // another eligible node.
-  //
-  // Note that when iterating, the keys *and* the values will appear in
-  // increasing order.
-  //
-  // Instead of a btree a vector could be used. Binary search is used to find
-  // a node. It is not clear if this would be faster though, because lookup in
-  // btrees is more cpu-cache friendly than binary search in a vector.
-  absl::btree_map<uint32_t, uint32_t> np_to_louvain_pos;
-  for (uint32_t np = 0; np < graph.nodes.size(); ++np) {
-    if (eligible_nodes.GetBit(np)) {
-      const GNode& n = graph.nodes.at(np);
-      for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
-        const GEdge& e = n.edges[ep];
-        // Check if this edge is in the louvain graph.
-        if (e.unique_other && e.other_node_idx != np &&
-            eligible_nodes.GetBit(e.other_node_idx)) {
-          // Edge between two eligible nodes.
-          // Node 'n' at position 'np' is good to use.
-          np_to_louvain_pos[np] = np_to_louvain_pos.size();
-          break;
-        }
-      }
-    }
-  }
-
-  std::vector<std::unique_ptr<louvain::LouvainGraph>> gvec;
-  gvec.push_back(std::make_unique<louvain::LouvainGraph>());
-  louvain::LouvainGraph* g = gvec.back().get();
-
-  // Create initial Louvain graph.
-  for (auto [np, louvain_pos] : np_to_louvain_pos) {
-    g->AddNode(louvain_pos, np);
-    const GNode& n = graph.nodes.at(np);
-    for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
-      const GEdge& e = n.edges[ep];
-      if (e.unique_other && e.other_node_idx != np &&
-          eligible_nodes.GetBit(e.other_node_idx)) {
-        auto it = np_to_louvain_pos.find(e.other_node_idx);
-        CHECK_S(it != np_to_louvain_pos.end());
-        const GWay& way = graph.ways.at(e.way_idx);
-        if (way.highway_label == HW_RESIDENTIAL ||
-            way.highway_label == HW_LIVING_STREET ||
-            way.highway_label == HW_SERVICE) {
-          g->AddEdge(it->second, /*weight=*/1);
-        } else {
-          g->AddEdge(it->second, /*weight=*/1);
-        }
-      }
-    }
-    CHECK_GT_S(g->nodes.back().num_edges, 0);
-  }
-
-  LOG_S(INFO) << absl::StrFormat("Louvain nodes: %12d", g->nodes.size());
-  LOG_S(INFO) << absl::StrFormat("Louvain edges: %12d", g->edges.size());
-
-  {
-    louvain::NodeLineRemover::ClusterLineNodes(g);
-    RemoveEmptyClusters(g);
-    gvec.push_back(std::make_unique<louvain::LouvainGraph>());
-    CreateClusterGraph(*g, gvec.back().get());
-    g = gvec.back().get();
-    g->SetTotalEdgeWeight(dfl_total_edge_weight);
-  }
-
-  LOG_S(INFO) << absl::StrFormat("Louvain nodes (line nodes removed): %12d",
-                                 g->nodes.size());
-  LOG_S(INFO) << absl::StrFormat("Louvain edges (line nodes removed): %12d",
-                                 g->edges.size());
-
-  constexpr int MaxLevel = 20;
-  for (int level = 0; level < MaxLevel; ++level) {
-    g->Validate();
-
-    uint32_t prev_moves = INFU32;
-    uint32_t prev_empty = 0;
-    for (int step = 0; step < 40; ++step) {
-      uint32_t moves = g->Step();
-      if (g->empty_clusters_ <= prev_empty && moves >= prev_moves) {
-        // stop when empty clusters start shrinking.
-        break;
-      }
-      prev_moves = moves;
-      prev_empty = g->empty_clusters_;
-
-      LOG_S(INFO) << absl::StrFormat(
-          "Level %d Step %d moves:%u #clusters:%u empty:%u", level, step, moves,
-          g->clusters.size(), g->empty_clusters_);
-      if (moves < g->nodes.size() / 1000000) {
-        if (step == 0) {
-          level = MaxLevel - 1;  // Complete stop.
-        }
-        break;
-      }
-    }
-    RemoveEmptyClusters(g);
-    if (level < MaxLevel - 1) {
-      // Create a new level.
-      gvec.push_back(std::make_unique<louvain::LouvainGraph>());
-      CreateClusterGraph(*g, gvec.back().get());
-      g = gvec.back().get();
-      g->SetTotalEdgeWeight(dfl_total_edge_weight);
-    }
-  }
-  return gvec;
-}
-
 }  // namespace build_clusters

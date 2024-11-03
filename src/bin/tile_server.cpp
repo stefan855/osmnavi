@@ -79,7 +79,10 @@ enum Color {
   GBLUE,
   ORANGE,
   LGREEN,
+  GREENBL,
+  LBROWN,
   PINK,
+  DPINK,
   NUM_COLORS
 };
 
@@ -193,8 +196,14 @@ void LoadSegments(const std::string& filename, LayerData* data) {
       seg.color = ORANGE;
     } else if (row.at(1) == "lgreen") {
       seg.color = LGREEN;
+    } else if (row.at(1) == "greenbl") {
+      seg.color = GREENBL;
+    } else if (row.at(1) == "lbrown") {
+      seg.color = LBROWN;
     } else if (row.at(1) == "pink") {
       seg.color = PINK;
+    } else if (row.at(1) == "dpink") {
+      seg.color = DPINK;
     } else {
       LOG_S(FATAL) << "unknow color " << row.at(1);
     }
@@ -259,7 +268,10 @@ std::string CreatePNG(const LayerData& layer_data, int zoom, int tile_x,
   colors[GBLUE] = gdImageColorAllocate(im, 0, 255, 255);
   colors[ORANGE] = gdImageColorAllocate(im, 255, 128, 0);
   colors[LGREEN] = gdImageColorAllocate(im, 0, 179, 0);
+  colors[GREENBL] = gdImageColorAllocate(im, 0, 204, 153);
+  colors[LBROWN] = gdImageColorAllocate(im, 181, 101, 29);
   colors[PINK] = gdImageColorAllocate(im, 255, 167, 182);
+  colors[DPINK] = gdImageColorAllocate(im, 255, 20, 147);
 
   gdImageSetThickness(im, 0);
   gdImageRectangle(im, 0, 0, 255, 255,

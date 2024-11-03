@@ -13,7 +13,7 @@ class ComponentAnalyzer {
   ComponentAnalyzer(const Graph& g) : g_(g) {}
 
   std::vector<Graph::Component> FindLargeComponents() {
-    FuncTimer timer("FindLargeComponents()");
+    FUNC_TIMER();
     label_.resize(g_.nodes.size(), INFU32);
     std::map<uint32_t, uint32_t> comp_size_to_count;
     std::map<uint32_t, uint32_t> comp_size_to_start_node;
@@ -53,7 +53,7 @@ class ComponentAnalyzer {
   }
 
   static void MarkLargeComponents(Graph* g) {
-    FuncTimer timer("MarkLargeComponents()");
+    FUNC_TIMER();
     CHECK_S(!g->large_components.empty());
     std::deque<uint32_t> nodes;
     for (const Graph::Component& comp : g->large_components) {

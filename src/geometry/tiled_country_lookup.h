@@ -90,7 +90,7 @@ class TiledCountryLookup {
   }
 
   void InitTiles() {
-    FuncTimer timer("TiledCountryLookup::InitTiles()");
+    FUNC_TIMER();
 
     // Iterate over all country polygon line segments, and for each line mark
     // all tiles that the line segment crosses as "mixed", by setting the tile

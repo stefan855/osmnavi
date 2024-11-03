@@ -19,6 +19,7 @@
 #include "algos/components.h"
 #include "algos/dijkstra.h"
 #include "algos/louvain.h"
+#include "algos/merge_tiny_clusters.h"
 #include "algos/tarjan.h"
 #include "base/argli.h"
 #include "base/country_code.h"
@@ -45,6 +46,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const bool out, const bool contra_way, const size_t way_idx,
              const std::uint64_t distance_cm) {
   GNode& n = g.nodes.at(start_idx);
+  const GNode& other = g.nodes.at(other_idx);
   GEdge* edges = out ? n.edges : n.edges + n.num_edges_out;
   size_t num_edges = out ? n.num_edges_out : n.num_edges_in;
   for (size_t pos = 0; pos < num_edges; ++pos) {
@@ -57,8 +59,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
       edges[pos].unique_other = 0;
       edges[pos].bridge = 0;
       edges[pos].contra_way = contra_way ? 1 : 0;
-      edges[pos].cross_country = 0;
-      edges[pos].cross_cluster = 0;
+      edges[pos].cross_country = n.ncc != other.ncc;
       return;
     }
   }
@@ -145,7 +146,7 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
 }
 
 void ApplyTarjan(Graph& g, MetaData* meta) {
-  FuncTimer timer("ApplyTarjan()");
+  FUNC_TIMER();
   if (g.large_components.empty()) {
     ABORT_S() << "g.large_components is empty";
   }
@@ -336,9 +337,10 @@ void WriteCrossCountryEdges(MetaData* meta, const std::string& filename) {
     for (size_t pos = 0; pos < node_idx.size() - 1; ++pos) {
       const GNode& n1 = meta->graph.nodes.at(node_idx.at(pos));
       const GNode& n2 = meta->graph.nodes.at(node_idx.at(pos + 1));
-      uint16_t ncc1 = meta->tiler->GetCountryNum(n1.lon, n1.lat);
-      uint16_t ncc2 = meta->tiler->GetCountryNum(n2.lon, n2.lat);
-      if (ncc1 != ncc2) {
+      // uint16_t ncc1 = meta->tiler->GetCountryNum(n1.lon, n1.lat);
+      // uint16_t ncc2 = meta->tiler->GetCountryNum(n2.lon, n2.lat);
+      // if (ncc1 != ncc2) {
+      if (n1.ncc != n2.ncc) {
         meta->stats.num_cross_country_edges++;
         myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat, n1.lon,
                                   n2.lat, n2.lon);
@@ -352,14 +354,14 @@ void WriteCrossCountryEdges(MetaData* meta, const std::string& filename) {
 }
 
 void SortGWays(MetaData* meta) {
-  FuncTimer timer("Sort gways");
+  FUNC_TIMER();
   // Sort by ascending way_id.
   std::sort(meta->graph.ways.begin(), meta->graph.ways.end(),
             [](const GWay& a, const GWay& b) { return a.id < b.id; });
 }
 
 void AllocateGNodes(MetaData* meta) {
-  FuncTimer timer("AllocateGNodes");
+  FUNC_TIMER();
   meta->graph.nodes.reserve(meta->way_nodes_needed.CountBits());
   NodeBuilder::GlobalNodeIter iter(meta->nodes);
   const NodeBuilder::VNode* node;
@@ -375,6 +377,13 @@ void AllocateGNodes(MetaData* meta) {
       snode.large_component = 0;
       meta->graph.nodes.push_back(snode);
     }
+  }
+}
+
+void SetCountryInGNodes(MetaData* meta) {
+  FUNC_TIMER();
+  for (GNode& n : meta->graph.nodes) {
+    n.ncc = meta->tiler->GetCountryNum(n.lon, n.lat);
   }
 }
 
@@ -430,7 +439,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
 }
 
 void ComputeEdgeCounts(MetaData* meta) {
-  FuncTimer timer("Compute edge counts");
+  FUNC_TIMER();
   std::mutex mut;
   const size_t unit_length = 25000;
   ThreadPool pool;
@@ -447,7 +456,7 @@ void ComputeEdgeCounts(MetaData* meta) {
 }
 
 void AllocateEdgeArrays(MetaData* meta) {
-  FuncTimer timer("Allocate edge arrays");
+  FUNC_TIMER();
   Graph& graph = meta->graph;
   for (GNode& n : meta->graph.nodes) {
     const std::uint32_t num_edges = gnode_num_edges(n);
@@ -554,7 +563,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
 }
 
 void PopulateEdgeArrays(MetaData* meta) {
-  FuncTimer timer("PopulateEdgeArrays()");
+  FUNC_TIMER();
   std::mutex mut;
   const size_t unit_length = 25000;
   ThreadPool pool;
@@ -571,7 +580,7 @@ void PopulateEdgeArrays(MetaData* meta) {
 }
 
 void MarkUniqueEdges(MetaData* meta) {
-  FuncTimer timer("Mark unique edges");
+  FUNC_TIMER();
   for (GNode& n : meta->graph.nodes) {
     MarkUniqueOther(&n);
   }
@@ -629,11 +638,18 @@ void CheckShortestClusterPaths(int n_threads, const Graph& g,
 }
 #endif
 
-void ExecuteLouvain(MetaData* meta) {
-  FuncTimer timer("ExecuteLouvain()");
-  auto gvec = build_clusters::ExecuteLouvainStages(meta->graph);
-  build_clusters::StoreClusterInformation(gvec, &meta->graph);
-  build_clusters::PrintClusterInformation(meta->graph, gvec);
+void ExecuteLouvain(const bool merge_tiny_clusters, MetaData* meta) {
+  FUNC_TIMER();
+  build_clusters::ExecuteLouvainStages(meta->n_threads, &meta->graph);
+  build_clusters::UpdateGraphClusterInformation(&meta->graph);
+
+  if (merge_tiny_clusters) {
+    build_clusters::MergeTinyClusters(&(meta->graph));
+    build_clusters::UpdateGraphClusterInformation(&meta->graph);
+  }
+
+  // build_clusters::StoreClusterInformation(gvec, &meta->graph);
+  build_clusters::PrintClusterInformation(meta->graph);
   build_clusters::WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
 
 #if 0
@@ -773,7 +789,6 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   size_t num_edges_out = 0;
   size_t num_non_unique_edges = 0;
   size_t num_no_country = 0;
-  size_t num_cross_cluster_edges = 0;
   size_t max_edges_in = 0;
   size_t max_edges_out = 0;
   for (const GNode& n : graph.nodes) {
@@ -785,12 +800,9 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
       if (!n.edges[edge_pos].unique_other) {
         num_non_unique_edges++;
       }
-      if (n.edges[edge_pos].cross_cluster) {
-        num_cross_cluster_edges++;
-      }
     }
-    uint16_t ncc = meta.tiler->GetCountryNum(n.lon, n.lat);
-    num_no_country += (ncc == INVALID_NCC ? 1 : 0);
+    // uint16_t ncc = meta.tiler->GetCountryNum(n.lon, n.lat);
+    num_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
   }
 
   LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld",
@@ -799,8 +811,6 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Num edges in:     %12lld", num_edges_in);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  num_non_unique_edges);
-  LOG_S(INFO) << absl::StrFormat("  Num cross-cluster:%12lld",
-                                 num_cross_cluster_edges);
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node:   %12.2f",
       static_cast<double>(num_edges_in + num_edges_out) / graph.nodes.size());
@@ -808,8 +818,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Max edges in:     %12lld", max_edges_in);
   LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  meta.stats.num_cross_country_edges);
-  LOG_S(INFO) << absl::StrFormat("  Num no country:   %12lld",
-                                 num_no_country);
+  LOG_S(INFO) << absl::StrFormat("  Num no country:   %12lld", num_no_country);
   LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  meta.stats.num_dead_end_nodes);
 
@@ -872,6 +881,7 @@ void DoIt(const Argli& argli) {
   const std::string in_bpf = argli.GetString("pbf");
   const std::string admin_pattern = argli.GetString("admin_pattern");
   const std::string routing_config = argli.GetString("routing_config");
+  const bool merge_tiny_clusters = argli.GetBool("merge_tiny_clusters");
 
   MetaData meta;
   meta.stats.log_way_tag_stats = argli.GetBool("log_way_tag_stats");
@@ -935,6 +945,7 @@ void DoIt(const Argli& argli) {
               std::mutex& mut) { ConsumeRelation(tagh, osm_rel, mut, &meta); });
 
   AllocateGNodes(&meta);
+  SetCountryInGNodes(&meta);
 
   // Now we know exactly which ways we have and which nodes are needed.
   // Creade edges.
@@ -957,7 +968,7 @@ void DoIt(const Argli& argli) {
   FindLargeComponents(&meta.graph);
   ApplyTarjan(meta.graph, &meta);
   TestRoute(meta.graph);
-  ExecuteLouvain(&meta);
+  ExecuteLouvain(merge_tiny_clusters, &meta);
 
   // Output.
   if (meta.stats.log_way_tag_stats) {
@@ -974,7 +985,7 @@ void DoIt(const Argli& argli) {
 
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
-  FuncTimer timer("main()");
+  FUNC_TIMER();
 
   Argli argli(
       argc, argv,
@@ -994,6 +1005,11 @@ int main(int argc, char* argv[]) {
            .type = "string",
            .dflt = "../config/routing.cfg",
            .desc = "Location of routing config file."},
+
+          {.name = "merge_tiny_clusters",
+           .type = "bool",
+           .dflt = "true",
+           .desc = "Merge tiny clusters at country borders."},
 
           {.name = "log_way_tag_stats",
            .type = "bool",

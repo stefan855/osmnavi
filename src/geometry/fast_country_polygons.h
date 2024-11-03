@@ -90,7 +90,7 @@ class FastCountryPolygons {
   }
 
   void PrepareData() {
-    FuncTimer timer("FastCountryPolygons::PrepareData()");
+    FUNC_TIMER();
     for (size_t i = 0; i < limited_lines_.size(); ++i) {
       std::vector<Line>& lines = limited_lines_.at(i);
       // Sort lines by increasing (y0,x0,y1,x1).
