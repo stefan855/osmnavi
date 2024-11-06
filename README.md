@@ -13,7 +13,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 * Routing should be efficient enough to run completely on smart phones. This helps protect the privacy of the user. Luckily, this becomes easier every year with improvements to the typical phone hardware. 
 
 ## Tasks done
-1. Efficiently read OSM data dumps in pbf format with multiple threads ([read_osm_pbf.h](./src/osm-util/read_osm_pbf.h)).
+1. Efficiently read OSM data dumps in pbf format with multiple threads ([read_osm_pbf.h](./src/osm/read_osm_pbf.h)).
 2. Extract **country polygons** from OSM data dumps ([extract_admin.h](./src/bin/extract_admin.cpp)).
 3. Given a point (lon,lat), efficiently find the country it belongs to ([tiled_country_lookup.h](./src/geometry/tiled_country_lookup.h)).
 4. Support per-country defaults such as maxspeed and access. This uses a text config file, see [routing.cfg](./config/routing.cfg).
