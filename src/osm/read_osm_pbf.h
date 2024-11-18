@@ -213,8 +213,9 @@ class OsmPbfReader {
   // Uses multiple threads, so you might have to synchronize access to global
   // data from your worker_func.
   void ReadBlobs(BlobContentType type, BlobWorkerFunc worker_func) {
-    FuncTimer timer(absl::StrFormat("ReadBlobs(type=%s) started",
-                                    BlobContentTypeToStr(type)));
+    FuncTimer timer(
+        absl::StrFormat("ReadBlobs(type=%s)", BlobContentTypeToStr(type)),
+        __FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {

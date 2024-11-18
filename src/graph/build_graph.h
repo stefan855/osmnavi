@@ -1,10 +1,12 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <mutex>
 
 #include "base/deduper_with_ids.h"
 #include "base/huge_bitset.h"
+#include "base/frequency_table.h"
 #include "geometry/tiled_country_lookup.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
@@ -14,11 +16,6 @@
 #include "osm/parsed_tag.h"
 
 namespace build_graph {
-
-struct WayTagStat {
-  int64_t count = 0;
-  int64_t example_way_id = 0;
-};
 
 struct MetaStatsData {
   int64_t num_ways_with_highway_tag = 0;
@@ -37,7 +34,7 @@ struct MetaStatsData {
   int64_t num_dead_end_nodes = 0;
 
   bool log_way_tag_stats = false;
-  std::map<std::string, WayTagStat> way_tag_statmap;
+  FrequencyTable way_tag_stats;
 
   bool log_turn_restrictions = false;
 
@@ -49,20 +46,20 @@ struct MetaData {
   int n_threads = 6;
   // Assigns country codes to lon/lat positions. Used to assign countries to
   // nodes and ways.
-  TiledCountryLookup* tiler = nullptr;
+  std::unique_ptr<TiledCountryLookup> tiler = nullptr;
 
   // Default RoutingAttrs records per country, highway type, rural/urban, ...
-  PerCountryConfig per_country_config;
+  std::unique_ptr<PerCountryConfig> per_country_config;
 
   // Nodes in-memory table. This contains node coordinates loaded from pbf
   // file. All nodes in 'way_nodes_seen' are present.
-  DataBlockTable nodes;
+  std::unique_ptr<DataBlockTable> node_table;
 
   // Nodes that are referenced by a way potentially used for routing. Currently
   // this is all ways that have a non-empty 'highway' tag.
-  HugeBitset way_nodes_seen;
+  std::unique_ptr<HugeBitset> way_nodes_seen;
   // Nodes that are needed for routing, i.e. start/end of a way, crossings etc.
-  HugeBitset way_nodes_needed;
+  std::unique_ptr<HugeBitset> way_nodes_needed;
   // Resulting graph data structure used for routing.
   Graph graph;
 
@@ -72,16 +69,6 @@ struct MetaData {
 
   MetaStatsData stats;
 };
-
-#if 0
-struct ParsedTag {
-  // A bit set representing the components in the parsed key.
-  // See osm/key_bits.h.
-  uint64_t bits;
-  // String value, given as index into the osm string table.
-  uint32_t val_st_idx;
-};
-#endif
 
 // Way attributes country code, rural/urban and is_motorroad as extracted from
 // tags. Note that country code is only used for error reporting, since we
@@ -93,9 +80,6 @@ struct WayTaggedZones {
   IS_MOTORROAD im_forw = IM_NO;
   IS_MOTORROAD im_backw = IM_NO;
 };
-
-// std::vector<ParsedTag> ParseTags(const OSMTagHelper& tagh,
-//                                  const OSMPBF::Way& osm_way);
 
 void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,

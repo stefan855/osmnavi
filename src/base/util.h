@@ -20,44 +20,47 @@ inline void InitLogging(int argc, char* argv[]) {
   loguru::init(argc, argv);
 }
 
+// Object that measures time execution time of a function and prints information
+// about start, end and elapsed time.
+// Just put the macro FUNC_TIME() on the first line of you function.
+#define FUNC_TIMER() FuncTimer __func_timer(__func__, __FILE__, __LINE__);
 class FuncTimer {
  public:
-  FuncTimer(std::string_view text) : text_(text), start_(absl::Now()) {
-    log(text_ + " started");
+  FuncTimer(std::string_view text, std::string_view path, int line)
+      : text_(text),
+        filename_(path.substr(path.find_last_of("/\\") + 1)),
+        line_(line),
+        start_(absl::Now()) {
+    RAW_LOG_F(INFO, absl::StrFormat(" %s %s:%d | %s() started",
+                                    absl::FormatTime("%H:%M:%E3S", start_,
+                                                     absl::LocalTimeZone()),
+                                    filename_, line_, text_)
+                        .c_str());
   }
   ~FuncTimer() {
-    log(absl::StrFormat("%s finished >>> secs: %.3f", text_,
-                        ToDoubleSeconds(absl::Now() - start_)));
+    RAW_LOG_F(INFO, absl::StrFormat(" %s %s:%d | %s() finished >>> secs: %.3f",
+                                    absl::FormatTime("%H:%M:%E3S", absl::Now(),
+                                                     absl::LocalTimeZone()),
+                                    filename_, line_, text_,
+                                    ToDoubleSeconds(absl::Now() - start_))
+                        .c_str());
   }
 
  private:
   const std::string text_;
+  const std::string filename_;
+  int line_;
   const absl::Time start_;
-  virtual void log(std::string_view msg) { LOG_S(INFO) << msg; }
 };
-
-// Start a FuncTimer() for the current function.
-// This macro is needed because the used macros __func__ and the expansion of
-// LOG_S depend on the place they are defined. Using a macro makes sure that the
-// correct function name, filename and line number are logged.
-#define FUNC_TIMER()                                                \
-  class FuncTimerDerived : public FuncTimer {                       \
-   public:                                                          \
-    FuncTimerDerived(std::string_view text) : FuncTimer(text) {}    \
-                                                                    \
-   private:                                                         \
-    void log(std::string_view msg) override { LOG_S(INFO) << msg; } \
-  };                                                                \
-  FuncTimerDerived func_timer_derived20241103(std::string(__func__) + "()");
 
 // Macro that returns vec[idx], after checking that idx >= 0 and idx <=
 // vec.size(). Logs a fatal error if idx >= vec.size();
-#define ATR(vec, idx)                            \
-  ({                                             \
-    if (!(idx >= 0) || idx >= vec.size()) {                     \
+#define VECTOR_AT(vec, idx)                                  \
+  ({                                                         \
+    if (!(idx >= 0) || idx >= vec.size()) {                  \
       LOG_S(FATAL) << idx << " not in range " << vec.size(); \
-    }                                            \
-    vec[idx];                                    \
+    }                                                        \
+    vec[idx];                                                \
   })
 
 inline bool ConsumePrefixIf(std::string_view prefix, std::string_view* str) {

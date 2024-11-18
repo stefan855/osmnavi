@@ -15,77 +15,11 @@
 #include "logging/loguru.h"
 
 class OSMTagHelper {
- private:
-  // Needed first for the initialization of the tag fields.
-  const OSMPBF::StringTable& string_table_;
-
  public:
   OSMTagHelper(const OSMPBF::StringTable& string_table)
-      : string_table_(string_table),
-        access_(FindTagNum("access")),
-        admin_level_(FindTagNum("admin_level")),
-        boundary_(FindTagNum("boundary")),
-        ferry_(FindTagNum("ferry")),
-        highway_(FindTagNum("highway")),
-        junction_(FindTagNum("junction")),
-        maxspeed_(FindTagNum("maxspeed")),
-        motor_vehicle_(FindTagNum("motor_vehicle")),
-        motorcar_(FindTagNum("motorcar")),
-        name_(FindTagNum("name")),
-        oneway_(FindTagNum("oneway")),
-        restriction_(FindTagNum("restriction")),
-        restriction_motorcar_(FindTagNum("restriction:motorcar")),
-        route_(FindTagNum("route")),
-        type_(FindTagNum("type")) {}
-
-  struct FilterExp {
-    // At least one of the two following booleans have to be true.
-    // If both are true, then the expression key + ": " + val is matched.
-    bool match_key;
-    bool match_val;
-    // When true, then 're' has to match at least once, if false, then it must
-    // never match.
-    bool negative;
-    std::regex re;
-  };
-
-  const int access_;
-  const int admin_level_;
-  const int boundary_;
-  const int ferry_;
-  const int highway_;
-  const int junction_;
-  const int maxspeed_;
-  const int motor_vehicle_;
-  const int motorcar_;
-  const int name_;
-  const int oneway_;
-  const int restriction_;
-  const int restriction_motorcar_;
-  const int route_;
-  const int type_;
+      : string_table_(string_table) {}
 
   std::string_view GetValue(
-      const google::protobuf::RepeatedField<unsigned int>& keys,
-      const google::protobuf::RepeatedField<unsigned int>& vals,
-      int key) const {
-    CHECK_EQ_S(keys.size(), vals.size());
-    if (key >= 0) {
-      for (int i = 0; i < keys.size(); ++i) {
-        if (keys[i] == static_cast<unsigned int>(key)) {
-          return string_table_.s(vals[i]);
-        }
-      }
-    }
-    return "";
-  }
-
-  template <typename T>
-  std::string_view GetValue(const T& obj, int key) const {
-    return GetValue(obj.keys(), obj.vals(), key);
-  }
-
-  std::string_view GetValueByStr(
       const google::protobuf::RepeatedField<unsigned int>& keys,
       const google::protobuf::RepeatedField<unsigned int>& vals,
       std::string_view key) const {
@@ -99,20 +33,8 @@ class OSMTagHelper {
   }
 
   template <typename T>
-  std::string_view GetValueByStr(const T& obj, std::string_view key) const {
-    return GetValueByStr(obj.keys(), obj.vals(), key);
-  }
-
-  bool EqualValue(const google::protobuf::RepeatedField<unsigned int>& keys,
-                  const google::protobuf::RepeatedField<unsigned int>& vals,
-                  int key, std::string_view value) const {
-    CHECK_S(!value.empty());
-    return value == GetValue(keys, vals, key);
-  }
-
-  template <typename T>
-  bool EqualValue(const T& obj, int key, std::string_view value) const {
-    return EqualValue(obj.keys(), obj.vals(), key, value);
+  std::string_view GetValue(const T& obj, std::string_view key) const {
+    return GetValue(obj.keys(), obj.vals(), key);
   }
 
   std::string_view ToString(unsigned int tagnum) const {
@@ -124,140 +46,29 @@ class OSMTagHelper {
 
   std::string GetLoggingStr(
       int64_t id, const google::protobuf::RepeatedField<unsigned int>& keys,
-      const google::protobuf::RepeatedField<unsigned int>& vals) const {
+      const google::protobuf::RepeatedField<unsigned int>& vals,
+      bool online = false) const {
+    std::string_view sep = online ? " :: " : "\n";
     CHECK_EQ_S(keys.size(), vals.size());
-    std::string res = absl::StrCat("id=", id, "\n");
+    std::string res = absl::StrCat("id=", id, sep);
     for (int i = 0; i < keys.size(); ++i) {
       absl::StrAppend(&res, string_table_.s(keys[i]), "=",
-                      string_table_.s(vals[i]), "\n");
+                      string_table_.s(vals[i]), sep);
     }
     return res;
   }
 
   template <typename T>
-  std::string GetLoggingStr(const T& obj) const {
-    return GetLoggingStr(obj.id(), obj.keys(), obj.vals());
-  }
-
-  static std::vector<FilterExp> ParseMatchFilters(std::string_view expression) {
-    std::vector<FilterExp> res;
-    for (std::string_view str :
-         absl::StrSplit(expression, '|', absl::SkipEmpty())) {
-      FilterExp exp;
-      exp.negative = ConsumePrefixIf("-", &str);
-      exp.match_val = ConsumePrefixIf("val:", &str);
-      exp.match_key = !exp.match_val && ConsumePrefixIf("key:", &str);
-      if (!exp.match_val && !exp.match_key) {
-        /*
-        if (ConsumePrefixIf("keyval:", &str)) {
-          exp.match_val = true;
-          exp.match_key = true;
-        } else {
-          ABORT_S() << "wrong syntax in filter expression <" << expression
-                    << ">";
-        }
-        */
-        ConsumePrefixIf("keyval:", &str);
-        exp.match_val = true;
-        exp.match_key = true;
-      }
-      CHECK_S(!str.empty()) << "Empty regexp not allowed";
-      exp.re = std::regex(std::string(str), std::regex_constants::icase);
-      res.push_back(exp);
-    }
-    return res;
-  }
-
-  bool MatchFilters(const google::protobuf::RepeatedField<unsigned int>& keys,
-                    const google::protobuf::RepeatedField<unsigned int>& vals,
-                    const std::vector<FilterExp>& filters) const {
-    if (filters.empty()) return false;
-    for (const FilterExp& f : filters) {
-      bool res = false;
-      ;
-      if (f.match_key && f.match_val) {
-        // Check if this filter can be satisied.
-        for (int i = 0; i < keys.size(); ++i) {
-          std::string tmp = absl::StrCat(string_table_.s(keys[i]), "=",
-                                         string_table_.s(vals[i]));
-          res = std::regex_search(tmp, f.re);
-          if (res) break;  // found a match.
-        }
-      } else if (f.match_val) {
-        for (int i = 0; i < vals.size(); ++i) {
-          res = std::regex_search(string_table_.s(vals[i]), f.re);
-          if (res) break;  // found a match.
-        }
-      } else {
-        CHECK_S(f.match_key);
-        for (int i = 0; i < keys.size(); ++i) {
-          res = std::regex_search(string_table_.s(keys[i]), f.re);
-          if (res) break;  // found a match.
-        }
-      }
-      if (f.negative == res) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  template <typename T>
-  bool MatchFilters(const T& obj, const std::vector<FilterExp>& filters) const {
-    return MatchFilters(obj.keys(), obj.vals(), filters);
+  std::string GetLoggingStr(const T& obj, bool oneline = false) const {
+    return GetLoggingStr(obj.id(), obj.keys(), obj.vals(), oneline);
   }
 
   const OSMPBF::StringTable& GetStringTable() const { return string_table_; }
 
  private:
-  int FindTagNum(std::string_view str) const {
-    for (int i = 0; i < string_table_.s().size(); ++i) {
-      if (string_table_.s(i) == str) {
-        return i;
-      }
-    }
-    return -2;
-  }
+  // Needed first for the initialization of the tag fields.
+  const OSMPBF::StringTable& string_table_;
 };
-
-inline HIGHWAY_LABEL ParseHighwayLabel(const OSMTagHelper& tagh,
-                                       const OSMPBF::Way& way) {
-  const std::string_view val = tagh.GetValue(way, tagh.highway_);
-  if (val.empty()) return HW_MAX;
-  return HighwayLabelToEnum(val);
-}
-
-// Only call for ways which are for cars.
-// Returns -1 for reverse direction only, 0 for both directions, 1 for forward
-// direction only.
-inline DIRECTION CarDirectionsOld(const OSMTagHelper& tagh,
-                                  const OSMPBF::Way& way) {
-  const std::string_view oneway_val = tagh.GetValue(way, tagh.oneway_);
-  if (!oneway_val.empty()) {
-    if (oneway_val == "no") {
-      return DIR_BOTH;
-    }
-    if (oneway_val == "yes") {
-      return DIR_FORWARD;
-    }
-    if (oneway_val == "-1") {
-      return DIR_BACKWARD;
-    }
-    return DIR_MAX;
-  }
-
-  if (tagh.EqualValue(way, tagh.junction_, "roundabout")) {
-    return DIR_FORWARD;
-  }
-
-  const std::string_view highway_val = tagh.GetValue(way, tagh.highway_);
-  if (!highway_val.empty() &&
-      (highway_val == "motorway" || highway_val == "motorway_link")) {
-    return DIR_FORWARD;
-  }
-
-  return DIR_BOTH;
-}
 
 namespace {
 const char* TypeToString(OSMPBF::Relation::MemberType type) {
@@ -326,12 +137,12 @@ bool TurnRestrictionCollectIds(const OSMTagHelper& tagh,
 inline ResType ParseTurnRestriction(const OSMTagHelper& tagh,
                                     const OSMPBF::Relation& relation,
                                     bool logging_on, TurnRestriction* tr) {
-  if (tagh.GetValue(relation, tagh.type_) != "restriction") {
+  if (tagh.GetValue(relation, "type") != "restriction") {
     return ResType::Ignore;  // not a restriction.
   }
-  std::string_view restriction = tagh.GetValue(relation, tagh.restriction_);
+  std::string_view restriction = tagh.GetValue(relation, "restriction");
   if (restriction.empty()) {
-    restriction = tagh.GetValue(relation, tagh.restriction_motorcar_);
+    restriction = tagh.GetValue(relation, "restriction:motorcar");
   }
   if (restriction.empty()) {
     if (logging_on) {
@@ -417,7 +228,7 @@ inline bool ParseCountrySpeedParts(std::string_view val, uint16_t* ncc,
   if (colon_pos != std::string_view::npos) {
     *ncc = TwoLetterCountryCodeToNum(val.substr(0, colon_pos));
     if (*ncc == 0) {
-      // TODO: optional logging mode needed 
+      // TODO: optional logging mode needed
       // LOG_S(INFO) << "Invalid CC in " << val;
     }
     val = val.substr(colon_pos + 1);

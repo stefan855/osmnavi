@@ -8,10 +8,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "base/util.h"
 
-// De-duplicate a series of objects (for instance strings) of type T and assign
-// consecutive ids 0, 1, 2, etc. to them. When the same ((by operation ==)
-// object is inserted multiple times, identical ids are returned and the object
-// is only stored once.
+// De-duplicate a series of objects (for instance strings) of type TObj and
+// assign consecutive ids 0, 1, 2, etc. to them. When the same "==" object is
+// inserted multiple times, identical ids are returned and the object is only
+// stored once.
 //
 // As an optional second step, the ids can be sorted by decreasing popularity.
 // This saves memory in case ids have to be var-encoded and tends to be more
@@ -28,13 +28,13 @@
 //   d.GetObjVector();       // -> {"bbb", "aaa", "ccc"}
 //   d.GetSortMapping();     // -> {1, 0, 2}
 
-template <typename T>
+template <typename TObj>
 class DeDuperWithIds {
  public:
   // Add object 'obj' and return the id for it. If the object hasn't been seen
   // before, then a new id will be returned, otherwise the id of the already
   // stored object is returned.
-  uint32_t Add(const T& obj) {
+  uint32_t Add(const TObj& obj) {
     CHECK_S(!sorted_);
     added_++;
     auto iter = lookup_.find(&obj);
@@ -85,13 +85,17 @@ class DeDuperWithIds {
     return v;
   }
 
+  // Get object that has id. Note that even after sorting, the original id has
+  // to be used.
+  const TObj& GetObj(uint32_t id) const { return objs_.at(id); }
+
   // If SortByPopularity() was called, then return the vector of objects in the
   // new sorted order. Otherwise, return the vector of the original order, which
   // corresponds to the ids returned by Add().
   // The returned vector has size num_unique().
-  std::vector<T> GetObjVector() const {
+  std::vector<TObj> GetObjVector() const {
     CHECK_EQ_S(entries_.size(), objs_.size());
-    std::vector<T> v;
+    std::vector<TObj> v;
     v.reserve(entries_.size());
     for (const Entry& e : entries_) {
       v.push_back(objs_.at(e.id));
@@ -110,27 +114,26 @@ class DeDuperWithIds {
 
   // Hash function, needed because hash table contains pointers.
   struct TPtrHash {
-    size_t operator()(const T* p) const { return std::hash<T>{}(*p); }
+    size_t operator()(const TObj* p) const { return std::hash<TObj>{}(*p); }
   };
 
   // Equal function, needed because hash table contains pointers.
   struct TPtrEqual {
-    bool operator()(const T* a, const T* b) const { return (*a) == (*b); }
+    bool operator()(const TObj* a, const TObj* b) const { return (*a) == (*b); }
   };
 
   // Get Information we have for object identified by 'id'.
   const Entry& GetEntryAt(uint32_t id) const { return entries_.at(id); }
-  const T& GetObjAt(uint32_t id) const { return objs_.at(id); }
 
   bool sorted_ = false;
   uint32_t added_ = 0;
-  // Objects T and Entry are not stored together. This way we avoid sorting a
+  // Objects TObj and Entry are not stored together. This way we avoid sorting a
   // vector with potentially large objects. We use deques to allow stable
   // pointers into the data, see below.
-  std::deque<T> objs_;
+  std::deque<TObj> objs_;
   std::deque<Entry> entries_;
   // The map uses pointers into the objs_/entries_ vectors to avoid double
-  // allocating objects of type T. Since the vectors are actually deques, the
+  // allocating objects of type TObj. Since the vectors are actually deques, the
   // pointers are stable.
-  absl::flat_hash_map<const T*, Entry*, TPtrHash, TPtrEqual> lookup_;
+  absl::flat_hash_map<const TObj*, Entry*, TPtrHash, TPtrEqual> lookup_;
 };

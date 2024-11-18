@@ -15,6 +15,7 @@
 #include "graph/oneway.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
+#include "graph/surface.h"
 #include "osm/key_bits.h"
 #include "osm/osm_helpers.h"
 
@@ -32,12 +33,12 @@ struct WayContext {
   GWay way;
   const OSMPBF::Way& osm_way;
   const std::vector<ParsedTag> ptags;
-  const std::vector<NodeCountry> node_countries;
-  WayTaggedZones rural;
+  // const std::vector<NodeCountry> node_countries;
+  // WayTaggedZones rural;
   PerCountryConfig::ConfigValue config_forw;
   PerCountryConfig::ConfigValue config_backw;
-  std::string_view streetname;
-  WriteBuff node_ids_buff;
+  // std::string_view streetname;
+  // WriteBuff node_ids_buff;
 };
 
 }  // namespace
@@ -46,7 +47,7 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,
                                     HugeBitset* node_ids,
                                     MetaStatsData* stats) {
-  if (ParseHighwayLabel(tagh, osm_way) == HW_MAX) {
+  if (HighwayLabelToEnum(tagh.GetValue(osm_way, "highway")) == HW_MAX) {
     return;
   }
   {
@@ -144,238 +145,6 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
   return info;
 }
 
-#if 0
-
-namespace {
-// Return a valid maxspeed in the range [0..INFINITE_MAXSPEED], or -1 in case
-// there was an error.
-int GetSingleMaxspeed(std::string_view val) {
-  if (val.empty()) {
-    return -1;
-  }
-  uint16_t maxspeed = 0;
-  if (!ParseNumericMaxspeed(val, &maxspeed)) {
-    return -1;
-  }
-  return maxspeed;
-}
-
-// Return maxspeed or -1 if it couldn't be extracted.
-int InterpretMaxspeedValue(std::string_view val, bool lanes) {
-  int maxspeed = -1;
-  if (!lanes) {
-    maxspeed = GetSingleMaxspeed(val);
-  } else {
-    // Get the maximum from all the lanes, assuming that the car can use this
-    // lane.
-    for (std::string_view sub : absl::StrSplit(val, '|')) {
-      int sub_maxspeed = GetSingleMaxspeed(sub);
-      // Only replace if value is "better".
-      if (sub_maxspeed > maxspeed) {
-        maxspeed = sub_maxspeed;
-      }
-    }
-  }
-  return maxspeed;
-}
-}  // namespace
-
-void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
-                        const std::vector<ParsedTag>& ptags,
-                        std::uint16_t* maxspeed_forw,
-                        std::uint16_t* maxspeed_backw, bool logging_on) {
-  // Special (hard) cases:
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
-  constexpr uint64_t modifier_bits =
-      GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER) |
-      GetBitMask(KEY_BIT_VEHICLE) | GetBitMask(KEY_BIT_MOTOR_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTORCAR);
-  *maxspeed_forw = 0;
-  *maxspeed_backw = 0;
-
-  for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
-      continue;
-    }
-
-    switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_MAXSPEED): {
-        std::string_view val = tagh.ToString(pt.val_st_idx);
-        int maxspeed = InterpretMaxspeedValue(
-            val, BitIsContained(KEY_BIT_LANES_INNER, pt.bits));
-        if (maxspeed > 0 && maxspeed <= INFINITE_MAXSPEED) {
-          if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
-            *maxspeed_forw = maxspeed;
-          } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
-            *maxspeed_backw = maxspeed;
-          } else {
-            // forward/backward are missing, either nothing or both_ways is
-            // specified, so set both.
-            *maxspeed_forw = maxspeed;
-            *maxspeed_backw = maxspeed;
-          }
-          break;
-        }
-      }
-      default:
-        if (logging_on && (pt.bits & GetBitMask(KEY_BIT_SOURCE, KEY_BIT_TYPE,
-                                                KEY_BIT_ZONE)) == 0) {
-          LOG_S(INFO) << absl::StrFormat(
-              "CarMaxspeedFromWay(): way %lld: can't handle %s=%s", way_id,
-              KeyPartBitsToString(pt.bits), tagh.ToString(pt.val_st_idx));
-        }
-    }
-  }
-}
-#endif
-
-#if 0
-namespace {
-ACCESS InterpretAccessValue(std::string_view val, bool lanes) {
-  if (!lanes) {
-    return AccessToEnum(val);
-  }
-  ACCESS acc = ACC_MAX;
-  for (std::string_view sub : absl::StrSplit(val, '|')) {
-    ACCESS sub_acc = AccessToEnum(sub);
-    // Only replace if value is "better".
-    if (sub_acc != ACC_MAX && (acc == ACC_MAX || sub_acc > acc)) {
-      acc = sub_acc;
-    }
-  }
-  return acc;
-}
-}  // namespace
-
-void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
-               const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
-               RoutingAttrs* ra_backw, bool logging_on) {
-  // Special (hard) cases:
-  // 1) access:lanes:backward=motorcar;motorcycle|hgv (TODO!)
-  // 2) lanes:motor_vehicle=yes|no|yes
-  // 3) access:both_ways=no ::
-  //    access:lanes:backward=yes|no ::
-  //    access:lanes:forward=yes|no ::
-  constexpr uint64_t selector_bits =
-      GetBitMask(KEY_BIT_ACCESS) | GetBitMask(KEY_BIT_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
-  constexpr uint64_t modifier_bits =
-      GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER);
-  // Start with the defaults from config.
-  ACCESS acc_forw = ra_forw->access;
-  ACCESS acc_backw = ra_backw->access;
-
-  for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
-      continue;
-    }
-
-    switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_ACCESS):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_VEHICLE):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTORCAR):
-      // Instead of access:motorcar=... one can say motorcar=...
-      case GetBitMask(KEY_BIT_VEHICLE):
-      case GetBitMask(KEY_BIT_MOTOR_VEHICLE):
-      case GetBitMask(KEY_BIT_MOTORCAR): {
-        std::string_view val = tagh.ToString(pt.val_st_idx);
-        ACCESS acc = InterpretAccessValue(
-            val, BitIsContained(KEY_BIT_LANES_INNER, pt.bits));
-        if (acc == ACC_MAX) {
-          // In general, if we don't know the access value, then it has to be
-          // interpreted as a 'no'.
-          // For instance, 'agricultural' or 'forestry' will go here.
-          acc = ACC_NO;
-        }
-        if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
-          ra_forw->access = acc;
-        } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
-          ra_backw->access = acc;
-        } else {
-          // forward/backward are missing, either nothing or both_ways is
-          // specified, so set both.
-          ra_forw->access = acc;
-          ra_backw->access = acc;
-        }
-        break;
-      }
-      default:
-        if (logging_on) {
-          LOG_S(INFO) << absl::StrFormat(
-              "CarAccess(): way %lld: can't handle %s=%s", way_id,
-              KeyPartBitsToString(pt.bits), tagh.ToString(pt.val_st_idx));
-        }
-    }
-  }
-}
-#endif
-
-#if 0
-// Find out if this way is oneway or bothways for a specific set of vehicle
-// types. Note that access is not considered.
-//
-// For instance, "oneway=no access:bicycle=no" with
-DIRECTION CarRoadDirection(const OSMTagHelper& tagh, const HIGHWAY_LABEL hw,
-                           int64_t way_id, const std::vector<ParsedTag>& ptags,
-                           bool logging_on) {
-  constexpr uint64_t selector_bits =
-      GetBitMask(KEY_BIT_ONEWAY) | GetBitMask(KEY_BIT_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
-
-  DIRECTION dir = DIR_BOTH;
-  bool found_oneway = false;
-  if (hw == HW_MOTORWAY || hw == HW_MOTORWAY_JUNCTION ||
-      hw == HW_MOTORWAY_LINK) {
-    dir = DIR_FORWARD;
-  }
-
-  for (const ParsedTag& pt : ptags) {
-    // For roundabouts (and circular), set the direction to forward, but only if
-    // oneway hasn't been found yet. This way, an explicit oneway tag always
-    // overwrites the implicit roundabout/circular direction, regardless of
-    // ordering of tags.
-    //
-    // See https://wiki.openstreetmap.org/wiki/DE:Tag:junction=roundabout
-    // See https://wiki.openstreetmap.org/wiki/DE:Tag:junction=circular
-    if (GetBitMask(KEY_BIT_JUNCTION) == pt.bits && !found_oneway &&
-        (tagh.ToString(pt.val_st_idx) == "roundabout" ||
-         tagh.ToString(pt.val_st_idx) == "circular")) {
-      dir = DIR_FORWARD;
-      continue;
-    }
-
-    if (!BitIsContained(KEY_BIT_ONEWAY, pt.bits)) {
-      continue;
-    }
-
-    if (BitsetIncludedIn(pt.bits, selector_bits)) {
-      std::string_view oneway_val = tagh.ToString(pt.val_st_idx);
-      if (oneway_val == "yes") {
-        dir = DIR_FORWARD;
-      } else if (oneway_val == "-1") {
-        dir = DIR_BACKWARD;
-      } else if (oneway_val == "no") {
-        dir = DIR_BOTH;
-      } else {
-        // For instance "reversible" or "alternating", which are not handled.
-        dir = DIR_MAX;
-      }
-      found_oneway = true;
-    } else {
-      if (logging_on) {
-        LOG_S(INFO) << absl::StrFormat(
-            "CarRoadDirection(): way %lld: can't handle %s=%s", way_id,
-            KeyPartBitsToString(pt.bits), tagh.ToString(pt.val_st_idx));
-      }
-    }
-  }
-  return dir;
-}
-#endif
-
 namespace {
 // String that contains the tags relevant for routing in readable form. This is
 // used to log tag-signatures and frequencies, for instance to find interesting
@@ -386,7 +155,7 @@ std::string CreateWayTagSignature(const OSMTagHelper& tagh,
   for (int pos = 0; pos < osm_way.keys().size(); ++pos) {
     std::string_view key = tagh.ToString(osm_way.keys().at(pos));
     std::string_view val = tagh.ToString(osm_way.vals().at(pos));
-    if (absl::StrContains(key, "lanes") || absl::StrContains(key, "zone") ||
+    if (absl::StrContains(key, "lane") || absl::StrContains(key, "zone") ||
         absl::StrContains(key, "motorroad") || absl::StrContains(key, "car") ||
         absl::StrContains(key, "oneway") ||
         absl::StrContains(key, "junction") ||
@@ -418,8 +187,6 @@ std::string CreateWayTagSignature(const OSMTagHelper& tagh,
   }
   std::string res;
   if (tagvals.size() > 0) {
-    // tagvals.push_back(
-    //       absl::StrCat("highway=", tagh.GetValue(osm_way, tagh.highway_)));
     std::sort(tagvals.begin(), tagvals.end());
     for (const std::string& s : tagvals) {
       absl::StrAppend(&res, s, " ## ");
@@ -436,7 +203,7 @@ std::vector<NodeCountry> ExtractNodeCountries(const MetaData& meta,
   for (int ref_idx = 0; ref_idx < osm_way.refs().size(); ++ref_idx) {
     running_id += osm_way.refs(ref_idx);
     NodeBuilder::VNode node;
-    if (!NodeBuilder::FindNode(meta.nodes, running_id, &node)) {
+    if (!NodeBuilder::FindNode(*meta.node_table, running_id, &node)) {
       // Node is referenced by osm_way, but the node was not loaded.
       // This happens often when a clipped country file does contain a way but
       // not all the nodes of the way.
@@ -480,28 +247,28 @@ void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
 // Also marks the nodes of edges connecting different countries as "needed".
 // This keeps edge distances short when we are not sure about speed limits,
 // access rules etc.
-void MarkSeenAndNeeded(MetaData* meta, const std::vector<NodeCountry>& v) {
+void MarkSeenAndNeeded(MetaData* meta, const std::vector<NodeCountry>& ncs) {
   // Mark nodes at country-crossing edges as 'needed' .
-  for (size_t i = 0; i < v.size() - 1; ++i) {
-    if (v.at(i).ncc != v.at(i + 1).ncc) {
-      meta->way_nodes_needed.SetBit(v.at(i).id, true);
-      meta->way_nodes_needed.SetBit(v.at(i + 1).id, true);
+  for (size_t i = 0; i < ncs.size() - 1; ++i) {
+    if (ncs.at(i).ncc != ncs.at(i + 1).ncc) {
+      meta->way_nodes_needed->SetBit(ncs.at(i).id, true);
+      meta->way_nodes_needed->SetBit(ncs.at(i + 1).id, true);
     }
   }
 
-  for (const NodeCountry& nc : v) {
-    if (meta->way_nodes_seen.GetBit(nc.id)) {
+  for (const NodeCountry& nc : ncs) {
+    if (meta->way_nodes_seen->GetBit(nc.id)) {
       // Node was seen >= 2 times, Mark as 'needed'.
-      meta->way_nodes_needed.SetBit(nc.id, true);
+      meta->way_nodes_needed->SetBit(nc.id, true);
     } else {
       // Not seen before, so mark as 'seen'.
-      meta->way_nodes_seen.SetBit(nc.id, true);
+      meta->way_nodes_seen->SetBit(nc.id, true);
     }
   }
   // Start and end nodes are both 'needed'.
-  meta->way_nodes_needed.SetBit(v.front().id, true);
-  meta->way_nodes_needed.SetBit(v.back().id, true);
-  if (v.front().id == v.back().id) {
+  meta->way_nodes_needed->SetBit(ncs.front().id, true);
+  meta->way_nodes_needed->SetBit(ncs.back().id, true);
+  if (ncs.front().id == ncs.back().id) {
     meta->stats.num_ways_closed++;
   }
 }
@@ -520,8 +287,7 @@ std::uint16_t LimitedMaxspeed(const PerCountryConfig::ConfigValue& cv,
 
 }  // namespace
 
-inline void ComputeCarWayRoutingData(const MetaData& meta,
-                                     const OSMTagHelper& tagh,
+inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
                                      const WayContext& wc,
                                      WaySharedAttrs* wsa) {
   RoutingAttrs ra_forw = wc.config_forw.dflt;
@@ -532,6 +298,8 @@ inline void ComputeCarWayRoutingData(const MetaData& meta,
   if (direction == DIR_MAX) {
     return;  // For instance wrong vehicle type or some tagging error.
   }
+
+  CarRoadSurface(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
 
   // Set access.
   CarAccess(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
@@ -565,8 +333,7 @@ inline void ComputeCarWayRoutingData(const MetaData& meta,
   }
 }
 
-inline void ComputeBicycleWayRoutingData(const MetaData& meta,
-                                         const OSMTagHelper& tagh,
+inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
                                          const WayContext& wc,
                                          WaySharedAttrs* wsa) {
   RoutingAttrs ra_forw = wc.config_forw.dflt;
@@ -612,73 +379,37 @@ inline void ComputeBicycleWayRoutingData(const MetaData& meta,
   }
 }
 
-#if 0
-void MetaStatsData::AddStats(const MetaStatsData& other) {
-  num_ways_with_highway_tag += other.num_ways_with_highway_tag;
-  num_edges_with_highway_tag += other.num_edges_with_highway_tag;
-  num_noderefs_with_highway_tag += other.num_noderefs_with_highway_tag;
-  num_ways_closed += other.num_ways_closed;
-  num_ways_missing_nodes += other.num_ways_missing_nodes;
-  num_way_node_lookups += other.num_way_node_lookups;
-  num_way_node_lookups_found += other.num_way_node_lookups_found;
-  num_way_without_speed += other.num_way_without_speed;
-  num_cross_country_edges += other.num_cross_country_edges;
-  num_turn_restriction_errors += other.num_turn_restriction_errors;
-  num_dead_end_nodes += other.num_dead_end_nodes;
-
-  CHECK_EQ_S(other.way_tag_statmap.empty(), log_way_tag_stats == false);
-  for (auto const& [key, val] : other.way_tag_statmap) {
-    WayTagStat& stat = way_tag_statmap[key];
-    stat.count += val.count;
-    if (val.example_way_id > 0 &&
-        (absl::ToInt64Nanoseconds(absl::Now() - absl::Time()) % stat.count) <
-            val.count) {
-      stat.example_way_id = val.example_way_id;
-    }
-  }
-}
-#endif
-
 namespace {
 void MayStoreWayTagStats(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                          std::mutex& mut, MetaData* meta) {
   if (meta->stats.log_way_tag_stats &&
-      !tagh.GetValue(osm_way, tagh.highway_).empty()) {
+      !tagh.GetValue(osm_way, "highway").empty()) {
     std::string statkey = CreateWayTagSignature(tagh, osm_way);
     if (!statkey.empty()) {
       std::unique_lock<std::mutex> l(mut);
-      WayTagStat& stat = meta->stats.way_tag_statmap[statkey];
-      stat.count += 1;
-      if ((absl::ToInt64Nanoseconds(absl::Now() - absl::Time()) % stat.count) ==
-          0) {
-        stat.example_way_id = osm_way.id();
-      }
+      meta->stats.way_tag_stats.Add(statkey, osm_way.id());
     }
   }
 }
 
-void LogCountryConflict(const WayContext& wc) {
-  if (wc.rural.ncc != INVALID_NCC && wc.way.uniform_country &&
-      wc.rural.ncc != wc.way.ncc) {
+void LogCountryConflict(const WayTaggedZones& rural, const GWay way) {
+  if (rural.ncc != INVALID_NCC && way.uniform_country && rural.ncc != way.ncc) {
     LOG_S(INFO) << absl::StrFormat(
         "Defined country different from tagged country %d:%d %s:%s in "
         "way:%lld",
-        wc.rural.ncc, wc.way.ncc, CountryNumToString(wc.rural.ncc),
-        CountryNumToString(wc.way.ncc), wc.way.id);
+        rural.ncc, way.ncc, CountryNumToString(rural.ncc),
+        CountryNumToString(way.ncc), way.id);
   }
 }
 
-void PrepareStreetnameAndNodeIds(const OSMTagHelper& tagh, WayContext* wc) {
-  // Get streetname tag.
-  wc->streetname =
-      tagh.GetValue(wc->osm_way.keys(), wc->osm_way.vals(), tagh.name_);
-
+inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
+                          WriteBuff* node_ids_buff) {
   std::vector<uint64_t> node_ids;
-  for (const NodeCountry& nc : wc->node_countries) {
+  for (const NodeCountry& nc : node_countries) {
     node_ids.push_back(nc.id);
   }
-  EncodeUInt(node_ids.size(), &(wc->node_ids_buff));
-  EncodeNodeIds(node_ids, &(wc->node_ids_buff));
+  EncodeUInt(node_ids.size(), node_ids_buff);
+  EncodeNodeIds(node_ids, node_ids_buff);
 }
 
 }  // namespace
@@ -696,33 +427,28 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   }
 
   MayStoreWayTagStats(tagh, osm_way, mut, meta);
-  const HIGHWAY_LABEL highway_label = ParseHighwayLabel(tagh, osm_way);
-  if (highway_label == HW_MAX) {
-    return;  // Not a valid street, ignore.
-  }
-  /* else {
-    std::unique_lock<std::mutex> l(mut);
-    meta->stats.num_ways_with_highway_tag++;
-    meta->stats.num_edges_with_highway_tag += (osm_way.refs().size() - 1);
-    meta->stats.num_noderefs_with_highway_tag += osm_way.refs().size();
-  }
-  */
+  const HIGHWAY_LABEL highway_label =
+      HighwayLabelToEnum(tagh.GetValue(osm_way, "highway"));
 
-  WayContext wc = {.osm_way = osm_way,
-                   .ptags = ParseTags(tagh, osm_way),
-                   // TODO: do this after the way has been accepted.
-                   .node_countries = ExtractNodeCountries(*meta, osm_way)};
+  if (highway_label == HW_MAX) {
+    return;  // Not interesting for routing, ignore.
+  }
+
+  WayContext wc = {.osm_way = osm_way, .ptags = ParseTags(tagh, osm_way)};
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
   CHECK_LT_S(wc.way.highway_label, HW_MAX);
-  if (wc.node_countries.size() <= 1) {
+  const std::vector<NodeCountry> node_countries =
+      ExtractNodeCountries(*meta, osm_way);
+  if (node_countries.size() <= 1) {
     std::unique_lock<std::mutex> l(mut);
     meta->stats.num_ways_missing_nodes++;
     return;
   }
-  SetWayCountryCode(wc.node_countries, &wc.way);
-  wc.rural = ExtractWayZones(tagh, wc.ptags);
-  LogCountryConflict(wc);
+  // Sets way.ncc and way.uniform_country.
+  SetWayCountryCode(node_countries, &wc.way);
+  const WayTaggedZones rural = ExtractWayZones(tagh, wc.ptags);
+  LogCountryConflict(rural, wc.way);
 
   WaySharedAttrs wsa;
   memset(&wsa, 0, sizeof(wsa));
@@ -730,17 +456,17 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   for (const VEHICLE vt : WaySharedAttrs::RA_VEHICLES) {
     // TODO: Use real country instead of always using CH (Switzerland).
-    wc.config_forw = meta->per_country_config.GetDefault(
-        /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, wc.rural.et_forw,
-        wc.rural.im_forw);
-    wc.config_backw = meta->per_country_config.GetDefault(
-        /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, wc.rural.et_backw,
-        wc.rural.im_backw);
+    wc.config_forw = meta->per_country_config->GetDefault(
+        /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, rural.et_forw,
+        rural.im_forw);
+    wc.config_backw = meta->per_country_config->GetDefault(
+        /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, rural.et_backw,
+        rural.im_backw);
 
     if (vt == VH_MOTOR_VEHICLE) {
-      ComputeCarWayRoutingData(*meta, tagh, wc, &wsa);
+      ComputeCarWayRoutingData(tagh, wc, &wsa);
     } else if (vt == VH_BICYCLE) {
-      ComputeBicycleWayRoutingData(*meta, tagh, wc, &wsa);
+      ComputeBicycleWayRoutingData(tagh, wc, &wsa);
     } else if (vt == VH_FOOT) {
       // TODO
     } else {
@@ -750,32 +476,32 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   if (!WSAAnyRoutable(wsa)) return;
 
-  PrepareStreetnameAndNodeIds(tagh, &wc);
+  WriteBuff node_ids_buff;
+  EncodeNodeIds(node_countries, &node_ids_buff);
   const uint32_t prev_num_unique = deduper->num_unique();
 
   // Run modifications of global data behind a mutex.
   {
     std::unique_lock<std::mutex> l(mut);
     wc.way.node_ids =
-        meta->graph.unaligned_pool_.AllocBytes(wc.node_ids_buff.used());
-    memcpy(wc.way.node_ids, wc.node_ids_buff.base_ptr(),
-           wc.node_ids_buff.used());
+        meta->graph.unaligned_pool_.AllocBytes(node_ids_buff.used());
+    memcpy(wc.way.node_ids, node_ids_buff.base_ptr(), node_ids_buff.used());
 
-    if (!wc.streetname.empty()) {
+    std::string_view streetname = tagh.GetValue(wc.osm_way, "name");
+    if (!streetname.empty()) {
       // allocate a 0-terminated char*.
-      wc.way.streetname = (char*)meta->graph.unaligned_pool_.AllocBytes(
-          wc.streetname.size() + 1);
-      memcpy(wc.way.streetname, wc.streetname.data(), wc.streetname.size());
-      wc.way.streetname[wc.streetname.size()] = '\0';
+      wc.way.streetname =
+          (char*)meta->graph.unaligned_pool_.AllocBytes(streetname.size() + 1);
+      memcpy(wc.way.streetname, streetname.data(), streetname.size());
+      wc.way.streetname[streetname.size()] = '\0';
     }
 
-    MarkSeenAndNeeded(meta, wc.node_countries);
+    MarkSeenAndNeeded(meta, node_countries);
 
     wc.way.wsa_id = deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
 
-    if (prev_num_unique != deduper->num_unique() &&
-        deduper->num_unique() % 10 == 0) {
+    if (prev_num_unique != deduper->num_unique()) {
       LOG_S(INFO) << "Number of unique way-routingattrs "
                   << deduper->num_unique() << " for way " << wc.way.id;
       for (uint32_t i = 0; i < WaySharedAttrs::RA_MAX; ++i) {

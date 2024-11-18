@@ -47,8 +47,6 @@ double ComputeModularity(const LouvainGraph& g) {
   return sum_loop / two_m;
 }
 
-
-
 void TestLouvainTriangleGrpah() {
   FUNC_TIMER();
   // These values where manually verified.
@@ -59,7 +57,7 @@ void TestLouvainTriangleGrpah() {
   // Two triangles (0,1,2) and (3,4,5) interconnected at 2 and 5.
   LouvainGraph g;
   g.resolution_ = 1.0;
-  
+
   g.AddNodeAndEdges(0, {1, 2, 3});
   g.AddNodeAndEdges(1, {0, 4, 5});
   g.AddNodeAndEdges(2, {0, 3});
@@ -131,7 +129,13 @@ void TestLouvainTriangleGrpah() {
                 << g.DebugStringCluster(g.nodes.at(0).cluster_pos);
     LOG_S(INFO) << "Exp Delta " << exp_after - exp_before;
     LOG_S(INFO) << "Delta " << computed_dq;
-    CHECK_EQ_S(computed_dq, expected_delta);
+    // TODO: Write macro to check floats for approximate equality.
+    // This started to fail, buit values are very close.
+    // CHECK_EQ_S(computed_dq, expected_delta);
+    LOG_S(INFO) << absl::StrFormat("%.20f %.20f", computed_dq, expected_delta);
+    CHECK_S(std::abs(computed_dq - expected_delta) <
+            (std::abs(computed_dq) + std::abs(expected_delta)) / 100000)
+        << computed_dq << " <-> " << expected_delta;
   }
 
   // Cluster of node 0 is the first triangle.

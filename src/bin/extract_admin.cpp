@@ -46,10 +46,17 @@ void WritePolygon(const AdminInfo& info,
                   const AdminRelation& rel, const AdminRelPolygon& poly,
                   bool error, int serial) {
   const bool inner = poly.pieces.front().inner;
+  char driving_side_letter = 'X';
+  if (rel.driving_side == "right") {
+    driving_side_letter = 'R';
+  } else if (rel.driving_side == "left") {
+    driving_side_letter = 'L';
+  }
+
   const std::string filename =
-      output_dir / absl::StrFormat("%s_%s_%04d_%c%s.csv", rel.iso_code,
+      output_dir / absl::StrFormat("%s_%s_%04d_%c_%c%s.csv", rel.iso_code,
                                    rel.iso_numeric, serial, inner ? 'I' : 'O',
-                                   error ? "_err" : "");
+                                   driving_side_letter, error ? "_err" : "");
 
   LOG_S(INFO) << "Write country borders to " << filename;
   std::ofstream myfile;
@@ -126,6 +133,7 @@ void ReadData(const std::string& filename, int n_threads,
 
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
+  FUNC_TIMER();
 
   Argli argli(argc, argv,
               {
@@ -182,8 +190,8 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  LOG_S(INFO) << "Written " << count << " polygon files with "
-              << errors << " error(s)";
+  LOG_S(INFO) << "Written " << count << " polygon files with " << errors
+              << " error(s)";
   LOG_S(INFO) << "Finished.";
   return 0;
 }

@@ -3,8 +3,9 @@
 #include <cmath>
 
 // Compute distance between two points on the surface of the earth, using the
-// haversine formula. Input coordinates are in units of 10^-7 degrees (which is
-// used in osm). Returned distance is in centimeters.
+// haversine formula. Input coordinates are in units of 10^-7 degrees, i.e. they
+// are multiplied by 10^7. This format is used in openstreetmap. Returned
+// distance is in centimeters.
 inline int64_t calculate_distance(int32_t lat1_100nano, int32_t lon1_100nano,
                                   int32_t lat2_100nano, int32_t lon2_100nano) {
   constexpr int64_t kEarthRadiusCm = 637100000;

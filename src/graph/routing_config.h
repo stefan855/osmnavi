@@ -139,9 +139,31 @@ class PerCountryConfig {
     return arr[hw][vh][et][im];
   }
 
+  void ResetGlobalDefaults() {
+    std::memset(&global_defaults_, 0, sizeof(global_defaults_));
+    /*
+    for (HIGHWAY_LABEL hw = HW_MOTORWAY; hw < HW_MAX;
+         hw = (HIGHWAY_LABEL)(hw + 1)) {
+      for (VEHICLE vh = VH_MOTOR_VEHICLE; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
+        for (ENVIRONMENT_TYPE et = ET_ANY; et < ET_MAX;
+             et = (ENVIRONMENT_TYPE)(et + 1)) {
+          for (IS_MOTORROAD im = IM_NO; im < IM_MAX;
+               im = (IS_MOTORROAD)(im + 1)) {
+            ConfigValue& v = global_defaults_[hw][vh][et][im];
+            v.dflt.surface = SURFACE_MAX;
+            v.dflt.tracktype = TRACKTYPE_MAX;
+            v.dflt.smoothness = SMOOTHNESS_MAX;
+          }
+        }
+      }
+    }
+    */
+  }
+
   void Clear() {
     LOG_S(INFO) << "sizeof(CountryDefaults):" << sizeof(CountryDefaults);
-    std::memset(&global_defaults_, 0, sizeof(global_defaults_));
+    ResetGlobalDefaults();
+
     for (size_t i = 0; i < country_defaults_.size(); ++i) {
       if (country_defaults_.at(i) != nullptr) {
         free(country_defaults_.at(i));

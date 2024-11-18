@@ -71,6 +71,7 @@ struct AdminRelation {
   std::string iso_code;
   std::string iso_numeric;
   int admin_level;
+  std::string driving_side;
   std::vector<int64_t> memids;
   std::vector<std::string> roles;
   std::vector<OSMPBF::Relation::MemberType> types;
@@ -97,35 +98,38 @@ struct AdminInfo {
 bool ExtractAdminRelation(const OSMTagHelper& tagh,
                           const OSMPBF::Relation& osm_rel, AdminRelation* rel) {
   int admin_level;
-  if (!absl::SimpleAtoi(tagh.GetValue(osm_rel, tagh.admin_level_),
-                        &admin_level)) {
+  if (!absl::SimpleAtoi(tagh.GetValue(osm_rel, "admin_level"), &admin_level)) {
     return false;
   }
   if (admin_level != 2) {
     return false;  // Only interested in countries so far.
   }
 
-  const std::string_view rel_type = tagh.GetValue(osm_rel, tagh.type_);
+  const std::string_view rel_type = tagh.GetValue(osm_rel, "type");
   if (rel_type != "boundary" && rel_type != "multipolygon") {
     return false;
   }
   rel->id = osm_rel.id();
   rel->type = std::string(rel_type);
-  rel->boundary = tagh.GetValue(osm_rel, tagh.boundary_);
+  rel->boundary = tagh.GetValue(osm_rel, "boundary");
   rel->admin_level = admin_level;
-  rel->name = tagh.GetValue(osm_rel, tagh.name_);
-  rel->name_de = tagh.GetValueByStr(osm_rel, "name:de");
+  rel->name = tagh.GetValue(osm_rel, "name");
+  rel->name_de = tagh.GetValue(osm_rel, "name:de");
   if (rel->name_de.empty()) {
-    rel->name_de = tagh.GetValueByStr(osm_rel, "name:en");
+    rel->name_de = tagh.GetValue(osm_rel, "name:en");
   }
-  rel->iso_code = tagh.GetValueByStr(osm_rel, "ISO3166-1:alpha2");
+  rel->iso_code = tagh.GetValue(osm_rel, "ISO3166-1:alpha2");
   if (rel->iso_code.empty()) {
-    rel->iso_code = tagh.GetValueByStr(osm_rel, "ISO3166-1");
+    rel->iso_code = tagh.GetValue(osm_rel, "ISO3166-1");
   }
   if (rel->iso_code.empty()) {
-    rel->iso_code = tagh.GetValueByStr(osm_rel, "country_code");
+    rel->iso_code = tagh.GetValue(osm_rel, "country_code");
   }
-  rel->iso_numeric = tagh.GetValueByStr(osm_rel, "ISO3166-1:numeric");
+  rel->iso_numeric = tagh.GetValue(osm_rel, "ISO3166-1:numeric");
+  rel->driving_side = tagh.GetValue(osm_rel, "driving_side");
+  LOG_S(INFO) << absl::StrFormat("Relation %lld %s driving_side=%s", rel->id,
+                                 rel->name_de.c_str(),
+                                 rel->driving_side.c_str());
 
   if (rel->type != "boundary" || rel->boundary != "administrative" ||
       rel->iso_code.empty()) {

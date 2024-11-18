@@ -95,7 +95,7 @@ namespace {
 // been merged.
 inline uint32_t GetRedirectedClusterId(const WorkData& wd, const GNode& n) {
   // const ClusterData& cd = wd.cluster_data.at(n.cluster_id);
-  const ClusterData& cd = ATR(wd.cluster_data, n.cluster_id);
+  const ClusterData& cd = VECTOR_AT(wd.cluster_data, n.cluster_id);
   return cd.deleted ? cd.replace_id : n.cluster_id;
 }
 
@@ -290,9 +290,11 @@ void MergeTinyClusters(Graph* graph) {
       wd.cluster_data.at(cluster_id).tiny = true;
       ++num_tiny;
     }
+#if 0
     LOG_S(INFO) << absl::StrFormat("Cluster %u tiny:%d nodes:%u", cluster_id,
                                    wd.cluster_data.at(cluster_id).tiny,
                                    graph->clusters.at(cluster_id).num_nodes);
+#endif
   }
   LOG_S(INFO) << "Tiny clusters: " << num_tiny << " of "
               << wd.cluster_data.size();

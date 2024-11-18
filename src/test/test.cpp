@@ -1155,15 +1155,15 @@ void TestDeDuperWithIdsInt() {
     CHECK_EQ_S(dd.Add(2), 2);
   }
 
-  CHECK_EQ_S(dd.GetObjAt(0), 0);
+  CHECK_EQ_S(dd.GetObj(0), 0);
   CHECK_EQ_S(dd.GetEntryAt(0).id, 0);
   CHECK_EQ_S(dd.GetEntryAt(0).ref_count, 1);
 
-  CHECK_EQ_S(dd.GetObjAt(1), 1);
+  CHECK_EQ_S(dd.GetObj(1), 1);
   CHECK_EQ_S(dd.GetEntryAt(1).id, 1);
   CHECK_EQ_S(dd.GetEntryAt(1).ref_count, 1);
 
-  CHECK_EQ_S(dd.GetObjAt(2), 2);
+  CHECK_EQ_S(dd.GetObj(2), 2);
   CHECK_EQ_S(dd.GetEntryAt(2).id, 2);
   CHECK_EQ_S(dd.GetEntryAt(2).ref_count, 5);
 
@@ -1190,9 +1190,9 @@ void TestDeDuperWithIdsString() {
   CHECK_EQ_S(dd.Add("bbb"), 1);
   CHECK_EQ_S(dd.Add("ccc"), 2);
 
-  CHECK_EQ_S(dd.GetObjAt(0), "aaa");
-  CHECK_EQ_S(dd.GetObjAt(1), "bbb");
-  CHECK_EQ_S(dd.GetObjAt(2), "ccc");
+  CHECK_EQ_S(dd.GetObj(0), "aaa");
+  CHECK_EQ_S(dd.GetObj(1), "bbb");
+  CHECK_EQ_S(dd.GetObj(2), "ccc");
   CHECK_EQ_S(dd.num_unique(), 3);
   CHECK_EQ_S(dd.num_added(), 7);
 

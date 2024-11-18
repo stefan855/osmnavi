@@ -91,7 +91,8 @@ void FindLargeComponents(Graph* g) {
 }
 
 void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
-  FuncTimer timer(absl::StrFormat("Write graph to %s", filename.c_str()));
+  FuncTimer timer(absl::StrFormat("Write graph to %s", filename.c_str()),
+                  __FILE__, __LINE__);
   std::ofstream myfile;
   myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
 
@@ -333,13 +334,10 @@ void WriteCrossCountryEdges(MetaData* meta, const std::string& filename) {
       continue;
     }
     const std::vector<size_t> node_idx =
-        meta->graph.GetGWayNodeIndexes(meta->way_nodes_needed, way);
+        meta->graph.GetGWayNodeIndexes(*(meta->way_nodes_needed), way);
     for (size_t pos = 0; pos < node_idx.size() - 1; ++pos) {
       const GNode& n1 = meta->graph.nodes.at(node_idx.at(pos));
       const GNode& n2 = meta->graph.nodes.at(node_idx.at(pos + 1));
-      // uint16_t ncc1 = meta->tiler->GetCountryNum(n1.lon, n1.lat);
-      // uint16_t ncc2 = meta->tiler->GetCountryNum(n2.lon, n2.lat);
-      // if (ncc1 != ncc2) {
       if (n1.ncc != n2.ncc) {
         meta->stats.num_cross_country_edges++;
         myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat, n1.lon,
@@ -362,11 +360,11 @@ void SortGWays(MetaData* meta) {
 
 void AllocateGNodes(MetaData* meta) {
   FUNC_TIMER();
-  meta->graph.nodes.reserve(meta->way_nodes_needed.CountBits());
-  NodeBuilder::GlobalNodeIter iter(meta->nodes);
+  meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits());
+  NodeBuilder::GlobalNodeIter iter(*meta->node_table);
   const NodeBuilder::VNode* node;
   while ((node = iter.Next()) != nullptr) {
-    if (meta->way_nodes_needed.GetBit(node->id)) {
+    if (meta->way_nodes_needed->GetBit(node->id)) {
       GNode snode;
       snode.node_id = node->id;
       snode.lat = node->lat;
@@ -382,6 +380,7 @@ void AllocateGNodes(MetaData* meta) {
 
 void SetCountryInGNodes(MetaData* meta) {
   FUNC_TIMER();
+  // TODO: run with thread pool.
   for (GNode& n : meta->graph.nodes) {
     n.ncc = meta->tiler->GetCountryNum(n.lon, n.lat);
   }
@@ -395,7 +394,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
     const GWay& way = graph.ways.at(way_idx);
     const WaySharedAttrs& wsa = GetWSA(graph, way);
     std::vector<size_t> node_idx =
-        meta->graph.GetGWayNodeIndexes(meta->way_nodes_needed, way);
+        meta->graph.GetGWayNodeIndexes(*(meta->way_nodes_needed), way);
     {
       // Update edge counts.
       std::unique_lock<std::mutex> l(mut);
@@ -495,9 +494,9 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
     NodeBuilder::VNode prev_node = {.id = 0, .lat = 0, .lon = 0};
     int64_t sum = 0;
     for (const uint64_t id : ids) {
-      if (meta->way_nodes_seen.GetBit(id)) {
+      if (meta->way_nodes_seen->GetBit(id)) {
         NodeBuilder::VNode node;
-        if (!NodeBuilder::FindNode(meta->nodes, id, &node)) {
+        if (!NodeBuilder::FindNode(*meta->node_table, id, &node)) {
           // Should not happen, all 'seen' nodes should exist.
           ABORT_S() << absl::StrFormat("Way:%llu has missing node %llu", way.id,
                                        id);
@@ -510,7 +509,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
         prev_node = node;
       }
       dist_sums.push_back(sum);
-      if (meta->way_nodes_needed.GetBit(id)) {
+      if (meta->way_nodes_needed->GetBit(id)) {
         std::size_t idx = graph.FindNodeIndex(id);
         CHECK_S(idx >= 0 && idx < graph.nodes.size());
         node_idx.push_back(idx);
@@ -528,7 +527,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
       int last_pos = -1;
       for (size_t pos = 0; pos < ids.size(); ++pos) {
         uint64_t id = ids.at(pos);
-        if (meta->way_nodes_needed.GetBit(id)) {
+        if (meta->way_nodes_needed->GetBit(id)) {
           if (last_pos >= 0) {
             // Emit edge.
             std::size_t idx1 = node_idx.at(last_pos);
@@ -589,7 +588,7 @@ void MarkUniqueEdges(MetaData* meta) {
 #if 0
 void CheckShortestClusterPaths(int n_threads, const Graph& g,
                                const RoutingMetric& metric) {
-  FuncTimer timer("ExecuteLouvain()::CheckShortestClusterPaths()");
+  FUNC_TIMER();
   ThreadPool pool;
   for (const GCluster& c : g.clusters) {
     pool.AddWork([&g, &c, &metric](int) {
@@ -638,6 +637,22 @@ void CheckShortestClusterPaths(int n_threads, const Graph& g,
 }
 #endif
 
+void ComputeShortestPathsInAllClusters(MetaData* meta) {
+  FUNC_TIMER();
+  RoutingMetricTime metric;
+  if (!meta->graph.clusters.empty()) {
+    ThreadPool pool;
+    for (GCluster& cluster : meta->graph.clusters) {
+      pool.AddWork([meta, &metric, &cluster](int) {
+        ComputeShortestClusterPaths(meta->graph, metric, &cluster);
+      });
+    }
+    // Faster with few threads only.
+    pool.Start(std::min(5, meta->n_threads));
+    pool.WaitAllFinished();
+  }
+}
+
 void ExecuteLouvain(const bool merge_tiny_clusters, MetaData* meta) {
   FUNC_TIMER();
   build_clusters::ExecuteLouvainStages(meta->n_threads, &meta->graph);
@@ -652,20 +667,10 @@ void ExecuteLouvain(const bool merge_tiny_clusters, MetaData* meta) {
   build_clusters::PrintClusterInformation(meta->graph);
   build_clusters::WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
 
+  // TODO: Compute separately for different vehicle types.
+  // ComputeShortestPathsInAllClusters(meta);
+
 #if 0
-  RoutingMetricTime metric;
-  if (!meta->graph.clusters.empty()) {
-    FuncTimer timer("ExecuteLouvain()::ComputeShortestClusterPaths");
-    ThreadPool pool;
-    for (GCluster& cluster : meta->graph.clusters) {
-      pool.AddWork([meta, &metric, &cluster](int) {
-        ComputeShortestClusterPaths(meta->graph, metric, &cluster);
-      });
-    }
-    // Faster with few threads only.
-    pool.Start(std::min(3, meta->n_threads));
-    pool.WaitAllFinished();
-  }
   // Check if astar and dijkstra find the same shortest paths.
   // CheckShortestClusterPaths(meta->n_threads, meta->graph, metric);
 #endif
@@ -710,11 +715,11 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
 
   LOG_S(INFO) << "========= Various Stats ==========";
   LOG_S(INFO) << absl::StrFormat("Num var-nodes:      %12lld",
-                                 meta.nodes.total_records());
+                                 meta.node_table->total_records());
   LOG_S(INFO) << absl::StrFormat(
       "  bytes/var-node:   %12.2f",
-      static_cast<double>(meta.nodes.mem_allocated()) /
-          meta.nodes.total_records());
+      static_cast<double>(meta.node_table->mem_allocated()) /
+          meta.node_table->total_records());
   LOG_S(INFO) << absl::StrFormat("Num turn restrictions:%10lld",
                                  meta.turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num turn restr errors:%10lld",
@@ -734,10 +739,10 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
                                  graph.ways.size());
 
   LOG_S(INFO) << absl::StrFormat("  Nodes \"seen\":     %12lld",
-                                 meta.way_nodes_seen.CountBits());
+                                 meta.way_nodes_seen->CountBits());
 
   LOG_S(INFO) << absl::StrFormat("  Nodes \"needed\":   %12lld",
-                                 meta.way_nodes_needed.CountBits());
+                                 meta.way_nodes_needed->CountBits());
 
   uint64_t num_no_maxspeed = 0;
   uint64_t num_diff_maxspeed = 0;
@@ -791,17 +796,24 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   size_t num_no_country = 0;
   size_t max_edges_in = 0;
   size_t max_edges_out = 0;
+  size_t node_in_cluster = 0;
+  size_t node_in_small_component = 0;
   for (const GNode& n : graph.nodes) {
     num_edges_in += n.num_edges_in;
     num_edges_out += n.num_edges_out;
     max_edges_in = std::max((uint64_t)n.num_edges_in, max_edges_in);
     max_edges_out = std::max((uint64_t)n.num_edges_out, max_edges_out);
+    if (n.cluster_id != INVALID_CLUSTER_ID) {
+      node_in_cluster++;
+    }
+    if (n.large_component == 0) {
+      node_in_small_component++;
+    }
     for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
       if (!n.edges[edge_pos].unique_other) {
         num_non_unique_edges++;
       }
     }
-    // uint16_t ncc = meta.tiler->GetCountryNum(n.lon, n.lat);
     num_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
   }
 
@@ -821,6 +833,9 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Num no country:   %12lld", num_no_country);
   LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  meta.stats.num_dead_end_nodes);
+  LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld", node_in_cluster);
+  LOG_S(INFO) << absl::StrFormat("  Node in small comp:%11lld",
+                                 node_in_small_component);
 
   std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
   std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
@@ -833,7 +848,7 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
 
   LOG_S(INFO) << "========= Memory Stats ===========";
   LOG_S(INFO) << absl::StrFormat("Varnode memory:     %12.2f MB",
-                                 meta.nodes.mem_allocated() / 1000000.0);
+                                 meta.node_table->mem_allocated() / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Node graph memory:  %12.2f MB",
                                  (node_bytes + node_added_bytes) / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Way graph memory:   %12.2f MB",
@@ -845,21 +860,14 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
 }
 
 void PrintWayTagStats(const MetaData& meta) {
-  int64_t total_count = 0;
-  std::vector<std::pair<WayTagStat, std::string_view>> v;
-  for (auto const& [key, val] : meta.stats.way_tag_statmap) {
-    v.emplace_back(val, key);
-    total_count += val.count;
-  }
-  std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) {
-    return a.first.count > b.first.count;
-  });
+  const FrequencyTable& ft = meta.stats.way_tag_stats;
+  const std::vector<FrequencyTable::Entry> v = ft.GetSortedElements();
   for (size_t i = 0; i < v.size(); ++i) {
-    const WayTagStat& stat = v.at(i).first;
+    const FrequencyTable::Entry& e = v.at(i);
     char cc[3] = "--";  // Way not found, can easily happen because many ways
                         // are not stored in the graph.
     {
-      const GWay* way = meta.graph.FindWay(stat.example_way_id);
+      const GWay* way = meta.graph.FindWay(e.example_id);
       if (way != nullptr) {
         strcpy(cc, ">1");
         if (way->uniform_country) {
@@ -868,13 +876,12 @@ void PrintWayTagStats(const MetaData& meta) {
       }
     }
 
-    RAW_LOG_F(INFO, "%7lu %10ld id:%10ld %s %s", i, stat.count,
-              stat.example_way_id, cc, std::string(v.at(i).second).c_str());
+    RAW_LOG_F(INFO, "%7lu %10ld id:%10ld %s %s", i, e.ref_count, e.example_id,
+              cc, std::string(e.key).c_str());
   }
   LOG_S(INFO) << absl::StrFormat(
       "Number of different ways tag configurations: %ld, total %ld (%.2f%%)",
-      meta.stats.way_tag_statmap.size(), total_count,
-      (100.0 * meta.stats.way_tag_statmap.size()) / total_count);
+      ft.TotalUnique(), ft.Total(), (100.0 * ft.TotalUnique()) / ft.Total());
 }
 
 void DoIt(const Argli& argli) {
@@ -884,6 +891,9 @@ void DoIt(const Argli& argli) {
   const bool merge_tiny_clusters = argli.GetBool("merge_tiny_clusters");
 
   MetaData meta;
+  meta.way_nodes_seen.reset(new HugeBitset);
+  meta.way_nodes_needed.reset(new HugeBitset);
+  meta.node_table.reset(new DataBlockTable);
   meta.stats.log_way_tag_stats = argli.GetBool("log_way_tag_stats");
   meta.stats.log_turn_restrictions = argli.GetBool("log_turn_restrictions");
   meta.n_threads = 8;
@@ -898,19 +908,20 @@ void DoIt(const Argli& argli) {
     pool.AddWork([&reader](int thread_idx) { reader.ReadFileStructure(); });
     // Read country polygons and initialise tiler.
     pool.AddWork([&meta, &admin_pattern](int thread_idx) {
-      meta.tiler = new TiledCountryLookup(
+      meta.tiler.reset(new TiledCountryLookup(
           admin_pattern,
-          /*tile_size=*/TiledCountryLookup::kDegreeUnits / 5);
+          /*tile_size=*/TiledCountryLookup::kDegreeUnits / 5));
     });
     // Read routing config.
     pool.AddWork([&meta, &routing_config](int) {
-      meta.per_country_config.ReadConfig(routing_config);
+      meta.per_country_config.reset(new PerCountryConfig);
+      meta.per_country_config->ReadConfig(routing_config);
     });
     pool.Start(std::min(meta.n_threads, 3));
     pool.WaitAllFinished();
   }
 
-  LoadNodeCoordinates(&reader, &meta.nodes, &meta.stats);
+  LoadNodeCoordinates(&reader, meta.node_table.get(), &meta.stats);
 
   {
     DeDuperWithIds<WaySharedAttrs> deduper;
@@ -958,7 +969,7 @@ void DoIt(const Argli& argli) {
 
   {
     NodeBuilder::VNode n;
-    bool found = NodeBuilder::FindNode(meta.nodes, 207718684, &n);
+    bool found = NodeBuilder::FindNode(*meta.node_table, 207718684, &n);
     LOG_S(INFO) << "Search node 207718684 expect lat:473492652 lon:87012469";
     LOG_S(INFO) << absl::StrFormat("Find node   %llu        lat:%llu lon:%llu",
                                    207718684, found ? n.lat : 0,
@@ -979,6 +990,23 @@ void DoIt(const Argli& argli) {
   WriteCrossCountryEdges(&meta, "/tmp/cross.csv");
   PrintStructSizes();
   PrintStats(reader, meta);
+
+  LOG_S(INFO)
+      << "Find node closest to 46,956106, 7,423648. Node 805904068 is good";
+  int64_t found_id = 0;
+  int64_t min_dist = INF64;
+  constexpr int64_t lat = 469561060;
+  constexpr int64_t lon = 74236480;
+  for (const GNode& n : meta.graph.nodes) {
+    int64_t dlat = lat - n.lat;
+    int64_t dlon = lon - n.lon;
+    int64_t dist = dlat * dlat + dlon * dlon;
+    if (dist < min_dist) {
+      min_dist = dist;
+      found_id = n.node_id;
+    }
+  }
+  LOG_S(INFO) << "found node " << found_id << " square-dist " << min_dist;
 }
 
 }  // namespace build_graph

@@ -38,8 +38,9 @@ class FastCountryPolygons {
         limited_lines_(max_height_.size()) {}
 
   void LoadPolygonsFromWildcard(std::string_view wildcard) {
-    FuncTimer timer(
-        absl::StrFormat("Load multiple polygon files from %s", wildcard));
+    FUNC_TIMER();
+    LOG_S(INFO) << absl::StrFormat("Load multiple polygon files from %s",
+                                   wildcard);
     for (const std::filesystem::path path : GetFilesWithWildcard(wildcard)) {
       std::vector<std::string> v =
           absl::StrSplit(path.filename().string(), '_');
@@ -252,7 +253,12 @@ class FastCountryPolygons {
     return total;
   }
 
+  // The entry max_height_[pos] contains the height limit for lines in
+  // limited_lines_[pos]. The values are increasing.
   std::vector<uint32_t> max_height_;
+  // limited_lines_[pos] contains a vector of sorted lines with height <=
+  // max_height_[pos]. Each line is stored only once, with smallest possible
+  // 'pos'.
   std::vector<std::vector<Line>> limited_lines_;
 
   friend void TestFastPolygonContains();

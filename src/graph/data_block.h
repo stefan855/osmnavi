@@ -232,9 +232,9 @@ class NodeBuilder {
 
  private:
   WriteBuff buff_;
-  std::uint64_t start_id_;
-  std::uint64_t prev_id_;
-  std::int64_t prev_lat_;
-  std::int64_t prev_lon_;
+  std::uint64_t start_id_ = 0;
+  std::uint64_t prev_id_ = 0;
+  std::int64_t prev_lat_ = 0;
+  std::int64_t prev_lon_ = 0;
   std::uint32_t num_records_ = 0;
 };
