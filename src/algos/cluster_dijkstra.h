@@ -18,19 +18,23 @@
 namespace cluster_all_paths {
 
 // Visit all nodes in a cluster using a BFS, starting from the border nodes.
-// Assigns a serial id=0..N-1 to each node. The border nodes are mapped
-// directly to indices 0..cluster.border_nodes.size()-1.
+// Assigns a fresh (and small) serial id=0..N-1 to each node. The border nodes
+// are mapped directly to indices 0..cluster.border_nodes.size()-1.
 //
-// Returns the number of nodes in the cluster n *num_nodes and the edges between
-// cluster nodes, each with the value computed by 'metric' as its 'weight'.
+// Returns the number of nodes in the cluster in '*num_nodes' and the edges
+// between cluster nodes, each with the value computed by 'metric' as its
+// 'weight'.
 void CollectClusterEdges(
-    const Graph& g, const RoutingMetric& metric, const GCluster& cluster,
-    uint32_t* num_nodes,
+    const Graph& g, const RoutingMetric& metric, VEHICLE vt,
+    const GCluster& cluster, uint32_t* num_nodes,
     std::vector<CompactDirectedGraph::FullEdge>* full_edges) {
   // Map from node index in g.nodes to the node index in the mini graph.
   absl::flat_hash_map<uint32_t, uint32_t> nodemap;
   // FIFO queue for bfs, containing node indices in g.nodes.
   std::queue<uint32_t> q;
+
+  const uint32_t wsa_idx_forw = RAinWSAIndex(vt, DIR_FORWARD);
+  const uint32_t wsa_idx_backw = RAinWSAIndex(vt, DIR_BACKWARD);
 
   // Preallocate ids for all border nodes.
   for (uint32_t pos = 0; pos < cluster.border_nodes.size(); ++pos) {
@@ -61,6 +65,16 @@ void CollectClusterEdges(
         continue;
       }
 
+      // Check if vt is routable on this edge.
+      const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
+      if (!RoutableAccess(GetRAFromWSA(wsa, vt,
+                                       edge.contra_way == DIR_FORWARD
+                                           ? DIR_FORWARD
+                                           : DIR_BACKWARD)
+                              .access)) {
+        continue;
+      }
+
       // The other node is part of the same cluster, so use it.
       uint32_t other_idx;
       auto iter = nodemap.find(edge.other_node_idx);
@@ -76,7 +90,7 @@ void CollectClusterEdges(
       }
 
       full_edges->push_back(
-          {mini_idx, other_idx, metric.Compute(GetWSA(g, edge.way_idx), edge)});
+          {mini_idx, other_idx, metric.Compute(wsa, vt, edge)});
     }
   }
   // TODO: nodemap.size() is sometimes smaller than cluster.num_nodes.
@@ -105,8 +119,9 @@ void SortAndCleanupEdges(
 
 // This exists once per 'node_idx'.
 struct VisitedNode {
-  std::uint32_t min_weight;  // The minimal weight seen so far.
-  std::uint32_t done;        // 1 <=> node has been finalized.
+  std::uint32_t min_weight;       // The minimal weight seen so far.
+  std::uint32_t done : 1;         // 1 <=> node has been finalized.
+  std::uint32_t from_v_idx : 31;  // 1 <=> node has been finalized.
 };
 
 // This might exist multiple times for each node, when a node gets
@@ -128,7 +143,8 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
   // LOG_S(INFO) << "Start routing from " << start_idx << " to "
   //             << num_border_nodes << " border nodes";
 
-  std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {INFU32, 0});
+  CHECK_LT_S(cg.num_nodes(), 1 << 31);
+  std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {INFU32, 0, 0});
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, MetricCmp> pq;
   const std::vector<uint32_t>& edges_start = cg.edges_start();
   const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
@@ -168,6 +184,7 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
                     << " o_mm=" << other.min_weight;
                     */
         other.min_weight = new_weight;
+        other.from_v_idx = qnode.visited_node_idx;
         pq.emplace(new_weight, e.to_idx);
       }
     }
@@ -186,7 +203,7 @@ std::vector<uint32_t> GetBorderRoutes(const CompactDirectedGraph& cg,
 // Compute all shortest paths between border nodes in a cluster. The results
 // are stored in 'cluster.distances'.
 void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
-                                 GCluster* cluster) {
+                                 VEHICLE vt, GCluster* cluster) {
   if (cluster->border_nodes.empty()) {
     return;
   }
@@ -194,7 +211,7 @@ void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
   // Construct a minimal graph with all necessary information.
   uint32_t num_nodes = 0;
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
-  cluster_all_paths::CollectClusterEdges(g, metric, *cluster, &num_nodes,
+  cluster_all_paths::CollectClusterEdges(g, metric, vt, *cluster, &num_nodes,
                                          &full_edges);
   const auto prev_edges_size = full_edges.size();
   cluster_all_paths::SortAndCleanupEdges(&full_edges);

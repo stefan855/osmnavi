@@ -42,7 +42,7 @@ struct TurnRestriction {
 struct WaySharedAttrs {
   // Vehicles types used in the ra array.
   static constexpr VEHICLE RA_VEHICLES[] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
-                                             VH_FOOT};
+                                            VH_FOOT};
   static constexpr uint32_t RA_MAX =
       2 * sizeof(RA_VEHICLES) / sizeof(RA_VEHICLES[0]);
   // Routing info in forward and backward direction.
@@ -294,6 +294,11 @@ inline bool WSAAnyRoutable(const WaySharedAttrs& wsa, DIRECTION dir) {
     }
   }
   return false;
+}
+
+inline bool WSAVehicleAnyRoutable(const WaySharedAttrs& wsa, VEHICLE vt) {
+  return RoutableAccess(GetRAFromWSA(wsa, vt, DIR_FORWARD).access) ||
+         RoutableAccess(GetRAFromWSA(wsa, vt, DIR_BACKWARD).access);
 }
 
 // Return true if any vehicle is routable, false if not.

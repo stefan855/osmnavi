@@ -116,7 +116,7 @@ class DijkstraRouter {
         const GWay& way = g_.ways.at(edge.way_idx);
         const WaySharedAttrs& wsa = GetWSA(g_, way);
 
-        if (RoutableAccess(GetRAFromWSA(wsa, filter.vt,
+        if (!RoutableAccess(GetRAFromWSA(wsa, filter.vt,
                                         edge.contra_way == DIR_FORWARD
                                             ? DIR_FORWARD
                                             : DIR_BACKWARD)
@@ -137,7 +137,8 @@ class DijkstraRouter {
         }
         std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx);
         VisitedNode& vother = visited_nodes_.at(v_idx);
-        std::uint32_t new_metric = min_metric + metric.Compute(wsa, edge);
+        std::uint32_t new_metric =
+            min_metric + metric.Compute(wsa, filter.vt, edge);
         if (!vother.done && new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;

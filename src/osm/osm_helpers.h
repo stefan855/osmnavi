@@ -17,7 +17,7 @@
 class OSMTagHelper {
  public:
   OSMTagHelper(const OSMPBF::StringTable& string_table)
-      : string_table_(string_table) {}
+      : string_table_(string_table), empty_string_("") {}
 
   std::string_view GetValue(
       const google::protobuf::RepeatedField<unsigned int>& keys,
@@ -37,11 +37,11 @@ class OSMTagHelper {
     return GetValue(obj.keys(), obj.vals(), key);
   }
 
-  std::string_view ToString(unsigned int tagnum) const {
+  const std::string& ToString(unsigned int tagnum) const {
     if (tagnum < static_cast<unsigned int>(string_table_.s().size())) {
       return string_table_.s(tagnum);
     }
-    return "";
+    return empty_string_;
   }
 
   std::string GetLoggingStr(
@@ -68,6 +68,8 @@ class OSMTagHelper {
  private:
   // Needed first for the initialization of the tag fields.
   const OSMPBF::StringTable& string_table_;
+  // This is needed to return references to string instead of string views.
+  const std::string empty_string_;
 };
 
 namespace {

@@ -1,5 +1,8 @@
 #include <osmpbf/osmpbf.h>
 
+#include <map>
+#include <string>
+
 #include "absl/strings/str_format.h"
 #include "base/argli.h"
 #include "base/frequency_table.h"
@@ -26,7 +29,10 @@ struct FilterExp {
 
 struct FreqStats {
   FrequencyTable matched_keys;
-  FrequencyTable matched_key_values;
+  // Number of of top values we want to keep for each key. 0 turns value stats
+  // off.
+  size_t n_values;
+  std::map<std::string, FrequencyTable> matched_key_values;
 };
 
 std::vector<FilterExp> ParseMatchFilters(std::string_view expression) {
@@ -71,7 +77,12 @@ bool MatchFilters(const OSMTagHelper& tagh, const T& obj,
                                           tagh.ToString(obj.vals(i))))) {
       match = true;
       std::unique_lock<std::mutex> l(mut);
-      stats->matched_keys.Add(tagh.ToString(obj.keys(i)), obj.id());
+      const std::string& key = tagh.ToString(obj.keys(i));
+      stats->matched_keys.Add(key, obj.id());
+      if (stats->n_values > 0) {
+        (stats->matched_key_values)[key].Add(tagh.ToString(obj.vals(i)),
+                                             obj.id());
+      }
     }
   }
 
@@ -84,16 +95,37 @@ bool MatchFilters(const OSMTagHelper& tagh, const T& obj,
 }
 
 void PrintStats(std::string_view name, const FreqStats& stats) {
-  const FrequencyTable& ft = stats.matched_keys;
+  const FrequencyTable& key_ft = stats.matched_keys;
+  const auto keys = key_ft.GetSortedElements();
 
-  LOG_S(INFO) << "======================== Matched Keys in " << name
-              << " ======================== ";
-  LOG_S(INFO) << absl::StrFormat(
-      "unique: %d total: %d (%.3f%%)", ft.TotalUnique(), ft.Total(),
-      (100.0 * ft.TotalUnique()) / (std::max(ft.Total(), (uint64_t)1)));
-  for (const auto& e : ft.GetSortedElements()) {
-    LOG_S(INFO) << absl::StrFormat("%-50s: %12d (id:%d)", e.key, e.ref_count,
-                                   e.example_id);
+  RAW_LOG_F(INFO, absl::StrFormat("======================== Matched Keys in %s "
+                                  "======================== ",
+                                  name)
+                      .c_str());
+  RAW_LOG_F(INFO, absl::StrFormat("unique: %d total: %d (%.3f%%)",
+                                  key_ft.TotalUnique(), key_ft.Total(),
+                                  (100.0 * key_ft.TotalUnique()) /
+                                      (std::max(key_ft.Total(), (uint64_t)1)))
+                      .c_str());
+  for (const auto& e : keys) {
+    RAW_LOG_F(INFO, absl::StrFormat("=== %s %7d (id:%d)", e.key, e.ref_count,
+                                    e.example_id)
+                        .c_str());
+    if (stats.n_values > 0) {
+      auto iter = stats.matched_key_values.find(e.key);
+      CHECK_NE_F(iter, stats.matched_key_values.end());
+      const auto vals = iter->second.GetSortedElements();
+      const size_t max_valkey_size = std::min(
+          (size_t)30, FrequencyTable::MaxKeySize(vals, stats.n_values));
+      for (size_t i = 0; i < vals.size(); ++i) {
+        if (i >= stats.n_values) break;
+        const FrequencyTable::Entry& vale = vals.at(i);
+        RAW_LOG_F(INFO, absl::StrFormat("    %s %7d (id:%d)",
+                                        PadString(vale.key, max_valkey_size),
+                                        vale.ref_count, vale.example_id)
+                            .c_str());
+      }
+    }
   }
 }
 
@@ -102,7 +134,6 @@ void PrintStats(std::string_view name, const FreqStats& stats) {
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   FUNC_TIMER();
-  // FUNC_TIMER2();
 
   Argli argli(
       argc, argv,
@@ -126,17 +157,25 @@ int main(int argc, char* argv[]) {
            .type = "string",
            .desc = "Select relations that should be logged. For syntax see "
                    "--way_filter"},
-          {.name = "entries",
-           .type = "bool",
-           .dflt = "true",
-           .desc = "Print each result object that matches"},
           {.name = "stats",
            .type = "bool",
            .dflt = "true",
            .desc = "Collect and print tag stats"},
+          {.name = "n_values",
+           .type = "int",
+           .dflt = "10",
+           .desc = "Print the top <n> values for each key."},
+          {.name = "raw",
+           .type = "bool",
+           .dflt = "true",
+           .desc = "Print each result object that matches"},
           {.name = "one_line",
            .type = "bool",
            .desc = "Print each result object way/relation on one line"},
+          {.name = "n_threads",
+           .type = "int",
+           .dflt = "22",
+           .desc = "Number of threads to use for parallel processing"},
       });
 
   const std::string in_bpf = argli.GetString("pbf");
@@ -144,24 +183,25 @@ int main(int argc, char* argv[]) {
       ParseMatchFilters(argli.GetString("ways"));
   std::vector<FilterExp> relation_filter =
       ParseMatchFilters(argli.GetString("relations"));
-  bool print_entries = argli.GetBool("entries");
+  bool print_raw = argli.GetBool("raw");
   bool print_stats = argli.GetBool("stats");
   bool print_one_line = argli.GetBool("one_line");
+  size_t n_values = static_cast<size_t>(argli.GetInt("n_values"));
 
-  OsmPbfReader reader(in_bpf, 16);
+  OsmPbfReader reader(in_bpf, argli.GetInt("n_threads"));
   reader.ReadFileStructure();
 
   uint64_t num_ways = 0;
   uint64_t num_relations = 0;
 
   if (!way_filter.empty()) {
-    FreqStats stats;
+    FreqStats stats = {.n_values = n_values};
     reader.ReadWays(
-        [&way_filter, &num_ways, print_entries, print_one_line, &stats](
+        [&way_filter, &num_ways, print_raw, print_one_line, &stats](
             const OSMTagHelper& tagh, const OSMPBF::Way& way, std::mutex& mut) {
           if (MatchFilters(tagh, way, way_filter, mut, &stats)) {
             num_ways++;
-            if (print_entries) {
+            if (print_raw) {
               RAW_LOG_F(INFO, "Way:\n%s\n",
                         tagh.GetLoggingStr(way, print_one_line).c_str());
             }
@@ -173,20 +213,23 @@ int main(int argc, char* argv[]) {
   }
 
   if (!relation_filter.empty()) {
-    FreqStats stats;
-    reader.ReadRelations([&relation_filter, &num_relations, print_entries,
+    FreqStats stats = {.n_values = n_values};
+    reader.ReadRelations([&relation_filter, &num_relations, print_raw,
                           print_one_line, &stats](const OSMTagHelper& tagh,
-                                            const OSMPBF::Relation& rel,
-                                            std::mutex& mut) {
+                                                  const OSMPBF::Relation& rel,
+                                                  std::mutex& mut) {
       if (MatchFilters(tagh, rel, relation_filter, mut, &stats)) {
         num_relations++;
         RAW_LOG_F(INFO, "Relation:\n%s\n",
                   tagh.GetLoggingStr(rel, print_one_line).c_str());
       }
     });
+    if (print_stats) {
+      PrintStats("Relations", stats);
+    }
   }
 
-  LOG_S(INFO) << absl::StrFormat("Finished (%u ways %u relations)", num_ways,
-                                 num_relations);
+  LOG_S(INFO) << absl::StrFormat("Finished (matched %u ways, %u relations)",
+                                 num_ways, num_relations);
   return 0;
 }

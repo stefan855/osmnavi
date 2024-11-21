@@ -117,7 +117,7 @@ class AStarRouter {
         const WaySharedAttrs& wsa = GetWSA(g_, way);
 
         // Is edge routable for the given vehicle type in the filter?
-        if (RoutableAccess(GetRAFromWSA(wsa, filter.vt,
+        if (!RoutableAccess(GetRAFromWSA(wsa, filter.vt,
                                         edge.contra_way == DIR_FORWARD
                                             ? DIR_FORWARD
                                             : DIR_BACKWARD)
@@ -139,7 +139,7 @@ class AStarRouter {
         if (vother.done) {
           continue;
         }
-        std::uint32_t new_metric = min_metric + metric.Compute(wsa, edge);
+        std::uint32_t new_metric = min_metric + metric.Compute(wsa, filter.vt, edge);
         if (new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
           vother.from_v_idx = qnode.visited_node_idx;
@@ -147,6 +147,7 @@ class AStarRouter {
           // Compute heuristic distance from new node to target.
           if (vother.heuristic_to_target == INF32) {
             // TODO: use country specific maxspeed.
+            // // TODO: support mexspeed for different vehicles.
             static const RoutingAttrs g_ra = {.access = ACC_YES,
                                               .maxspeed = 120};
             static const WaySharedAttrs g_wsa = {
@@ -154,6 +155,7 @@ class AStarRouter {
             const GNode& other_node = g_.nodes.at(edge.other_node_idx);
             vother.heuristic_to_target = metric.Compute(
                 g_wsa,
+                filter.vt,
                 {.distance_cm = static_cast<uint64_t>(
                      1.00 * calculate_distance(other_node.lat /* / 10000000.0*/,
                                                other_node.lon /* / 10000000.0*/,

@@ -57,6 +57,17 @@ class FrequencyTable {
     return result;
   }
 
+  // Return the maximum size of a key from the keys in 'v' in the range
+  // [0..n_pos-1].
+  static size_t MaxKeySize(const std::vector<Entry>& v, size_t n_top) {
+    size_t m = 0;
+    for (size_t i = 0; i < v.size() && i < n_top; ++i) {
+      m = std::max(m, v.at(i).key.size());
+
+    }
+    return m;
+  }
+
   // Total number of added elements, i.e. the sum of all frequencies in the
   // table.
   uint64_t Total() const { return added_; }

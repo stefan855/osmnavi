@@ -644,7 +644,9 @@ void ComputeShortestPathsInAllClusters(MetaData* meta) {
     ThreadPool pool;
     for (GCluster& cluster : meta->graph.clusters) {
       pool.AddWork([meta, &metric, &cluster](int) {
-        ComputeShortestClusterPaths(meta->graph, metric, &cluster);
+          // TODO: support the other vehicle types.
+        ComputeShortestClusterPaths(meta->graph, metric, VH_MOTOR_VEHICLE,
+                                    &cluster);
       });
     }
     // Faster with few threads only.
@@ -667,8 +669,7 @@ void ExecuteLouvain(const bool merge_tiny_clusters, MetaData* meta) {
   build_clusters::PrintClusterInformation(meta->graph);
   build_clusters::WriteLouvainGraph(meta->graph, "/tmp/louvain.csv");
 
-  // TODO: Compute separately for different vehicle types.
-  // ComputeShortestPathsInAllClusters(meta);
+  ComputeShortestPathsInAllClusters(meta);
 
 #if 0
   // Check if astar and dijkstra find the same shortest paths.

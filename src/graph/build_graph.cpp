@@ -298,7 +298,8 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   if (direction == DIR_MAX) {
     return;  // For instance wrong vehicle type or some tagging error.
   }
-
+  ra_forw.dir = IsDirForward(direction);
+  ra_backw.dir = IsDirBackward(direction);
   CarRoadSurface(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
 
   // Set access.
@@ -338,14 +339,14 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
                                          WaySharedAttrs* wsa) {
   RoutingAttrs ra_forw = wc.config_forw.dflt;
   RoutingAttrs ra_backw = wc.config_backw.dflt;
-  // ra_forw.maxspeed = 11;
-  // ra_backw.maxspeed = 11;
 
   const DIRECTION direction =
       BicycleRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.ptags);
   if (direction == DIR_MAX) {
     return;  // For instance wrong vehicle type or some tagging error.
   }
+  ra_forw.dir = IsDirForward(direction);
+  ra_backw.dir = IsDirBackward(direction);
 
   // Set access.
   BicycleAccess(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
@@ -451,7 +452,8 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   LogCountryConflict(rural, wc.way);
 
   WaySharedAttrs wsa;
-  memset(&wsa, 0, sizeof(wsa));
+  // Set all numbers to 0, enums to first value.
+  memset(&wsa.ra, 0, sizeof(wsa.ra));
   bool success = false;
 
   for (const VEHICLE vt : WaySharedAttrs::RA_VEHICLES) {

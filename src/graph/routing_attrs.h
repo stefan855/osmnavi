@@ -532,6 +532,7 @@ constexpr uint16_t INFINITE_MAXSPEED = 1023;  // 2^10 - 1
 constexpr uint16_t WALK_MAXSPEED = 7;
 
 struct alignas(2) RoutingAttrs {
+  uint8_t dir : 1;  // 1 if the direction of the road is allowed, 0 if not. 
   ACCESS access : 4;  // no, private, ...
   uint16_t maxspeed : 10;
   uint16_t lit : 1;
@@ -600,7 +601,8 @@ inline bool ParseNumericMaxspeed(std::string_view val,
 
 inline std::string RoutingAttrsDebugString(RoutingAttrs ra) {
   return absl::StrFormat(
-      "acc:%s maxsp:%u surface:%s tracktype:%s smoothness:%s",
+      "dir:%u acc:%s maxsp:%u surface:%s tracktype:%s smoothness:%s",
+      ra.dir,
       AccessToString(ra.access).substr(0, 4), ra.maxspeed,
       ra.surface < SURFACE_MAX ? SurfaceToString(ra.surface)
                                : absl::StrCat(ra.surface),

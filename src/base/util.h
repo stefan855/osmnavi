@@ -71,6 +71,22 @@ inline bool ConsumePrefixIf(std::string_view prefix, std::string_view* str) {
   return true;
 }
 
+inline std::string PadString(std::string_view str, size_t width,
+                             bool add_right = true) {
+  int needed = (int)width - (int)str.size();
+  if (needed <= 0) return std::string(str);
+
+  std::string res;
+  if (add_right) {
+    res = str;
+    res.append(needed, ' ');
+  } else {
+    res.append(needed, ' ');
+    res.append(str);
+  }
+  return res;
+}
+
 inline std::string WildCardToRegex(const std::string& wildcard) {
   static const std::string escape_chars = "\\$()*+.?[]^{|}";
   std::string result;

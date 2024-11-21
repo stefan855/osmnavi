@@ -43,7 +43,7 @@ inline bool HasCyclewayOppositeTag(const OSMTagHelper& tagh,
                                      GetBitMask(KEY_BIT_RIGHT);
   for (const ParsedTag& pt : ptags) {
     if (pt.first == KEY_BIT_CYCLEWAY &&
-        BitsetIncludedIn(pt.bits, cycleway_bits)) {
+        BitsetContainedIn(pt.bits, cycleway_bits)) {
       if (absl::StartsWith(tagh.ToString(pt.val_st_idx), "opposite")) {
         return true;
       }
@@ -78,7 +78,7 @@ inline DIRECTION CarRoadDirection(const OSMTagHelper& tagh,
   DIRECTION dir = DefaultDirection(tagh, hw, ptags);
   for (const ParsedTag& pt : ptags) {
     if (pt.first == KEY_BIT_ONEWAY) {
-      if (BitsetIncludedIn(pt.bits, selector_bits)) {
+      if (BitsetContainedIn(pt.bits, selector_bits)) {
         dir = ExtractOnewayValue(tagh.ToString(pt.val_st_idx));
       }
     }
@@ -122,7 +122,7 @@ inline DIRECTION BicycleRoadDirection(const OSMTagHelper& tagh,
   DIRECTION dir = DefaultDirection(tagh, hw, ptags);
   for (const ParsedTag& pt : ptags) {
     if (pt.first == KEY_BIT_ONEWAY) {
-      if (BitsetIncludedIn(pt.bits, selector_bits)) {
+      if (BitsetContainedIn(pt.bits, selector_bits)) {
         dir = ExtractOnewayValue(tagh.ToString(pt.val_st_idx));
       }
     }

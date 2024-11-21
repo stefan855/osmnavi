@@ -109,8 +109,15 @@ constexpr uint64_t GetBitMask(uint8_t bit, uint8_t bit2, uint8_t bit3,
 constexpr bool BitIsContained(uint8_t bit, uint64_t bitset) {
   return (bitset & GetBitMask(bit)) != 0;
 }
-constexpr bool BitsetIncludedIn(uint64_t bitset, uint64_t large_set) {
+constexpr bool BitsetContainedIn(uint64_t bitset, uint64_t large_set) {
   return (bitset & large_set) == bitset;
+}
+constexpr bool BitsetsOverlap(uint64_t bitset1, uint64_t bitset2) {
+  return (bitset1 & bitset2) != 0;
+}
+
+constexpr uint64_t BitsetUnion(uint64_t bitset1, uint64_t bitset2) {
+  return (bitset1 | bitset2);
 }
 
 constexpr uint64_t BITSET_VEHICLES =
