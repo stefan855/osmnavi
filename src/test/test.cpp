@@ -16,15 +16,15 @@
 #include "geometry/distance.h"
 #include "geometry/line_clipping.h"
 #include "geometry/polygon.h"
-#include "graph/access.h"
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
-#include "graph/maxspeed.h"
-#include "graph/oneway.h"
 #include "graph/routing_config.h"
+#include "osm/access.h"
 #include "osm/admin_boundary.h"
 #include "osm/key_bits.h"
+#include "osm/maxspeed.h"
+#include "osm/oneway.h"
 #include "osm/osm_helpers.h"
 
 struct OsmWayWrapper {

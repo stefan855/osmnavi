@@ -7,17 +7,17 @@
 #include "base/huge_bitset.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"
-#include "graph/access.h"
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
-#include "graph/maxspeed.h"
-#include "graph/oneway.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
-#include "graph/surface.h"
+#include "osm/access.h"
 #include "osm/key_bits.h"
+#include "osm/maxspeed.h"
+#include "osm/oneway.h"
 #include "osm/osm_helpers.h"
+#include "osm/surface.h"
 
 namespace build_graph {
 

@@ -71,6 +71,8 @@ inline bool ConsumePrefixIf(std::string_view prefix, std::string_view* str) {
   return true;
 }
 
+// Add space characters to the right or the left of a string to make it 'width'
+// characters wide.
 inline std::string PadString(std::string_view str, size_t width,
                              bool add_right = true) {
   int needed = (int)width - (int)str.size();

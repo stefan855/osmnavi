@@ -90,6 +90,10 @@ inline DIRECTION CarRoadDirection(const OSMTagHelper& tagh,
 // Does not find out if bicycles have access, i.e. "oneway=no
 // access:bicycle=no" yields that both directions are possible.
 //
+// Complicated cases:
+// 461917749  cycleway:left:oneway=no cycleway:right=no
+//
+//
 // 9428840:   oneway:bicycle=no ## oneway:psv=no ## oneway=yes
 // 684582393: cycleway:left=opposite_lane ## highway=residential ##
 //            maxspeed=30 ## oneway:bicycle=no ## oneway=yes ##
