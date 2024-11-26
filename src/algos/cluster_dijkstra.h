@@ -67,11 +67,8 @@ void CollectClusterEdges(
 
       // Check if vt is routable on this edge.
       const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
-      if (!RoutableAccess(GetRAFromWSA(wsa, vt,
-                                       edge.contra_way == DIR_FORWARD
-                                           ? DIR_FORWARD
-                                           : DIR_BACKWARD)
-                              .access)) {
+      if (!RoutableAccess(
+              GetRAFromWSA(wsa, vt, EDGE_DIR(edge)).access)) {
         continue;
       }
 
@@ -90,7 +87,7 @@ void CollectClusterEdges(
       }
 
       full_edges->push_back(
-          {mini_idx, other_idx, metric.Compute(wsa, vt, edge)});
+          {mini_idx, other_idx, metric.Compute(wsa, vt, EDGE_DIR(edge), edge)});
     }
   }
   // TODO: nodemap.size() is sometimes smaller than cluster.num_nodes.
@@ -215,10 +212,12 @@ void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
                                          &full_edges);
   const auto prev_edges_size = full_edges.size();
   cluster_all_paths::SortAndCleanupEdges(&full_edges);
+#if 0
   LOG_S(INFO) << absl::StrFormat(
       "Cluster:%u removed %u dups from edges array size:%u",
       cluster->cluster_id, prev_edges_size - full_edges.size(),
       prev_edges_size);
+#endif
   const CompactDirectedGraph cg(num_nodes, full_edges);
   cg.LogStats();
   for (size_t border_node = 0; border_node < cluster->border_nodes.size();

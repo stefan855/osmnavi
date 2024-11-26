@@ -43,12 +43,12 @@
 namespace build_graph {
 
 void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
-             const bool out, const bool contra_way, const size_t way_idx,
-             const std::uint64_t distance_cm) {
+             const bool out, const bool contra_way, const bool both_directions,
+             const size_t way_idx, const std::uint64_t distance_cm) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
   GEdge* edges = out ? n.edges : n.edges + n.num_edges_out;
-  size_t num_edges = out ? n.num_edges_out : n.num_edges_in;
+  size_t num_edges = out ? n.num_edges_out : n.num_edges_inverted;
   for (size_t pos = 0; pos < num_edges; ++pos) {
     // Unused edges are marked with 'other_node_idx == INFU32'.
     if (edges[pos].other_node_idx == INFU32) {
@@ -58,7 +58,9 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
       edges[pos].distance_cm = distance_cm;
       edges[pos].unique_other = 0;
       edges[pos].bridge = 0;
+      edges[pos].to_bridge = 0;
       edges[pos].contra_way = contra_way ? 1 : 0;
+      edges[pos].both_directions = both_directions ? 1 : 0;
       edges[pos].cross_country = n.ncc != other.ncc;
       return;
     }
@@ -72,7 +74,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
 
 void MarkUniqueOther(GNode* n) {
   GEdge* edges = n->edges;
-  for (size_t i = 0; i < gnode_num_edges(*n); ++i) {
+  for (size_t i = 0; i < gnode_total_edges(*n); ++i) {
     size_t k = 0;
     while (k < i) {
       if (edges[i].other_node_idx == edges[k].other_node_idx) {
@@ -156,7 +158,9 @@ void ApplyTarjan(Graph& g, MetaData* meta) {
   for (const Graph::Component& comp : g.large_components) {
     bridges.clear();
     t.FindBridges(comp, &bridges);
-    // Sort bridges in descending order of subtrees.
+    // Sort bridges in descending order of subtrees. If a dead-end contains
+    // other, smaller dead-ends, then only the dead-end with the largest subtree
+    // is actually used.
     std::sort(bridges.begin(), bridges.end(),
               [](const Tarjan::BridgeInfo& a, const Tarjan::BridgeInfo& b) {
                 return a.subtree_size > b.subtree_size;
@@ -205,6 +209,35 @@ void TestRoute(const Graph& g) {
         }
       }
       {
+        DijkstraRouter router(g);
+        auto result = router.Route(start_idx, target_idx, RoutingMetricTime());
+        if (result.found) {
+          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
+        } else {
+          LOG_S(INFO) << "failed to find dijkstra route!";
+        }
+      }
+      {
+        DijkstraRouter router(g);
+        DijkstraRouter::Filter filt = DijkstraRouter::standard_filter;
+        filt.inverse_search = true;
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricDistance(), filt);
+        if (!result.found) {
+          LOG_S(INFO) << "failed to find dijkstra route!";
+        }
+      }
+      {
+        DijkstraRouter router(g);
+        DijkstraRouter::Filter filt = DijkstraRouter::standard_filter;
+        filt.inverse_search = true;
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricTime(), filt);
+        if (!result.found) {
+          LOG_S(INFO) << "failed to find dijkstra route!";
+        }
+      }
+      {
         AStarRouter router(g);
         auto result =
             router.Route(start_idx, target_idx, RoutingMetricDistance());
@@ -223,8 +256,79 @@ void TestRoute(const Graph& g) {
           LOG_S(INFO) << "failed to find astar route!";
         }
       }
+
+      {
+        AStarRouter router(g);
+        AStarRouter::Filter filt = AStarRouter::standard_filter;
+        filt.inverse_search = true;
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricDistance(), filt);
+        if (!result.found) {
+          LOG_S(INFO) << "failed to find astar route!";
+        }
+      }
+      {
+        AStarRouter router(g);
+        AStarRouter::Filter filt = AStarRouter::standard_filter;
+        filt.inverse_search = true;
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricTime(), filt);
+        if (!result.found) {
+          LOG_S(INFO) << "failed to find astar route!";
+        }
+      }
     }
   }
+  if (true) {
+    // Ackerstrasse Uster (deadend)
+    std::uint32_t start_idx = g.FindNodeIndex(3108534441);
+    // Mürtschenweg Weesen (deadend)
+    std::uint32_t target_idx = g.FindNodeIndex(3019156898);
+    LOG_S(INFO) << "=======================================================";
+    LOG_S(INFO) << "Route from Uster ZH (3108534441) to Weesen (3019156898)";
+    if (start_idx >= g.nodes.size() || target_idx >= g.nodes.size()) {
+      LOG_S(INFO) << absl::StrFormat("failed to find end points", start_idx,
+                                     target_idx);
+    } else {
+      {
+        AStarRouter router(g);
+
+        AStarRouter::Filter filt = AStarRouter::standard_filter;
+        filt.MayFillBridgeNodeId(g, target_idx);
+        auto result =
+            router.Route(start_idx, target_idx, RoutingMetricTime(), filt);
+        if (result.found) {
+          router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
+        }
+      }
+    }
+  }
+}
+
+std::uint32_t RandomNodeIdx(const Graph& g) {
+  std::uint32_t pos = INFU32;
+  do {
+    pos = rand() % g.nodes.size();
+  } while (!g.nodes.at(pos).large_component);
+  return pos;
+}
+
+void RandomShortestPaths(const Graph& g) {
+  FUNC_TIMER();
+  std::srand(1);  // Get always the same pseudo-random numbers.
+  ThreadPool pool;
+  for (int i = 0; i < 10000; ++i) {
+    uint32_t start = RandomNodeIdx(g);
+    uint32_t target = RandomNodeIdx(g);
+    pool.AddWork([&g, start, target](int thread_idx) {
+      AStarRouter router(g);
+      AStarRouter::Filter filt = AStarRouter::standard_filter;
+      filt.MayFillBridgeNodeId(g, target);
+      auto result = router.Route(start, target, RoutingMetricTime(), filt);
+    });
+  }
+  pool.Start(23);
+  pool.WaitAllFinished();
 }
 
 namespace {
@@ -369,7 +473,7 @@ void AllocateGNodes(MetaData* meta) {
       snode.node_id = node->id;
       snode.lat = node->lat;
       snode.lon = node->lon;
-      snode.num_edges_in = 0;
+      snode.num_edges_inverted = 0;
       snode.num_edges_out = 0;
       snode.dead_end = 0;
       snode.large_component = 0;
@@ -410,10 +514,10 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
             graph.nodes.at(idx).num_edges_out++;
           } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
             graph.nodes.at(prev_idx).num_edges_out++;
-            graph.nodes.at(idx).num_edges_in++;
+            graph.nodes.at(idx).num_edges_inverted++;
           } else {
             CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
-            graph.nodes.at(prev_idx).num_edges_in++;
+            graph.nodes.at(prev_idx).num_edges_inverted++;
             graph.nodes.at(idx).num_edges_out++;
           }
 #if 0
@@ -423,10 +527,10 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
             graph.nodes.at(idx).num_edges_out++;
           } else if (RoutableForward(graph, way, VH_MOTOR_VEHICLE)) {
             graph.nodes.at(prev_idx).num_edges_out++;
-            graph.nodes.at(idx).num_edges_in++;
+            graph.nodes.at(idx).num_edges_inverted++;
           } else {
             CHECK_S(RoutableBackward(graph, way, VH_MOTOR_VEHICLE)) << way.id;
-            graph.nodes.at(prev_idx).num_edges_in++;
+            graph.nodes.at(prev_idx).num_edges_inverted++;
             graph.nodes.at(idx).num_edges_out++;
           }
 #endif
@@ -458,7 +562,7 @@ void AllocateEdgeArrays(MetaData* meta) {
   FUNC_TIMER();
   Graph& graph = meta->graph;
   for (GNode& n : meta->graph.nodes) {
-    const std::uint32_t num_edges = gnode_num_edges(n);
+    const std::uint32_t num_edges = gnode_total_edges(n);
     CHECK_GT_S(num_edges, 0u);
     if (num_edges > 0) {
       n.edges = (GEdge*)meta->graph.aligned_pool_.AllocBytes(num_edges *
@@ -538,20 +642,20 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos, MetaData* meta,
             if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
                 WSAAnyRoutable(wsa, DIR_BACKWARD)) {
               AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
-                      way_idx, distance_cm);
+                      /*both_directions=*/true, way_idx, distance_cm);
               AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
-                      way_idx, distance_cm);
+                      /*both_directions=*/true, way_idx, distance_cm);
             } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
               AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
-                      way_idx, distance_cm);
-              AddEdge(graph, idx2, idx1, /*out=*/false, /*contra_way=*/false,
-                      way_idx, distance_cm);
+                      /*both_directions=*/false, way_idx, distance_cm);
+              AddEdge(graph, idx2, idx1, /*out=*/false, /*contra_way=*/true,
+                      /*both_directions=*/false, way_idx, distance_cm);
             } else {
               CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
               AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
-                      way_idx, distance_cm);
-              AddEdge(graph, idx1, idx2, /*out=*/false, /*contra_way=*/true,
-                      way_idx, distance_cm);
+                      /*both_directions=*/false, way_idx, distance_cm);
+              AddEdge(graph, idx1, idx2, /*out=*/false, /*contra_way=*/false,
+                      /*both_directions=*/false, way_idx, distance_cm);
             }
           }
           last_pos = pos;
@@ -644,7 +748,7 @@ void ComputeShortestPathsInAllClusters(MetaData* meta) {
     ThreadPool pool;
     for (GCluster& cluster : meta->graph.clusters) {
       pool.AddWork([meta, &metric, &cluster](int) {
-          // TODO: support the other vehicle types.
+        // TODO: support the other vehicle types.
         ComputeShortestClusterPaths(meta->graph, metric, VH_MOTOR_VEHICLE,
                                     &cluster);
       });
@@ -791,18 +895,23 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
                                  way_bytes + way_added_bytes);
 
-  size_t num_edges_in = 0;
+  size_t num_edges_inverted = 0;
   size_t num_edges_out = 0;
   size_t num_non_unique_edges = 0;
   size_t num_no_country = 0;
-  size_t max_edges_in = 0;
+  size_t max_edges_inverted = 0;
   size_t max_edges_out = 0;
   size_t node_in_cluster = 0;
   size_t node_in_small_component = 0;
-  for (const GNode& n : graph.nodes) {
-    num_edges_in += n.num_edges_in;
+  size_t min_edge_length_cm = INFU64;
+  size_t max_edge_length_cm = 0;
+  uint64_t sum_edge_length_cm = 0;
+  for (size_t node_idx = 0; node_idx < graph.nodes.size(); ++node_idx) {
+    const GNode& n = graph.nodes.at(node_idx);
+    num_edges_inverted += n.num_edges_inverted;
     num_edges_out += n.num_edges_out;
-    max_edges_in = std::max((uint64_t)n.num_edges_in, max_edges_in);
+    max_edges_inverted =
+        std::max((uint64_t)n.num_edges_inverted, max_edges_inverted);
     max_edges_out = std::max((uint64_t)n.num_edges_out, max_edges_out);
     if (n.cluster_id != INVALID_CLUSTER_ID) {
       node_in_cluster++;
@@ -810,9 +919,23 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
     if (n.large_component == 0) {
       node_in_small_component++;
     }
-    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
-      if (!n.edges[edge_pos].unique_other) {
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
+      const GEdge& edge = n.edges[edge_pos];
+      if (!edge.unique_other) {
         num_non_unique_edges++;
+      }
+      if (edge_pos < n.num_edges_out && edge.other_node_idx != node_idx) {
+        sum_edge_length_cm += edge.distance_cm;
+        if (edge.distance_cm == 0) {
+          LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
+                      << graph.nodes.at(edge.other_node_idx).node_id;
+        }
+        if (edge.distance_cm < min_edge_length_cm) {
+          min_edge_length_cm = edge.distance_cm;
+        }
+        if (edge.distance_cm > max_edge_length_cm) {
+          max_edge_length_cm = edge.distance_cm;
+        }
       }
     }
     num_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
@@ -821,14 +944,25 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld",
                                  graph.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld", num_edges_out);
-  LOG_S(INFO) << absl::StrFormat("  Num edges in:     %12lld", num_edges_in);
+  LOG_S(INFO) << absl::StrFormat("  Num edges inverted: %10lld",
+                                 num_edges_inverted);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  num_non_unique_edges);
+
+  LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
+                                 min_edge_length_cm);
+  LOG_S(INFO) << absl::StrFormat("  Max edge length:  %12lld",
+                                 max_edge_length_cm);
+  LOG_S(INFO) << absl::StrFormat("  Avg edge length   %12.0f",
+                                 (double)sum_edge_length_cm / num_edges_out);
+
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node:   %12.2f",
-      static_cast<double>(num_edges_in + num_edges_out) / graph.nodes.size());
+      static_cast<double>(num_edges_inverted + num_edges_out) /
+          graph.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld", max_edges_out);
-  LOG_S(INFO) << absl::StrFormat("  Max edges in:     %12lld", max_edges_in);
+  LOG_S(INFO) << absl::StrFormat("  Max edges inverted: %10lld",
+                                 max_edges_inverted);
   LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  meta.stats.num_cross_country_edges);
   LOG_S(INFO) << absl::StrFormat("  Num no country:   %12lld", num_no_country);
@@ -979,7 +1113,10 @@ void DoIt(const Argli& argli) {
 
   FindLargeComponents(&meta.graph);
   ApplyTarjan(meta.graph, &meta);
+
   TestRoute(meta.graph);
+  RandomShortestPaths(meta.graph);
+
   ExecuteLouvain(merge_tiny_clusters, &meta);
 
   // Output.

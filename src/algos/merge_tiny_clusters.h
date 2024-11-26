@@ -110,7 +110,7 @@ void CheckCrossEdges(const WorkData& wd, std::uint32_t cluster_id) {
   for (uint32_t node_idx : c.border_nodes) {
     const GNode& n = wd.g.nodes.at(node_idx);
     uint32_t r_cluster_id = GetRedirectedClusterId(wd, n);
-    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
       const GEdge& e = n.edges[edge_pos];
       if (!e.unique_other || e.bridge) {
         continue;
@@ -177,7 +177,7 @@ void MayAddEdgeToWorkQueue(const GEdge& e, const GNode& n1, const GNode& n2,
 void AddClusterBorderEdges(const GCluster& c, WorkData* wd) {
   for (uint32_t node_idx : c.border_nodes) {
     const GNode& n = wd->g.nodes.at(node_idx);
-    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
       const GEdge& e = n.edges[edge_pos];
       MayAddEdgeToWorkQueue(e, n, wd->g.nodes.at(e.other_node_idx), wd);
     }
@@ -214,7 +214,7 @@ void MayMergeCluster(const CrossEdge& ce, WorkData* wd) {
     CHECK_EQ_S(GetRedirectedClusterId(*wd, n), large_cl.cluster_id);
 
     // Iterate edges and add eligible ones to work queue.
-    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
       const GEdge& e = n.edges[edge_pos];
       if (!e.unique_other || e.bridge) {
         continue;

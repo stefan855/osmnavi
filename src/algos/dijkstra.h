@@ -1,9 +1,11 @@
 #pragma once
 
+#include <deque>
 #include <fstream>
 #include <queue>
 #include <vector>
 
+#include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "algos/routing_metric.h"
 #include "base/constants.h"
@@ -32,11 +34,13 @@ class DijkstraRouter {
     VEHICLE vt;
     bool avoid_dead_end;
     bool restrict_to_cluster;
+    bool inverse_search;
     std::uint32_t cluster_id;
   };
   static constexpr Filter standard_filter = {.vt = VH_MOTOR_VEHICLE,
                                              .avoid_dead_end = true,
                                              .restrict_to_cluster = false,
+                                             .inverse_search = false,
                                              .cluster_id = INFU32};
 
   struct Result {
@@ -59,7 +63,9 @@ class DijkstraRouter {
                const Filter filter = standard_filter) {
     if (verbose_) {
       LOG_S(INFO) << "Start routing from " << start_idx << " to " << target_idx
-                  << " (Dijkstra, " << metric.Name() << ")";
+                  << " (Dijkstra, " << metric.Name() << ")"
+                  << (filter.inverse_search ? " backward search"
+                                            : " forward search");
     }
     Clear();
     std::uint32_t start_v_idx = FindOrAddVisitedNode(start_idx);
@@ -106,44 +112,11 @@ class DijkstraRouter {
         return result;
       }
 
-      // Search neighbours.
-      const GNode& node = g_.nodes.at(vnode.node_idx);
-      const std::uint32_t min_metric = vnode.min_metric;
-      // TODO: Do not use 'vnode' after this line, because
-      // FindOrAddVisitedNode() in the loop below might invalidate it.
-      for (size_t i = 0; i < node.num_edges_out; ++i) {
-        const GEdge& edge = node.edges[i];
-        const GWay& way = g_.ways.at(edge.way_idx);
-        const WaySharedAttrs& wsa = GetWSA(g_, way);
-
-        if (!RoutableAccess(GetRAFromWSA(wsa, filter.vt,
-                                        edge.contra_way == DIR_FORWARD
-                                            ? DIR_FORWARD
-                                            : DIR_BACKWARD)
-                               .access)) {
-          continue;
-        }
-
-        // Even if we want to avoid dead ends, still allow to leave a dead end
-        // but not *entering* one. This way, the start node can reside in a dead
-        // end and routing still works. To achieve this behavior, we allow to
-        // pass a bridge only when leaving a dead end.
-        if (filter.avoid_dead_end && edge.bridge && !node.dead_end) {
-          continue;
-        }
-        if (filter.restrict_to_cluster &&
-            g_.nodes.at(edge.other_node_idx).cluster_id != filter.cluster_id) {
-          continue;
-        }
-        std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx);
-        VisitedNode& vother = visited_nodes_.at(v_idx);
-        std::uint32_t new_metric =
-            min_metric + metric.Compute(wsa, filter.vt, edge);
-        if (!vother.done && new_metric < vother.min_metric) {
-          vother.min_metric = new_metric;
-          vother.from_v_idx = qnode.visited_node_idx;
-          pq_.emplace(new_metric, v_idx);
-        }
+      if (!filter.inverse_search) {
+        ExpandNeighbours(qnode, metric, filter, g_.nodes.at(vnode.node_idx));
+      } else {
+        InverseExpandNeighbours(qnode, metric, filter,
+                                g_.nodes.at(vnode.node_idx));
       }
     }
     if (verbose_) {
@@ -184,6 +157,7 @@ class DijkstraRouter {
     return left.metric > right.metric;
   }
 
+#if 0
   std::uint32_t FindOrAddVisitedNode(std::uint32_t node_idx) {
     auto iter = node_to_vnode_idx_.find(node_idx);
     if (iter != node_to_vnode_idx_.end()) {
@@ -193,6 +167,18 @@ class DijkstraRouter {
     node_to_vnode_idx_[node_idx] = visited_nodes_.size() - 1;
     return visited_nodes_.size() - 1;
   }
+#endif
+  std::uint32_t FindOrAddVisitedNode(std::uint32_t node_idx) {
+    // Prevent doing two lookups by following
+    // https://stackoverflow.com/questions/1409454.
+    const auto iter = node_to_vnode_idx_.insert(
+        NodeIdMap::value_type(node_idx, visited_nodes_.size()));
+    if (iter.second) {
+      // Key didn't exist and was inserted, so add it to visited_nodes_ too.
+      visited_nodes_.emplace_back(node_idx, INF, INF, 0, 0);
+    }
+    return iter.first->second;
+  }
 
   void Clear() {
     visited_nodes_.clear();
@@ -201,9 +187,86 @@ class DijkstraRouter {
     target_visited_node_index_ = INFU32;
   }
 
+  void ExpandNeighbours(const QueuedNode& qnode, const RoutingMetric& metric,
+                        const Filter& filter, const GNode& node) {
+    for (size_t i = 0; i < node.num_edges_out; ++i) {
+      const GEdge& edge = node.edges[i];
+
+      // Even if we want to avoid dead ends, still allow to leave a dead end
+      // but not *entering* one. This way, the start node can reside in a dead
+      // end and routing still works. To achieve this behavior, we allow to
+      // pass a bridge only when leaving a dead end.
+      if (edge.bridge && filter.avoid_dead_end && !node.dead_end) {
+        continue;
+      }
+      if (filter.restrict_to_cluster &&
+          g_.nodes.at(edge.other_node_idx).cluster_id != filter.cluster_id) {
+        continue;
+      }
+
+      const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
+      if (!RoutableAccess(
+              GetRAFromWSA(wsa, filter.vt, EDGE_DIR(edge)).access)) {
+        continue;
+      }
+
+      std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx);
+      VisitedNode& vother = visited_nodes_.at(v_idx);
+      std::uint32_t new_metric =
+          qnode.metric + metric.Compute(wsa, filter.vt, EDGE_DIR(edge), edge);
+      if (!vother.done && new_metric < vother.min_metric) {
+        vother.min_metric = new_metric;
+        vother.from_v_idx = qnode.visited_node_idx;
+        pq_.emplace(new_metric, v_idx);
+      }
+    }
+  }
+
+  void InverseExpandNeighbours(const QueuedNode& qnode,
+                               const RoutingMetric& metric,
+                               const Filter& filter, const GNode& node) {
+    for (size_t i = 0; i < gnode_total_edges(node); ++i) {
+      const GEdge& edge = node.edges[i];
+      // Skip edges that are forward only.
+      if (i < node.num_edges_out && !edge.both_directions) {
+        continue;
+      }
+
+      // Even if we want to avoid dead ends, still allow to leave a dead end
+      // but not *entering* one. This way, the start node can reside in a dead
+      // end and routing still works. To achieve this behavior, we allow to
+      // pass a bridge only when leaving a dead end.
+      if (edge.bridge && filter.avoid_dead_end && !node.dead_end) {
+        continue;
+      }
+      if (filter.restrict_to_cluster &&
+          g_.nodes.at(edge.other_node_idx).cluster_id != filter.cluster_id) {
+        continue;
+      }
+
+      const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
+      if (!RoutableAccess(
+              GetRAFromWSA(wsa, filter.vt, EDGE_INVERSE_DIR(edge)).access)) {
+        continue;
+      }
+
+      std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx);
+      VisitedNode& vother = visited_nodes_.at(v_idx);
+      std::uint32_t new_metric =
+          qnode.metric +
+          metric.Compute(wsa, filter.vt, EDGE_INVERSE_DIR(edge), edge);
+      if (!vother.done && new_metric < vother.min_metric) {
+        vother.min_metric = new_metric;
+        vother.from_v_idx = qnode.visited_node_idx;
+        pq_.emplace(new_metric, v_idx);
+      }
+    }
+  }
+
   const Graph& g_;
-  std::vector<VisitedNode> visited_nodes_;
-  absl::flat_hash_map<uint32_t, uint32_t> node_to_vnode_idx_;
+  std::deque<VisitedNode> visited_nodes_;
+  typedef absl::flat_hash_map<uint32_t, uint32_t> NodeIdMap;
+  NodeIdMap node_to_vnode_idx_;
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, decltype(&MetricCmp)>
       pq_;
   std::uint32_t target_visited_node_index_;

@@ -8,7 +8,7 @@
 #include "graph/graph_def.h"
 
 // This is a compacted view on the nodes and edges of a cluster, with a weight
-// for every edge. The nodes in the mini graph have ids 0..num_nodes()-1.
+// for every edge. The nodes in the graph have ids 0..num_nodes()-1.
 class CompactDirectedGraph {
  public:
   struct FullEdge {
@@ -32,7 +32,7 @@ class CompactDirectedGraph {
     BuildGraph(full_edges);
   }
 
-  // Return the number of nodes in the mini graph. Ids are 0..num_nodes()-1.
+  // Return the number of nodes in the graph. Ids are 0..num_nodes()-1.
   // The ids 0..cluster.border_nodes.size()-1 represent the border nodes.
   uint32_t num_nodes() const { return num_nodes_; }
 
@@ -53,12 +53,14 @@ class CompactDirectedGraph {
       if (e.weight < min_weight) min_weight = e.weight;
       if (e.weight > max_weight) max_weight = e.weight;
     }
+#if 0
     LOG_S(INFO) << absl::StrFormat(
         "CompactGraph #nodes:%u #edges:%u mem:%u weight=[%u,%u]",
         edges_start_.size() - 1, edges_.size(),
         edges_start_.size() * sizeof(uint32_t) +
             edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
         min_weight, max_weight);
+#endif
   }
 
  private:

@@ -190,7 +190,7 @@ class OsmPbfReader {
     CheckSortOrder(ContentWays);
   }
 
-  // Call 'worker_func' for each way in the pbf file. Uses multiple
+  // Call 'worker_func' for each node in the pbf file. Uses multiple
   // threads, so you might have to synchronize access to global data from your
   // worker_func.
   void ReadNodes(NodeWorkerFunc worker_func) {

@@ -468,7 +468,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     if (vt == VH_MOTOR_VEHICLE) {
       ComputeCarWayRoutingData(tagh, wc, &wsa);
     } else if (vt == VH_BICYCLE) {
-      ComputeBicycleWayRoutingData(tagh, wc, &wsa);
+      // ComputeBicycleWayRoutingData(tagh, wc, &wsa);
     } else if (vt == VH_FOOT) {
       // TODO
     } else {

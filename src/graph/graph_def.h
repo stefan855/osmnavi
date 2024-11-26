@@ -101,7 +101,7 @@ struct GEdge;
 struct GNode {
   std::int64_t node_id : 40;
   std::uint32_t num_edges_out : 11;
-  std::uint32_t num_edges_in : 11;  // Is one byte actually enough?
+  std::uint32_t num_edges_inverted : 11;  // Is one byte actually enough?
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
   // node outside of this dead end have to pass through the bridge edge.
@@ -122,11 +122,11 @@ struct GNode {
 
   std::int32_t lat = 0;
   std::int32_t lon = 0;
-  GEdge* edges;  // Array of length 'num_edges_out + num_edges_in'.
+  GEdge* edges;  // Array of length 'num_edges_out + num_edges_inverted'.
 };
 
-inline size_t gnode_num_edges(const GNode& n) {
-  return n.num_edges_out + n.num_edges_in;
+inline size_t gnode_total_edges(const GNode& n) {
+  return n.num_edges_out + n.num_edges_inverted;
 }
 
 struct GEdge {
@@ -144,14 +144,25 @@ struct GEdge {
   // to 0 for all nodes.
   // Note: Only bridges connect dead-end with non-dead-end nodes.
   std::uint64_t bridge : 1;
-  // DIR_FORWARD (==0) or DIR_BACKWARD (==1), to indicate the direction of the
-  // edge relative to the direction of the way. Is not typed 'DIRECTION' because
-  // it can not hold all values of that enum. Important for example when
-  // selecting forward/backward speed.
+  // Each node in a dead and has at least one edge that is marked 'to_bridge' or
+  // 'bridge', i.e. by following edges with 'to_bridge==1' the bridge can be
+  // found with a simple iteration instead of some thing more expensive such as
+  // a BFS.
+  std::uint64_t to_bridge : 1;
+  // DIR_FORWARD (==0) or DIR_BACKWARD (==1), to indicate the
+  // direction of the edge relative to the direction of the way. Is not typed
+  // 'DIRECTION' because it can not hold all values of that enum. Important for
+  // example when selecting forward/backward speed.
   std::uint64_t contra_way : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
   std::uint64_t cross_country : 1;
+  // True if the edge represents a way that enables both directions for at least
+  // one vehicle. In this case, there are two out edges at both end nodes.
+  // If false, then the way only enables one direction, and the other direction
+  // is represented by an inverted edge at the other node.
+  // Inverted edges always have false as value.
+  std::uint64_t both_directions : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -177,7 +188,7 @@ struct Graph {
     uint32_t size;
   };
 
-  static constexpr uint32_t kLargeComponentMinSize = 10000;
+  static constexpr uint32_t kLargeComponentMinSize = 20000;
 
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<GWay> ways;
@@ -247,8 +258,8 @@ struct Graph {
   }
 };
 
-inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_id) {
-  return g.way_shared_attrs.at(g.ways.at(way_id).wsa_id);
+inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_idx) {
+  return g.way_shared_attrs.at(g.ways.at(way_idx).wsa_id);
 }
 
 inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
@@ -261,20 +272,22 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
 // not valid.
 inline uint32_t RAinWSAIndex(VEHICLE vt, DIRECTION dir) {
   const uint32_t pos = vt * 2 + dir;
-  CHECK_LE_S(vt, VH_FOOT);  //   VH_MOTOR_VEHICLE, VH_BICYCLE, VH_FOOT,
   CHECK_LT_S(dir, 2);
   CHECK_LT_S(pos, WaySharedAttrs::RA_MAX);
   return pos;
 }
+
+#define EDGE_DIR(edge) ((DIRECTION)edge.contra_way)
+#define EDGE_INVERSE_DIR(edge) ((DIRECTION)(1 - edge.contra_way))
 
 inline RoutingAttrs GetRAFromWSA(const WaySharedAttrs& wsa, VEHICLE vt,
                                  DIRECTION dir) {
   return wsa.ra[RAinWSAIndex(vt, dir)];
 }
 
-inline RoutingAttrs GetRAFromWSA(const Graph& g, uint32_t way_id, VEHICLE vt,
+inline RoutingAttrs GetRAFromWSA(const Graph& g, uint32_t way_idx, VEHICLE vt,
                                  DIRECTION dir) {
-  return GetRAFromWSA(GetWSA(g, way_id), vt, dir);
+  return GetRAFromWSA(GetWSA(g, way_idx), vt, dir);
 }
 
 inline RoutingAttrs GetRAFromWSA(const Graph& g, const GWay& way, VEHICLE vt,

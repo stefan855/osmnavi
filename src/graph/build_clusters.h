@@ -45,7 +45,7 @@ inline TGVec CreateInitalLouvainGraph(const Graph& graph,
   for (auto [np, louvain_pos] : np_to_louvain_pos) {
     g->AddNode(louvain_pos, np);
     const GNode& n = graph.nodes.at(np);
-    for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
+    for (size_t ep = 0; ep < gnode_total_edges(n); ++ep) {
       const GEdge& e = n.edges[ep];
       const GNode& other = graph.nodes.at(e.other_node_idx);
 
@@ -183,7 +183,7 @@ void ExecuteLouvainStages(int n_threads, Graph* graph) {
   for (uint32_t np = 0; np < graph->nodes.size(); ++np) {
     const GNode& n = graph->nodes.at(np);
     if (EligibleNodeForLouvain(n)) {
-      for (size_t ep = 0; ep < gnode_num_edges(n); ++ep) {
+      for (size_t ep = 0; ep < gnode_total_edges(n); ++ep) {
         const GEdge& e = n.edges[ep];
         // Check if this edge is in the louvain graph.
         if (e.unique_other && e.other_node_idx != np &&
@@ -232,7 +232,7 @@ void UpdateGraphClusterInformation(Graph* g) {
     GCluster& cluster = g->clusters.at(n.cluster_id);
     cluster.num_nodes++;
 
-    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n); ++edge_pos) {
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
       GEdge& e = n.edges[edge_pos];
       GNode& other = g->nodes.at(e.other_node_idx);
 
@@ -373,7 +373,7 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
       continue;
     }
 
-    for (size_t edge_pos = 0; edge_pos < gnode_num_edges(n0); ++edge_pos) {
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos) {
       const GEdge& e = n0.edges[edge_pos];
       if (e.bridge || !e.unique_other) continue;
       const GNode& n1 = g.nodes.at(e.other_node_idx);
