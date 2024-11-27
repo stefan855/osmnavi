@@ -1115,7 +1115,7 @@ void DoIt(const Argli& argli) {
   ApplyTarjan(meta.graph, &meta);
 
   TestRoute(meta.graph);
-  RandomShortestPaths(meta.graph);
+  // RandomShortestPaths(meta.graph);
 
   ExecuteLouvain(merge_tiny_clusters, &meta);
 

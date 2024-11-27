@@ -44,14 +44,13 @@ class OSMTagHelper {
     return empty_string_;
   }
 
-  std::string GetLoggingStr(
-      int64_t id, const google::protobuf::RepeatedField<unsigned int>& keys,
-      const google::protobuf::RepeatedField<unsigned int>& vals,
-      bool online = false) const {
-    std::string_view sep = online ? " :: " : "\n";
+  template <typename Vec>
+  std::string GetLoggingStr(int64_t id, const Vec& keys, const Vec& vals,
+                            bool one_line = false) const {
+    std::string_view sep = one_line ? " :: " : "\n";
     CHECK_EQ_S(keys.size(), vals.size());
     std::string res = absl::StrCat("id=", id, sep);
-    for (int i = 0; i < keys.size(); ++i) {
+    for (int i = 0; i < (int)keys.size(); ++i) {
       absl::StrAppend(&res, string_table_.s(keys[i]), "=",
                       string_table_.s(vals[i]), sep);
     }

@@ -99,11 +99,12 @@ void ConsumeWay(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   }
 }
 
-void ConsumeNode(const OsmPbfReader::Node& node, std::mutex& mut,
+void ConsumeNode(const OsmPbfReader::NodeWithTags& node, std::mutex& mut,
                  AdminInfo* admin_info) {
-  if (admin_info->ref_nodes.contains(node.id)) {
+  if (admin_info->ref_nodes.contains(node.id())) {
     std::unique_lock<std::mutex> l(mut);
-    admin_info->nodes[node.id] = node;
+    admin_info->nodes[node.id()] = {
+        .id = node.id(), .lat = node.lat_, .lon = node.lon_};
   }
 }
 
@@ -124,9 +125,9 @@ void ReadData(const std::string& filename, int n_threads,
   });
 
   reader.ReadNodes(
-      [&admin_info](const OsmPbfReader::Node& node, std::mutex& mut) {
-        ConsumeNode(node, mut, &admin_info);
-      });
+      [&admin_info](const OSMTagHelper& tagh,
+                    const OsmPbfReader::NodeWithTags& node,
+                    std::mutex& mut) { ConsumeNode(node, mut, &admin_info); });
 }
 
 }  // namespace

@@ -72,15 +72,15 @@ bool MatchFilters(const OSMTagHelper& tagh, const T& obj,
   }
 
   bool match = false;
-  for (int i = 0; i < obj.keys().size(); ++i) {
-    if (OneTagMatch(filters, absl::StrCat(tagh.ToString(obj.keys(i)), "=",
-                                          tagh.ToString(obj.vals(i))))) {
+  for (int i = 0; i < (int)obj.keys().size(); ++i) {
+    if (OneTagMatch(filters, absl::StrCat(tagh.ToString(obj.keys().at(i)), "=",
+                                          tagh.ToString(obj.vals().at(i))))) {
       match = true;
       std::unique_lock<std::mutex> l(mut);
-      const std::string& key = tagh.ToString(obj.keys(i));
+      const std::string& key = tagh.ToString(obj.keys().at(i));
       stats->matched_keys.Add(key, obj.id());
       if (stats->n_values > 0) {
-        (stats->matched_key_values)[key].Add(tagh.ToString(obj.vals(i)),
+        (stats->matched_key_values)[key].Add(tagh.ToString(obj.vals().at(i)),
                                              obj.id());
       }
     }
@@ -157,6 +157,10 @@ int main(int argc, char* argv[]) {
            .type = "string",
            .desc = "Select relations that should be logged. For syntax see "
                    "--way_filter"},
+          {.name = "nodes",
+           .type = "string",
+           .desc = "Select nodes that should be logged. For syntax see "
+                   "--way_filter"},
           {.name = "stats",
            .type = "bool",
            .dflt = "true",
@@ -183,6 +187,8 @@ int main(int argc, char* argv[]) {
       ParseMatchFilters(argli.GetString("ways"));
   std::vector<FilterExp> relation_filter =
       ParseMatchFilters(argli.GetString("relations"));
+  std::vector<FilterExp> node_filter =
+      ParseMatchFilters(argli.GetString("nodes"));
   bool print_raw = argli.GetBool("raw");
   bool print_stats = argli.GetBool("stats");
   bool print_one_line = argli.GetBool("one_line");
@@ -193,6 +199,7 @@ int main(int argc, char* argv[]) {
 
   uint64_t num_ways = 0;
   uint64_t num_relations = 0;
+  uint64_t num_nodes = 0;
 
   if (!way_filter.empty()) {
     FreqStats stats = {.n_values = n_values};
@@ -220,8 +227,10 @@ int main(int argc, char* argv[]) {
                                                   std::mutex& mut) {
       if (MatchFilters(tagh, rel, relation_filter, mut, &stats)) {
         num_relations++;
-        RAW_LOG_F(INFO, "Relation:\n%s\n",
-                  tagh.GetLoggingStr(rel, print_one_line).c_str());
+        if (print_raw) {
+          RAW_LOG_F(INFO, "Relation:\n%s\n",
+                    tagh.GetLoggingStr(rel, print_one_line).c_str());
+        }
       }
     });
     if (print_stats) {
@@ -229,7 +238,35 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  LOG_S(INFO) << absl::StrFormat("Finished (matched %u ways, %u relations)",
-                                 num_ways, num_relations);
+  if (!node_filter.empty()) {
+    FreqStats stats = {.n_values = n_values};
+    reader.ReadNodes([&node_filter, &num_nodes, print_raw, print_one_line,
+                      &stats](const OSMTagHelper& tagh,
+                              const OsmPbfReader::NodeWithTags& node,
+                              std::mutex& mut) {
+      /*
+        LOG_S(INFO) << "Node:" << node.id();
+        for (size_t i = 0; i < node.keys().size(); ++i) {
+          LOG_S(INFO) << absl::StrFormat(
+              "%s=%s", tagh.ToString(node.keys().at(i)),
+              tagh.ToString(node.vals().at(i)));
+        }
+        */
+      if (MatchFilters(tagh, node, node_filter, mut, &stats)) {
+        num_nodes++;
+        if (print_raw) {
+          RAW_LOG_F(INFO, "Node:\n%s\n",
+                    tagh.GetLoggingStr(node, print_one_line).c_str());
+        }
+      }
+    });
+    if (print_stats) {
+      PrintStats("Relations", stats);
+    }
+  }
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Finished (matched %u ways, %u relations %u nodes)", num_ways,
+      num_relations, num_nodes);
   return 0;
 }

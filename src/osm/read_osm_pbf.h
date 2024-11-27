@@ -78,14 +78,33 @@ class OsmPbfReader {
     int64_t lat;
     int64_t lon;
   };
-  // The mutex 'mut' passed to the functions below can be used to isolate one
-  // thread from the wwork of the other threads.
+
+  // Node that looks similar to the Way and Relation classes defined as
+  // protocol buffers. Nodes store their tags in a different way than the other
+  // entities. Using this struct makes them easier to use.
+  struct NodeWithTags {
+    int64_t id_ = 0;
+    int64_t lat_ = 0;
+    int64_t lon_ = 0;
+    std::vector<int> keys_;
+    std::vector<int> vals_;
+
+    int64_t id() const { return id_; }
+    const std::vector<int>& keys() const { return keys_; }
+    const std::vector<int>& vals() const { return vals_; }
+
+   private:
+  };
+
+  // The mutex 'mut' passed to the functions below can be used to isolate
+  // one thread from the wwork of the other threads.
   using RelationWorkerFunc = std::function<void(
       const OSMTagHelper& tagh, const OSMPBF::Relation& rel, std::mutex& mut)>;
   using WayWorkerFunc = std::function<void(
       const OSMTagHelper& tagh, const OSMPBF::Way& way, std::mutex& mut)>;
   // Currently, tags are not available for nodes.
-  using NodeWorkerFunc = std::function<void(Node& node, std::mutex& mut)>;
+  using NodeWorkerFunc = std::function<void(
+      const OSMTagHelper& tagh, const NodeWithTags& node, std::mutex& mut)>;
   // Works on whole blobs. This is sometimes useful, for instance, when the
   // worker wants to use the sort order of the items in the blob.
   // Note that a blob contains only one type of items, i.e. nodes, ways or
@@ -102,10 +121,10 @@ class OsmPbfReader {
     }
   }
 
-  // Read structure information (headers) from the pbf file and add a BlobMeta
-  // for every OSMData blob in 'blob_meta'. Call before calling any of the other
-  // Read* functions.
-  // This might be a little bit slow on hard disks. It was tested only on SSDs.
+  // Read structure information (headers) from the pbf file and add a
+  // BlobMeta for every OSMData blob in 'blob_meta'. Call before calling any
+  // of the other Read* functions. This might be a little bit slow on hard
+  // disks. It was tested only on SSDs.
   void ReadFileStructure() {
     FUNC_TIMER();
     CHECK_NE_S(file_handles_.at(0), nullptr);
@@ -153,8 +172,8 @@ class OsmPbfReader {
   }
 
   // Call 'worker_func' for each relation in the pbf file. Uses multiple
-  // threads, so you might have to synchronize access to global data from your
-  // worker_func.
+  // threads, so you might have to synchronize access to global data from
+  // your worker_func.
   void ReadRelations(RelationWorkerFunc worker_func) {
     FUNC_TIMER();
     std::mutex mut;
@@ -172,8 +191,8 @@ class OsmPbfReader {
   }
 
   // Call 'worker_func' for each way in the pbf file. Uses multiple
-  // threads, so you might have to synchronize access to global data from your
-  // worker_func.
+  // threads, so you might have to synchronize access to global data from
+  // your worker_func.
   void ReadWays(WayWorkerFunc worker_func) {
     FUNC_TIMER();
     std::mutex mut;
@@ -191,8 +210,8 @@ class OsmPbfReader {
   }
 
   // Call 'worker_func' for each node in the pbf file. Uses multiple
-  // threads, so you might have to synchronize access to global data from your
-  // worker_func.
+  // threads, so you might have to synchronize access to global data from
+  // your worker_func.
   void ReadNodes(NodeWorkerFunc worker_func) {
     FUNC_TIMER();
     std::mutex mut;
@@ -210,8 +229,8 @@ class OsmPbfReader {
   }
 
   // Call 'worker_func' for each blob of type 'type' in the pbf file.
-  // Uses multiple threads, so you might have to synchronize access to global
-  // data from your worker_func.
+  // Uses multiple threads, so you might have to synchronize access to
+  // global data from your worker_func.
   void ReadBlobs(BlobContentType type, BlobWorkerFunc worker_func) {
     FuncTimer timer(
         absl::StrFormat("ReadBlobs(type=%s)", BlobContentTypeToStr(type)),
@@ -365,6 +384,9 @@ class OsmPbfReader {
       ComputeContentStats(*prim_block, blob_meta);
       blob_meta->content_stats_done = true;
     }
+    CHECK_EQ_S(prim_block->granularity(), 100) << "not supported";
+    CHECK_EQ_S(prim_block->lat_offset(), 0) << "not supported";
+    CHECK_EQ_S(prim_block->lon_offset(), 0) << "not supported";
   }
 
   // Get the content type of the blob at position 'pos' in blob_meta_.
@@ -385,9 +407,9 @@ class OsmPbfReader {
     return meta.type;
   }
 
-  // Find the first blob at position >= start_idx that is not of type 'type'.
-  // Note: The underlying assumption is that the blobs in the file are
-  // strictly ordered by type - first nodes, then ways, then relations.
+  // Find the first blob at position >= start_idx that is not of type
+  // 'type'. Note: The underlying assumption is that the blobs in the file
+  // are strictly ordered by type - first nodes, then ways, then relations.
   int64_t FindContentStart(const BlobContentType type,
                            const int64_t start_idx) {
     CHECK_S(!blob_meta_.empty());
@@ -483,6 +505,7 @@ class OsmPbfReader {
     CHECK_EQ_S(meta->type, ContentNodes);
     OSMPBF::PrimitiveBlock primblock;
     ReadBlob(file_handles_.at(thread_idx), meta, &primblock);
+    OSMTagHelper tagh(primblock.stringtable());
 
     for (const OSMPBF::PrimitiveGroup& pg : primblock.primitivegroup()) {
       CHECK_S(pg.dense().id_size() > 0);
@@ -490,12 +513,45 @@ class OsmPbfReader {
         LOG_S(INFO) << "Read PrimitiveGroup with " << pg.dense().id_size()
                     << " nodes";
       }
-      Node node = {.id = 0, .lat = 0, .lon = 0};
+      NodeWithTags node;  // = {.id_ = 0, .lat_ = 0, .lon_ = 0};
+      int kv_start = -1;
+      /*
+      NodeTags node_tags = {.keys_vals = pg.dense().keys_vals(),
+                            .start_pos = 0};
+                            */
+#if 0
+      for (int i = 0; i < pg.dense().keys_vals().size(); ++i) {
+        LOG_S(INFO) << "Key:" << i << " value:" << pg.dense().keys_vals(i)
+                    << " <" << tagh.ToString(pg.dense().keys_vals(i)) << ">";
+      }
+#endif
       for (int i = 0; i < pg.dense().id_size(); ++i) {
-        node.id += pg.dense().id(i);
-        node.lat += pg.dense().lat(i);
-        node.lon += pg.dense().lon(i);
-        worker_func(node, mut);
+        node.id_ += pg.dense().id(i);
+        node.lat_ += pg.dense().lat(i);
+        node.lon_ += pg.dense().lon(i);
+
+        // Update tag vectors.
+        if (kv_start < pg.dense().keys_vals().size()) {
+          node.keys_.clear();
+          node.vals_.clear();
+          kv_start++;
+          int kv_stop = kv_start;
+          while (kv_stop < pg.dense().keys_vals().size() &&
+                 pg.dense().keys_vals(kv_stop) != 0) {
+            kv_stop++;
+          }
+          if (kv_start < kv_stop) {
+            // Check the diff is even.
+            CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
+            while (kv_start < kv_stop) {
+              node.keys_.push_back(pg.dense().keys_vals().at(kv_start++));
+              node.vals_.push_back(pg.dense().keys_vals().at(kv_start++));
+            }
+          }
+        }
+        worker_func(tagh, node, mut);
+        // node_tags.start_pos = kv_stop;
+        // worker_func(node, mut);
       }
     }
   }
