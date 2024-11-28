@@ -191,8 +191,9 @@ void TestRoute(const Graph& g) {
     } else {
       {
         DijkstraRouter router(g);
+        RoutingOptions opt;
         auto result =
-            router.Route(start_idx, target_idx, RoutingMetricDistance());
+            router.Route(start_idx, target_idx, RoutingMetricDistance(), opt);
         if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/route_dist.csv");
         } else {
@@ -201,46 +202,40 @@ void TestRoute(const Graph& g) {
       }
       {
         DijkstraRouter router(g);
-        auto result = router.Route(start_idx, target_idx, RoutingMetricTime());
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
-        } else {
-          LOG_S(INFO) << "failed to find dijkstra route!";
-        }
-      }
-      {
-        DijkstraRouter router(g);
-        auto result = router.Route(start_idx, target_idx, RoutingMetricTime());
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
-        } else {
-          LOG_S(INFO) << "failed to find dijkstra route!";
-        }
-      }
-      {
-        DijkstraRouter router(g);
-        DijkstraRouter::Filter filt = DijkstraRouter::standard_filter;
-        filt.inverse_search = true;
+        RoutingOptions opt;
         auto result =
-            router.Route(target_idx, start_idx, RoutingMetricDistance(), filt);
+            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
+        if (result.found) {
+          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
+        } else {
+          LOG_S(INFO) << "failed to find dijkstra route!";
+        }
+      }
+      {
+        DijkstraRouter router(g);
+        RoutingOptions opt;
+        opt.backward_search = true;
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricDistance(), opt);
         if (!result.found) {
           LOG_S(INFO) << "failed to find dijkstra route!";
         }
       }
       {
         DijkstraRouter router(g);
-        DijkstraRouter::Filter filt = DijkstraRouter::standard_filter;
-        filt.inverse_search = true;
+        RoutingOptions opt;
+        opt.backward_search = true;
         auto result =
-            router.Route(target_idx, start_idx, RoutingMetricTime(), filt);
+            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
         if (!result.found) {
           LOG_S(INFO) << "failed to find dijkstra route!";
         }
       }
       {
         AStarRouter router(g);
+        RoutingOptions opt;
         auto result =
-            router.Route(start_idx, target_idx, RoutingMetricDistance());
+            router.Route(start_idx, target_idx, RoutingMetricDistance(), opt);
         if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/astar_route_dist.csv");
         } else {
@@ -249,7 +244,9 @@ void TestRoute(const Graph& g) {
       }
       {
         AStarRouter router(g);
-        auto result = router.Route(start_idx, target_idx, RoutingMetricTime());
+        RoutingOptions opt;
+        auto result =
+            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
         if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
         } else {
@@ -259,20 +256,20 @@ void TestRoute(const Graph& g) {
 
       {
         AStarRouter router(g);
-        AStarRouter::Filter filt = AStarRouter::standard_filter;
-        filt.inverse_search = true;
+        RoutingOptions opt;
+        opt.backward_search = true;
         auto result =
-            router.Route(target_idx, start_idx, RoutingMetricDistance(), filt);
+            router.Route(target_idx, start_idx, RoutingMetricDistance(), opt);
         if (!result.found) {
           LOG_S(INFO) << "failed to find astar route!";
         }
       }
       {
         AStarRouter router(g);
-        AStarRouter::Filter filt = AStarRouter::standard_filter;
-        filt.inverse_search = true;
+        RoutingOptions opt;
+        opt.backward_search = true;
         auto result =
-            router.Route(target_idx, start_idx, RoutingMetricTime(), filt);
+            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
         if (!result.found) {
           LOG_S(INFO) << "failed to find astar route!";
         }
@@ -291,12 +288,43 @@ void TestRoute(const Graph& g) {
                                      target_idx);
     } else {
       {
-        AStarRouter router(g);
-
-        AStarRouter::Filter filt = AStarRouter::standard_filter;
-        filt.MayFillBridgeNodeId(g, target_idx);
+        DijkstraRouter router(g);
+        RoutingOptions opt;
+        opt.MayFillBridgeNodeId(g, target_idx);
         auto result =
-            router.Route(start_idx, target_idx, RoutingMetricTime(), filt);
+            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
+        if (result.found) {
+          // router.SaveSpanningTreeSegments("/tmp/route_time.csv");
+        }
+      }
+      {
+        DijkstraRouter router(g);
+        RoutingOptions opt;
+        opt.MayFillBridgeNodeId(g, start_idx);
+        opt.backward_search = true;
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
+        if (result.found) {
+          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
+        }
+      }
+      {
+        AStarRouter router(g);
+        RoutingOptions opt;
+        opt.MayFillBridgeNodeId(g, target_idx);
+        auto result =
+            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
+        if (result.found) {
+          // router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
+        }
+      }
+      {
+        AStarRouter router(g);
+        RoutingOptions opt;
+        opt.backward_search = true;
+        opt.MayFillBridgeNodeId(g, start_idx);
+        auto result =
+            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
         if (result.found) {
           router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
         }
@@ -322,9 +350,9 @@ void RandomShortestPaths(const Graph& g) {
     uint32_t target = RandomNodeIdx(g);
     pool.AddWork([&g, start, target](int thread_idx) {
       AStarRouter router(g);
-      AStarRouter::Filter filt = AStarRouter::standard_filter;
-      filt.MayFillBridgeNodeId(g, target);
-      auto result = router.Route(start, target, RoutingMetricTime(), filt);
+      RoutingOptions opt;
+      opt.MayFillBridgeNodeId(g, target);
+      auto result = router.Route(start, target, RoutingMetricTime(), opt);
     });
   }
   pool.Start(23);
@@ -401,7 +429,7 @@ void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
 namespace {
 
 // Read the ways that might useful for routing, remember the nodes ids touched
-// by these ways, then read the node coordinates and store them in 'nodes'.
+// by these ways, then read the node coordinates and store them in 'node_table'.
 void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
                          MetaStatsData* stats) {
   HugeBitset touched_nodes_ids;
@@ -689,24 +717,24 @@ void MarkUniqueEdges(MetaData* meta) {
   }
 }
 
-#if 0
-void CheckShortestClusterPaths(int n_threads, const Graph& g,
-                               const RoutingMetric& metric) {
+void CheckShortestClusterPaths(int n_threads, const Graph& g) {
   FUNC_TIMER();
+  const RoutingMetricTime metric;
   ThreadPool pool;
   for (const GCluster& c : g.clusters) {
     pool.AddWork([&g, &c, &metric](int) {
       LOG_S(INFO) << absl::StrFormat("Checks paths in cluster:%u #border:%u",
                                      c.cluster_id, c.num_border_nodes);
-      AStarRouter::Filter filter = {.avoid_dead_end = true,
-                                    .restrict_to_cluster = true,
-                                    .cluster_id = c.cluster_id};
+      RoutingOptions opt;
+      opt.avoid_dead_end = true;
+      opt.restrict_to_cluster = true;
+      opt.cluster_id = c.cluster_id;
       for (uint32_t idx = 0; idx < c.num_border_nodes; ++idx) {
         for (uint32_t idx2 = 0; idx2 < c.num_border_nodes; ++idx2) {
           // DijkstraRouter rt(g, /*verbose=*/false);
           AStarRouter rt(g, /*verbose=*/false);
           auto result = rt.Route(c.border_nodes.at(idx),
-                                 c.border_nodes.at(idx2), metric, filter);
+                                 c.border_nodes.at(idx2), metric, opt);
 
           if (c.distances.at(idx).at(idx2) != result.found_distance) {
             LOG_S(INFO) << absl::StrFormat(
@@ -739,7 +767,6 @@ void CheckShortestClusterPaths(int n_threads, const Graph& g,
   pool.Start(n_threads);
   pool.WaitAllFinished();
 }
-#endif
 
 void ComputeShortestPathsInAllClusters(MetaData* meta) {
   FUNC_TIMER();
@@ -775,10 +802,8 @@ void ExecuteLouvain(const bool merge_tiny_clusters, MetaData* meta) {
 
   ComputeShortestPathsInAllClusters(meta);
 
-#if 0
   // Check if astar and dijkstra find the same shortest paths.
-  // CheckShortestClusterPaths(meta->n_threads, meta->graph, metric);
-#endif
+  // CheckShortestClusterPaths(meta->n_threads, meta->graph);
 }
 
 void PrintStructSizes() {

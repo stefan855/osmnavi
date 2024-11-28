@@ -514,17 +514,9 @@ class OsmPbfReader {
                     << " nodes";
       }
       NodeWithTags node;  // = {.id_ = 0, .lat_ = 0, .lon_ = 0};
+      // Points to terminating 0-element of previous node. At the start it is
+      // therefore on position -1.
       int kv_start = -1;
-      /*
-      NodeTags node_tags = {.keys_vals = pg.dense().keys_vals(),
-                            .start_pos = 0};
-                            */
-#if 0
-      for (int i = 0; i < pg.dense().keys_vals().size(); ++i) {
-        LOG_S(INFO) << "Key:" << i << " value:" << pg.dense().keys_vals(i)
-                    << " <" << tagh.ToString(pg.dense().keys_vals(i)) << ">";
-      }
-#endif
       for (int i = 0; i < pg.dense().id_size(); ++i) {
         node.id_ += pg.dense().id(i);
         node.lat_ += pg.dense().lat(i);
@@ -540,18 +532,20 @@ class OsmPbfReader {
                  pg.dense().keys_vals(kv_stop) != 0) {
             kv_stop++;
           }
+          // kv_stop points to 0-element terminating kvs for this node.
+
           if (kv_start < kv_stop) {
-            // Check the diff is even.
+            // We have some key/values. Check that the diff is even.
             CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
             while (kv_start < kv_stop) {
               node.keys_.push_back(pg.dense().keys_vals().at(kv_start++));
               node.vals_.push_back(pg.dense().keys_vals().at(kv_start++));
             }
+            CHECK_EQ_F(kv_start, kv_stop);
           }
+          // kv_start points to 0-element terminating kvs for this node.
         }
         worker_func(tagh, node, mut);
-        // node_tags.start_pos = kv_stop;
-        // worker_func(node, mut);
       }
     }
   }
