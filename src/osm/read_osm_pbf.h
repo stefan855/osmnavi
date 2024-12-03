@@ -513,9 +513,9 @@ class OsmPbfReader {
         LOG_S(INFO) << "Read PrimitiveGroup with " << pg.dense().id_size()
                     << " nodes";
       }
-      NodeWithTags node;  // = {.id_ = 0, .lat_ = 0, .lon_ = 0};
-      // Points to terminating 0-element of previous node. At the start it is
-      // therefore on position -1.
+      NodeWithTags node;
+      // kv_start points to terminating 0-element of previous node. Before the
+      // loop it is therefore on position -1.
       int kv_start = -1;
       for (int i = 0; i < pg.dense().id_size(); ++i) {
         node.id_ += pg.dense().id(i);

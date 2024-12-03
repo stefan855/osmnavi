@@ -15,7 +15,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "algos/astar.h"
-#include "algos/cluster_dijkstra.h"
+#include "algos/compact_dijkstra.h"
 #include "algos/components.h"
 #include "algos/dijkstra.h"
 #include "algos/louvain.h"
@@ -723,8 +723,6 @@ void CheckShortestClusterPaths(int n_threads, const Graph& g) {
   ThreadPool pool;
   for (const GCluster& c : g.clusters) {
     pool.AddWork([&g, &c, &metric](int) {
-      LOG_S(INFO) << absl::StrFormat("Checks paths in cluster:%u #border:%u",
-                                     c.cluster_id, c.num_border_nodes);
       RoutingOptions opt;
       opt.avoid_dead_end = true;
       opt.restrict_to_cluster = true;
@@ -762,6 +760,9 @@ void CheckShortestClusterPaths(int n_threads, const Graph& g) {
           // CHECK(c.distances.at(idx).at(idx2), result.found_distance);
         }
       }
+      LOG_S(INFO) << absl::StrFormat(
+          "Checks paths in cluster:%u #border:%u finished", c.cluster_id,
+          c.num_border_nodes);
     });
   }
   pool.Start(n_threads);
@@ -803,7 +804,7 @@ void ExecuteLouvain(const bool merge_tiny_clusters, MetaData* meta) {
   ComputeShortestPathsInAllClusters(meta);
 
   // Check if astar and dijkstra find the same shortest paths.
-  // CheckShortestClusterPaths(meta->n_threads, meta->graph);
+  CheckShortestClusterPaths(meta->n_threads, meta->graph);
 }
 
 void PrintStructSizes() {
