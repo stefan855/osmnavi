@@ -141,7 +141,6 @@ void TestLouvainTriangleGrpah() {
   // Cluster of node 0 is the first triangle.
   {
     LouvainNode n0 = g.nodes.at(0);
-    double clusterq = g.ClusterQ(n0.cluster_pos);
     double clusterq_mod_neg = g.ModifiedClusterQ(n0.cluster_pos, -2, -2);
     double clusterq_mod_pos = g.ModifiedClusterQ(n0.cluster_pos, 2, 2);
 

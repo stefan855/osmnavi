@@ -454,7 +454,6 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   WaySharedAttrs wsa;
   // Set all numbers to 0, enums to first value.
   memset(&wsa.ra, 0, sizeof(wsa.ra));
-  bool success = false;
 
   for (const VEHICLE vt : WaySharedAttrs::RA_VEHICLES) {
     // TODO: Use real country instead of always using CH (Switzerland).

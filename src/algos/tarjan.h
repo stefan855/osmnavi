@@ -193,11 +193,8 @@ class Tarjan {
           low->at(e.parent) = std::min(low->at(e.parent), low->at(e.node));
           if (low->at(e.node) > visno->at(e.parent)) {
             // The edge "parent <=> node" is a bridge.
-            const GNode& n1 = g_.nodes.at(e.parent);
-            const GNode& n2 = g_.nodes.at(e.node);
             if (bridges != nullptr) {
-              // Arrange such that the tree below 'to_node_idx' is smaller
-              // than the number of nodes.
+              // Arrange such that the tree below 'to_node_idx' is smaller.
               if (e.tree_size < comp.size / 2) {
                 CHECK_LE_S(e.tree_size, comp.size);
                 bridges->push_back({.from_node_idx = e.parent,

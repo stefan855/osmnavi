@@ -473,7 +473,7 @@ void FindNode(const DataBlockTable& t, std::uint64_t id, std::int64_t lat,
               std::int64_t lon) {
   LOG_S(INFO) << absl::StrFormat("FindNode(%llu)", id);
   NodeBuilder::VNode node;
-  bool found = NodeBuilder::FindNode(t, id, &node);
+  CHECK_S(NodeBuilder::FindNode(t, id, &node));
   CHECK_EQ_S(node.id, id);
   CHECK_EQ_S(node.lat, lat);
   CHECK_EQ_S(node.lon, lon);

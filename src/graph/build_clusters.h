@@ -7,6 +7,7 @@
 
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
+#include "algos/compact_dijkstra.h"
 #include "algos/louvain.h"
 #include "base/thread_pool.h"
 #include "graph/graph_def.h"
@@ -280,6 +281,43 @@ void UpdateGraphClusterInformation(Graph* g) {
     CHECK_GT_S(cluster.num_nodes, 0);
     std::sort(cluster.border_nodes.begin(), cluster.border_nodes.end());
   }
+}
+
+// Compute all shortest paths between border nodes in a cluster. The results
+// are stored in 'cluster.distances'.
+void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
+                                 VEHICLE vt, GCluster* cluster) {
+  CHECK_S(cluster->distances.empty());
+  const size_t num_border_nodes = cluster->border_nodes.size();
+  if (num_border_nodes == 0) {
+    return;  // Nothing to compute, cluster is isolated.
+  }
+
+  // Construct a minimal graph with all necessary information.
+  uint32_t num_nodes = 0;
+  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  compact_dijkstra::CollectEdges(g, metric,
+                                 {.vt = vt,
+                                  .restrict_to_cluster = true,
+                                  .cluster_id = cluster->cluster_id},
+                                 cluster->border_nodes, &num_nodes,
+                                 &full_edges);
+  compact_dijkstra::SortAndCleanupEdges(&full_edges);
+  const CompactDirectedGraph cg(num_nodes, full_edges);
+  cg.LogStats();
+
+  // Execute single source Dijkstra from every border node.
+  for (size_t border_node = 0; border_node < num_border_nodes; ++border_node) {
+    // Now store the distances for this border node.
+    cluster->distances.emplace_back();
+    const std::vector<compact_dijkstra::VisitedNode> vis =
+        compact_dijkstra::SingleSourceDijkstra(cg, border_node);
+    CHECK_EQ_S(vis.size(), num_nodes);
+    for (size_t i = 0; i < num_border_nodes; ++i) {
+      cluster->distances.back().push_back(vis.at(i).min_weight);
+    }
+  };
+  CHECK_EQ_S(cluster->distances.size(), cluster->border_nodes.size());
 }
 
 void PrintClusterInformation(const Graph& g) {

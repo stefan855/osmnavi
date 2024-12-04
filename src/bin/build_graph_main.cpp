@@ -352,7 +352,7 @@ void RandomShortestPaths(const Graph& g) {
       AStarRouter router(g);
       RoutingOptions opt;
       opt.MayFillBridgeNodeId(g, target);
-      auto result = router.Route(start, target, RoutingMetricTime(), opt);
+      router.Route(start, target, RoutingMetricTime(), opt);
     });
   }
   pool.Start(23);
@@ -588,7 +588,6 @@ void ComputeEdgeCounts(MetaData* meta) {
 
 void AllocateEdgeArrays(MetaData* meta) {
   FUNC_TIMER();
-  Graph& graph = meta->graph;
   for (GNode& n : meta->graph.nodes) {
     const std::uint32_t num_edges = gnode_total_edges(n);
     CHECK_GT_S(num_edges, 0u);
@@ -777,8 +776,8 @@ void ComputeShortestPathsInAllClusters(MetaData* meta) {
     for (GCluster& cluster : meta->graph.clusters) {
       pool.AddWork([meta, &metric, &cluster](int) {
         // TODO: support the other vehicle types.
-        ComputeShortestClusterPaths(meta->graph, metric, VH_MOTOR_VEHICLE,
-                                    &cluster);
+        build_clusters::ComputeShortestClusterPaths(meta->graph, metric,
+                                                    VH_MOTOR_VEHICLE, &cluster);
       });
     }
     // Faster with few threads only.
@@ -969,6 +968,12 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
 
   LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld",
                                  graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
+                                 meta.stats.num_dead_end_nodes);
+  LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld", node_in_cluster);
+  LOG_S(INFO) << absl::StrFormat("  Node in small comp:%11lld",
+                                 node_in_small_component);
+
   LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld", num_edges_out);
   LOG_S(INFO) << absl::StrFormat("  Num edges inverted: %10lld",
                                  num_edges_inverted);
@@ -981,7 +986,6 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
                                  max_edge_length_cm);
   LOG_S(INFO) << absl::StrFormat("  Avg edge length   %12.0f",
                                  (double)sum_edge_length_cm / num_edges_out);
-
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node:   %12.2f",
       static_cast<double>(num_edges_inverted + num_edges_out) /
@@ -992,11 +996,6 @@ void PrintStats(const OsmPbfReader& reader, const MetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  meta.stats.num_cross_country_edges);
   LOG_S(INFO) << absl::StrFormat("  Num no country:   %12lld", num_no_country);
-  LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
-                                 meta.stats.num_dead_end_nodes);
-  LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld", node_in_cluster);
-  LOG_S(INFO) << absl::StrFormat("  Node in small comp:%11lld",
-                                 node_in_small_component);
 
   std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
   std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
