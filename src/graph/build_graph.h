@@ -4,9 +4,11 @@
 #include <memory>
 #include <mutex>
 
+#include "algos/components.h"
+#include "algos/tarjan.h"
 #include "base/deduper_with_ids.h"
-#include "base/huge_bitset.h"
 #include "base/frequency_table.h"
+#include "base/huge_bitset.h"
 #include "geometry/tiled_country_lookup.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
@@ -14,36 +16,81 @@
 #include "graph/routing_config.h"
 #include "osm/osm_helpers.h"
 #include "osm/parsed_tag.h"
+#include "osm/turn_restriction.h"
 
 namespace build_graph {
 
-struct MetaStatsData {
+struct BuildGraphOptions {
+  // Support the following vehicle types. Possible values are {VH_MOTOR_VEHICLE,
+  // VH_BICYCLE, VH_FOOT}. Note that currently only cars and partially bicycle
+  // are supported.
+  std::vector<VEHICLE> vehicle_types = {VH_MOTOR_VEHICLE};
+  // Path to input OSM pbf file. Must not be empty.
+  std::string pbf_filename;
+  // File pattern for admin files (country polygons).
+  std::string admin_filepattern = "../../data/admin/??_*.csv";
+  std::string routing_config = "../config/routing.cfg";
+  bool merge_tiny_clusters = true;
+
+  // Max number of threads to use for parallel processing.
+  int n_threads = 8;
+
+  // Development, Debugging...
+  // Currently only reading is implemented.
+  bool process_turn_restrictions = true;
+  bool log_turn_restrictions = false;
+  bool log_way_tag_stats = false;
+  // Compute all cluster shortest paths a second time with A* and compare to the
+  // results of single source Dijkstra. This is extremely time consuming.
+  bool check_shortest_cluster_paths = false;
+};
+
+struct BuildGraphStats {
+  // Input (pbf)
+  int64_t num_nodes_in_pbf = 0;
+  int64_t num_ways_in_pbf = 0;
+  int64_t num_relations_in_pbf = 0;
   int64_t num_ways_with_highway_tag = 0;
   int64_t num_edges_with_highway_tag = 0;
   int64_t num_noderefs_with_highway_tag = 0;
-  int64_t num_ways_closed = 0;
+  int64_t num_ways_too_short = 0;
   int64_t num_ways_missing_nodes = 0;
 
-  int64_t num_way_node_lookups = 0;
-  int64_t num_way_node_lookups_found = 0;
-  int64_t num_way_without_speed = 0;
-
-  int64_t num_cross_country_edges = 0;
+  // Graph building
   int64_t num_turn_restriction_errors = 0;
 
+  // Graph
+  int64_t num_ways_closed = 0;
+
+  int64_t num_ways_no_maxspeed = 0;
+  int64_t num_ways_diff_maxspeed = 0;
+  int64_t num_ways_has_country = 0;
+  int64_t num_ways_has_streetname = 0;
+  int64_t num_ways_oneway_car = 0;
+
+  int64_t num_cross_country_edges = 0;
+
+  int64_t num_nodes_in_cluster = 0;
+  int64_t num_nodes_in_small_component = 0;
+  int64_t num_nodes_no_country = 0;
+  int64_t num_edges_inverted = 0;
+  int64_t num_edges_out = 0;
+  int64_t num_edges_non_unique = 0;
+  int64_t max_edges_inverted = 0;
+  int64_t max_edges_out = 0;
+  int64_t min_edge_length_cm = INF64;
+  int64_t max_edge_length_cm = 0;
+  int64_t sum_edge_length_cm = 0;
+
+  // Tarjan algorithm
   int64_t num_dead_end_nodes = 0;
 
-  bool log_way_tag_stats = false;
   FrequencyTable way_tag_stats;
-
-  bool log_turn_restrictions = false;
-
-  // TODO: may help improve multithreading:
-  // void AddStats(const MetaStatsData& other);
 };
 
-struct MetaData {
-  int n_threads = 6;
+struct GraphMetaData {
+  BuildGraphOptions opt;
+
   // Assigns country codes to lon/lat positions. Used to assign countries to
   // nodes and ways.
   std::unique_ptr<TiledCountryLookup> tiler = nullptr;
@@ -67,8 +114,12 @@ struct MetaData {
   // Currently not used.
   std::vector<TurnRestriction> turn_restrictions;
 
-  MetaStatsData stats;
+  BuildGraphStats stats;
 };
+
+// Read a pbf file from disk, build the road network and return it together with
+// auxiliary data.
+GraphMetaData BuildGraph(const BuildGraphOptions& opt);
 
 // Way attributes country code, rural/urban and is_motorroad as extracted from
 // tags. Note that country code is only used for error reporting, since we
@@ -83,7 +134,8 @@ struct WayTaggedZones {
 
 void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,
-                                    HugeBitset* node_ids, MetaStatsData* stats);
+                                    HugeBitset* node_ids,
+                                    BuildGraphStats* stats);
 
 void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
@@ -110,21 +162,23 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
 // void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
 //                         const std::vector<ParsedTag>& ptags,
 //                         std::uint16_t* maxspeed_forw,
-//                         std::uint16_t* maxspeed_backw, bool logging_on = false);
+//                         std::uint16_t* maxspeed_backw, bool logging_on =
+//                         false);
 
 // void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
 //                const std::vector<ParsedTag>& ptags, RoutingAttrs* ra_forw,
 //                RoutingAttrs* ra_backw, bool logging_on = false);
 
 // DIRECTION CarRoadDirection(const OSMTagHelper& tagh, HIGHWAY_LABEL hw,
-//                            int64_t way_id, const std::vector<ParsedTag>& ptags,
-//                            bool logging_on = false);
+//                            int64_t way_id, const std::vector<ParsedTag>&
+//                            ptags, bool logging_on = false);
 
-// bool ComputeWayRoutingData(const MetaData& meta, const OSMTagHelper& tagh,
+// bool ComputeWayRoutingData(const GraphMetaData& meta, const OSMTagHelper&
+// tagh,
 //                            const OSMPBF::Way& osm_way, GWay* way);
 
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
-                      MetaData* meta);
+                      GraphMetaData* meta);
 
 }  // namespace build_graph

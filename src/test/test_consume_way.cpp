@@ -104,8 +104,8 @@ TiledCountryLookup* InitCountryTiler(int16_t country) {
   return new TiledCountryLookup(p, tile_size);
 }
 
-build_graph::MetaData CreateMeta() {
-  build_graph::MetaData meta;
+build_graph::GraphMetaData CreateMeta() {
+  build_graph::GraphMetaData meta;
 
   meta.way_nodes_seen.reset(new HugeBitset);
   meta.way_nodes_needed.reset(new HugeBitset);
@@ -164,7 +164,7 @@ void TestWay() {
 <tag k="width" v="20"/>
 )";
   constexpr int num_nodes = 2;  // Our way has two nodes.
-  build_graph::MetaData meta = CreateMeta();
+  build_graph::GraphMetaData meta = CreateMeta();
   StoreNodes(num_nodes, meta.node_table.get());
   DeDuperWithIds<WaySharedAttrs> deduper;
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);

@@ -40,6 +40,7 @@ add_compile_options(-march=native)
 
 add_library(loguru_lib src/logging/loguru.cpp)
 add_library(build_graph_lib src/graph/build_graph.cpp)
+target_link_libraries(build_graph_lib PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib)
 
 add_executable(build_graph_main src/bin/build_graph_main.cpp)
 target_include_directories(build_graph_main SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
@@ -55,7 +56,7 @@ target_link_libraries(test PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl:
 
 add_executable(test_consume_way src/test/test_consume_way.cpp)
 target_include_directories(test_consume_way SYSTEM PRIVATE)
-target_link_libraries(test_consume_way PRIVATE osmpbf protobuf::libprotobuf absl::strings absl::flat_hash_map  absl::str_format loguru_lib absl::time build_graph_lib)
+target_link_libraries(test_consume_way PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::flat_hash_map  absl::str_format loguru_lib absl::time build_graph_lib)
 
 add_executable(test_louvain src/test/test_louvain.cpp)
 target_include_directories(test_louvain SYSTEM PRIVATE)
@@ -71,5 +72,5 @@ target_link_libraries(extract_admin PRIVATE osmpbf ZLIB::ZLIB protobuf::libproto
 
 add_executable(tools src/bin/tools.cpp)
 target_include_directories(tools SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
-target_link_libraries(tools PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time)
+target_link_libraries(tools PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
 

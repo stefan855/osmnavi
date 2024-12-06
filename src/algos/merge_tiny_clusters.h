@@ -40,8 +40,9 @@
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
 #include "base/constants.h"
+#include "base/util.h"
 #include "base/huge_bitset.h"
-#include "logging/loguru.h"
+#include "graph/graph_def.h"
 
 namespace build_clusters {
 
@@ -277,7 +278,7 @@ void RenumberClusters(const WorkData& wd, Graph* graph) {
 
 }  // namespace
 
-void MergeTinyClusters(Graph* graph) {
+inline void MergeTinyClusters(Graph* graph) {
   FUNC_TIMER();
   WorkData wd = {.g = *graph};
   wd.cluster_data.resize(graph->clusters.size());

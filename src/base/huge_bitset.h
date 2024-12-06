@@ -11,6 +11,8 @@
 // grows as needed.
 // The maximal bit number is 2^35-1, to help protect against bugs. It can be
 // changed at construction time.
+// TODO: use a hash set or something similar as long as it is more memory
+// efficient.
 class HugeBitset {
  public:
   // Create a bitset, allowing for bits 0..max_bit_no-1. Only memory that is
@@ -90,6 +92,7 @@ class HugeBitset {
     return allocated_bits_;
   }
 
+  // Count the bits that are '1'.
   std::uint64_t CountBits() const {
     std::uint64_t cnt = 0;
     for (std::uint64_t i = NextBit(0); i < NumAllocatedBits();
@@ -100,6 +103,9 @@ class HugeBitset {
   }
 
   std::uint64_t NumAllocatedBits() const { return allocated_bits_; }
+  std::uint64_t NumUsedBytes() const {
+    return blocks_.size() * (sizeof(blocks_[0]) + block_size_);
+  }
 
  private:
   void make_available(std::uint64_t bit) {

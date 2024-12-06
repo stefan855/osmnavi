@@ -1,5 +1,7 @@
 #pragma once
 
+#include <malloc.h>
+
 #include <charconv>
 #include <filesystem>
 #include <regex>
@@ -124,4 +126,14 @@ inline std::vector<std::string> GetFilesWithWildcard(
     }
   }
   return files;
+}
+
+inline void LogMemoryUsage() {
+  struct mallinfo2 info;
+  info = mallinfo2();
+  LOG_S(INFO) << " ********** Mallinfo **********";
+  LOG_S(INFO) << "Total heap:      " << info.arena;
+  LOG_S(INFO) << "Total mapped:    " << info.hblkhd;
+  LOG_S(INFO) << "Total heap used: " << info.uordblks;
+  LOG_S(INFO) << "Total heap free: " << info.fordblks;
 }

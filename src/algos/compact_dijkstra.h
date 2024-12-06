@@ -29,11 +29,11 @@ namespace compact_dijkstra {
 // If 'node_refs' is not nullptr, then it will contain the original node index
 // in graph:nodes for every of the 'num_nodes' nodes which are indexed by
 // [0..num_nodes-1]..
-void CollectEdges(const Graph& g, const RoutingMetric& metric,
-                  const RoutingOptions& opt,
-                  std::vector<std::uint32_t>& start_nodes, uint32_t* num_nodes,
-                  std::vector<CompactDirectedGraph::FullEdge>* full_edges,
-                  std::vector<std::uint32_t>* node_refs = nullptr) {
+inline void CollectEdges(
+    const Graph& g, const RoutingMetric& metric, const RoutingOptions& opt,
+    std::vector<std::uint32_t>& start_nodes, uint32_t* num_nodes,
+    std::vector<CompactDirectedGraph::FullEdge>* full_edges,
+    std::vector<std::uint32_t>* node_refs = nullptr) {
   // Map from node index in g.nodes to the node index in the compact graph.
   absl::flat_hash_map<uint32_t, uint32_t> nodemap;
   // FIFO queue for bfs, containing node indices in g.nodes.
@@ -105,7 +105,7 @@ void CollectEdges(const Graph& g, const RoutingMetric& metric,
 
 // Sort the edges by ascending order (from_idx, to_idx, weight) and remove
 // duplicates (from, to) keeping the one with the lowest weight.
-void SortAndCleanupEdges(
+inline void SortAndCleanupEdges(
     std::vector<CompactDirectedGraph::FullEdge>* full_edges) {
   std::sort(full_edges->begin(), full_edges->end());
   // Remove dups.
@@ -142,8 +142,8 @@ struct MetricCmp {
 
 // Execute single source Dijkstra (for a start node to *all* nodes).
 // Returns the vector with VisitedNode entries for every node in the graph.
-std::vector<VisitedNode> SingleSourceDijkstra(const CompactDirectedGraph& cg,
-                                              std::uint32_t start_idx) {
+inline std::vector<VisitedNode> SingleSourceDijkstra(
+    const CompactDirectedGraph& cg, std::uint32_t start_idx) {
   CHECK_LT_S(cg.num_nodes(), 1 << 31) << "currently not supported";
   std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {INFU32, 0, 0});
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, MetricCmp> pq;

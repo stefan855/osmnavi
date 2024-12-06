@@ -20,6 +20,7 @@
 //  });
 
 #include <netinet/in.h>
+#include <osmpbf/osmpbf.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <zlib.h>
@@ -32,8 +33,13 @@
 #include <vector>
 
 #include "absl/strings/str_format.h"
+#include "algos/merge_tiny_clusters.h"
 #include "base/thread_pool.h"
+#include "base/util.h"
+#include "graph/data_block.h"
+#include "graph/graph_def.h"
 #include "logging/loguru.h"
+#include "osm/osm_helpers.h"
 
 namespace {
 FILE* OpenFile(const std::string& filename) {

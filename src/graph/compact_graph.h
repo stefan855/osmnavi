@@ -104,7 +104,7 @@ class CompactDirectedGraph {
   std::vector<PartialEdge> edges_;
 };
 
-bool operator<(const CompactDirectedGraph::FullEdge& a,
+inline bool operator<(const CompactDirectedGraph::FullEdge& a,
                const CompactDirectedGraph::FullEdge& b) {
   return std::tie(a.from_idx, a.to_idx, a.weight) <
          std::tie(b.from_idx, b.to_idx, b.weight);

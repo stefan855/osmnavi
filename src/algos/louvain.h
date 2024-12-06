@@ -531,7 +531,7 @@ struct NodeLineRemover {
 
 // Find the cluster of a node at the input level by climbing up the clusters
 // level-by-level to the top level.
-uint32_t FindFinalCluster(
+inline uint32_t FindFinalCluster(
     const std::vector<std::unique_ptr<LouvainGraph>>& gvec, uint32_t node_pos) {
   for (const auto& g : gvec) {
     const LouvainNode& n = g->nodes.at(node_pos);
@@ -543,7 +543,7 @@ uint32_t FindFinalCluster(
 // Remove empty clusters and adjust cluster_pos stored in nodes to reflect the
 // new position.
 // With this, the clusters on level X map 1:1 to nodes at level X+1.
-void RemoveEmptyClusters(LouvainGraph* g) {
+inline void RemoveEmptyClusters(LouvainGraph* g) {
   uint32_t write_pos = 0;
   std::vector<uint32_t> old_to_new(g->clusters.size(), INFU32);
   for (size_t pos = 0; pos < g->clusters.size(); ++pos) {
@@ -571,7 +571,8 @@ void RemoveEmptyClusters(LouvainGraph* g) {
 // the input clusters as nodes. The new nodes have the same in-vector positions
 // as the source clusters. Check-fails if there are empty clusters, i.e. call
 // RemoveEmptyClusters() before calling this function.
-void CreateClusterGraph(const LouvainGraph& input, LouvainGraph* result) {
+inline void CreateClusterGraph(const LouvainGraph& input,
+                               LouvainGraph* result) {
   LOG_S(INFO) << absl::StrFormat(
       "Cluster graph with nodes:%u edges:%u clusters:%u", input.nodes.size(),
       input.edges.size(), input.clusters.size());

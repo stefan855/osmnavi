@@ -7,6 +7,7 @@
 #include "base/huge_bitset.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"
+#include "graph/build_clusters.h"
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
@@ -17,12 +18,11 @@
 #include "osm/maxspeed.h"
 #include "osm/oneway.h"
 #include "osm/osm_helpers.h"
+#include "osm/read_osm_pbf.h"
 #include "osm/surface.h"
 
 namespace build_graph {
-
 namespace {
-
 struct NodeCountry {
   int64_t id;
   uint16_t ncc;
@@ -40,21 +40,23 @@ struct WayContext {
   // std::string_view streetname;
   // WriteBuff node_ids_buff;
 };
-
 }  // namespace
 
 void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,
                                     HugeBitset* node_ids,
-                                    MetaStatsData* stats) {
+                                    BuildGraphStats* stats) {
   if (HighwayLabelToEnum(tagh.GetValue(osm_way, "highway")) == HW_MAX) {
     return;
   }
   {
     std::unique_lock<std::mutex> l(mut);
     stats->num_ways_with_highway_tag++;
-    stats->num_edges_with_highway_tag += (osm_way.refs().size() - 1);
-    stats->num_noderefs_with_highway_tag += osm_way.refs().size();
+    const size_t ref_size = osm_way.refs().size();
+    if (ref_size > 0) {
+      stats->num_edges_with_highway_tag += (osm_way.refs().size() - 1);
+      stats->num_noderefs_with_highway_tag += osm_way.refs().size();
+    }
     std::int64_t running_id = 0;
     for (int ref_idx = 0; ref_idx < osm_way.refs().size(); ++ref_idx) {
       running_id += osm_way.refs(ref_idx);
@@ -196,7 +198,7 @@ std::string CreateWayTagSignature(const OSMTagHelper& tagh,
 }
 
 // Given a way, return a list of all way nodes with their countries.
-std::vector<NodeCountry> ExtractNodeCountries(const MetaData& meta,
+std::vector<NodeCountry> ExtractNodeCountries(const GraphMetaData& meta,
                                               const OSMPBF::Way& osm_way) {
   std::vector<NodeCountry> node_countries;
   std::int64_t running_id = 0;
@@ -247,7 +249,8 @@ void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
 // Also marks the nodes of edges connecting different countries as "needed".
 // This keeps edge distances short when we are not sure about speed limits,
 // access rules etc.
-void MarkSeenAndNeeded(MetaData* meta, const std::vector<NodeCountry>& ncs) {
+void MarkSeenAndNeeded(GraphMetaData* meta,
+                       const std::vector<NodeCountry>& ncs) {
   // Mark nodes at country-crossing edges as 'needed' .
   for (size_t i = 0; i < ncs.size() - 1; ++i) {
     if (ncs.at(i).ncc != ncs.at(i + 1).ncc) {
@@ -284,7 +287,6 @@ std::uint16_t LimitedMaxspeed(const PerCountryConfig::ConfigValue& cv,
   }
   return m;
 }
-
 }  // namespace
 
 inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
@@ -382,8 +384,8 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
 
 namespace {
 void MayStoreWayTagStats(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                         std::mutex& mut, MetaData* meta) {
-  if (meta->stats.log_way_tag_stats &&
+                         std::mutex& mut, GraphMetaData* meta) {
+  if (meta->opt.log_way_tag_stats &&
       !tagh.GetValue(osm_way, "highway").empty()) {
     std::string statkey = CreateWayTagSignature(tagh, osm_way);
     if (!statkey.empty()) {
@@ -412,7 +414,6 @@ inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
   EncodeUInt(node_ids.size(), node_ids_buff);
   EncodeNodeIds(node_ids, node_ids_buff);
 }
-
 }  // namespace
 
 // Check if osm_way is part of the routable network (routable by car etc.) and
@@ -420,10 +421,12 @@ inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
 // bitsets.
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
-                      MetaData* meta) {
+                      GraphMetaData* meta) {
   if (osm_way.refs().size() <= 1) {
     LOG_S(INFO) << absl::StrFormat("Ignore way %lld of length %lld",
                                    osm_way.id(), osm_way.refs().size());
+    std::unique_lock<std::mutex> l(mut);
+    meta->stats.num_ways_too_short++;
     return;
   }
 
@@ -512,4 +515,707 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   }
 }
 
+namespace {
+void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
+             const bool out, const bool contra_way, const bool both_directions,
+             const size_t way_idx, const std::uint64_t distance_cm) {
+  GNode& n = g.nodes.at(start_idx);
+  const GNode& other = g.nodes.at(other_idx);
+  GEdge* edges = out ? n.edges : n.edges + n.num_edges_out;
+  size_t num_edges = out ? n.num_edges_out : n.num_edges_inverted;
+  for (size_t pos = 0; pos < num_edges; ++pos) {
+    // Unused edges are marked with 'other_node_idx == INFU32'.
+    if (edges[pos].other_node_idx == INFU32) {
+      assert(other_idx != INFU32);
+      edges[pos].other_node_idx = other_idx;
+      edges[pos].way_idx = way_idx;
+      edges[pos].distance_cm = distance_cm;
+      edges[pos].unique_other = 0;
+      edges[pos].bridge = 0;
+      edges[pos].to_bridge = 0;
+      edges[pos].contra_way = contra_way ? 1 : 0;
+      edges[pos].both_directions = both_directions ? 1 : 0;
+      edges[pos].cross_country = n.ncc != other.ncc;
+      return;
+    }
+  }
+  // Should not happen because we preallocated needed space.
+  ABORT_S() << absl::StrFormat(
+      "Cannot store edge at node:%lld start_idx:%u num_edges:%u other_idx:%u "
+      "out:%d way_idx:%u dist:%llu",
+      n.node_id, start_idx, num_edges, other_idx, out, way_idx, distance_cm);
+}
+
+void MarkUniqueOther(GNode* n) {
+  GEdge* edges = n->edges;
+  for (size_t i = 0; i < gnode_total_edges(*n); ++i) {
+    size_t k = 0;
+    while (k < i) {
+      if (edges[i].other_node_idx == edges[k].other_node_idx) {
+        break;
+      }
+      k++;
+    }
+    edges[i].unique_other = (i == k);
+  }
+}
+
+void FindLargeComponents(Graph* g) {
+  ComponentAnalyzer a(*g);
+  g->large_components = a.FindLargeComponents();
+  ComponentAnalyzer::MarkLargeComponents(g);
+}
+
+void ApplyTarjan(Graph& g, GraphMetaData* meta) {
+  FUNC_TIMER();
+  if (g.large_components.empty()) {
+    ABORT_S() << "g.large_components is empty";
+  }
+  Tarjan t(g);
+  std::vector<Tarjan::BridgeInfo> bridges;
+  for (const Graph::Component& comp : g.large_components) {
+    bridges.clear();
+    t.FindBridges(comp, &bridges);
+    // Sort bridges in descending order of subtrees. If a dead-end contains
+    // other, smaller dead-ends, then only the dead-end with the largest subtree
+    // is actually used.
+    std::sort(bridges.begin(), bridges.end(),
+              [](const Tarjan::BridgeInfo& a, const Tarjan::BridgeInfo& b) {
+                return a.subtree_size > b.subtree_size;
+              });
+    for (const Tarjan::BridgeInfo& bridge : bridges) {
+      MarkBridgeEdge(g, bridge.from_node_idx, bridge.to_node_idx);
+      MarkBridgeEdge(g, bridge.to_node_idx, bridge.from_node_idx);
+      meta->stats.num_dead_end_nodes +=
+          MarkDeadEndNodes(g, bridge.to_node_idx, bridge.subtree_size);
+    }
+  }
+  LOG_S(INFO) << absl::StrFormat(
+      "Graph has %u (%.2f%%) dead end nodes.", meta->stats.num_dead_end_nodes,
+      (100.0 * meta->stats.num_dead_end_nodes) / g.nodes.size());
+}
+
+void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
+                     std::mutex& mut, GraphMetaData* meta) {
+  // TODO: Handle turn restrictions (currently we're only reading them).
+  TurnRestriction tr;
+  ResType rt =
+      ParseTurnRestriction(tagh, osm_rel, meta->opt.log_turn_restrictions, &tr);
+  if (rt == ResType::Ignore) return;
+
+  if (rt == ResType::Success &&
+      ConnectTurnRestriction(meta->graph, meta->opt.log_turn_restrictions,
+                             &tr)) {
+    std::unique_lock<std::mutex> l(mut);
+    meta->turn_restrictions.push_back(tr);
+  } else {
+    std::unique_lock<std::mutex> l(mut);
+    meta->stats.num_turn_restriction_errors++;
+  }
+}
+
+// Read the ways that might useful for routing, remember the nodes ids touched
+// by these ways, then read the node coordinates and store them in 'node_table'.
+void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
+                         BuildGraphStats* stats) {
+  HugeBitset touched_nodes_ids;
+  // Read ways and remember the touched nodes in 'touched_nodes_ids'.
+  reader->ReadWays([&touched_nodes_ids, stats](const OSMTagHelper& tagh,
+                                               const OSMPBF::Way& way,
+                                               std::mutex& mut) {
+    ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids, stats);
+  });
+
+  // Read all the node coordinates for nodes in 'touched_nodes_ids'.
+  reader->ReadBlobs(
+      OsmPbfReader::ContentNodes,
+      [&touched_nodes_ids, node_table](const OSMTagHelper& tagh,
+                                       const OSMPBF::PrimitiveBlock& prim_block,
+                                       std::mutex& mut) {
+        ConsumeNodeBlob(tagh, prim_block, mut, touched_nodes_ids, node_table);
+      });
+  // Make node table searchable, so we can look up lat/lon by node_id.
+  node_table->Sort();
+}
+
+void SortGWays(GraphMetaData* meta) {
+  FUNC_TIMER();
+  // Sort by ascending way_id.
+  std::sort(meta->graph.ways.begin(), meta->graph.ways.end(),
+            [](const GWay& a, const GWay& b) { return a.id < b.id; });
+}
+
+void AllocateGNodes(GraphMetaData* meta) {
+  FUNC_TIMER();
+  meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits());
+  NodeBuilder::GlobalNodeIter iter(*meta->node_table);
+  const NodeBuilder::VNode* node;
+  while ((node = iter.Next()) != nullptr) {
+    if (meta->way_nodes_needed->GetBit(node->id)) {
+      GNode snode;
+      snode.node_id = node->id;
+      snode.lat = node->lat;
+      snode.lon = node->lon;
+      snode.num_edges_inverted = 0;
+      snode.num_edges_out = 0;
+      snode.dead_end = 0;
+      snode.large_component = 0;
+      meta->graph.nodes.push_back(snode);
+    }
+  }
+}
+
+void SetCountryInGNodes(GraphMetaData* meta) {
+  FUNC_TIMER();
+  // TODO: run with thread pool.
+  for (GNode& n : meta->graph.nodes) {
+    n.ncc = meta->tiler->GetCountryNum(n.lon, n.lat);
+  }
+}
+
+void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
+                             GraphMetaData* meta, std::mutex& mut) {
+  Graph& graph = meta->graph;
+
+  for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
+    const GWay& way = graph.ways.at(way_idx);
+    const WaySharedAttrs& wsa = GetWSA(graph, way);
+    std::vector<size_t> node_idx =
+        meta->graph.GetGWayNodeIndexes(*(meta->way_nodes_needed), way);
+    {
+      // Update edge counts.
+      std::unique_lock<std::mutex> l(mut);
+      int64_t prev_idx = -1;
+      for (const size_t idx : node_idx) {
+        if (prev_idx >= 0) {
+          // TODO: self edges?
+          // CHECK_NE_S(idx1, idx2) << way.id;
+
+          if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
+              WSAAnyRoutable(wsa, DIR_BACKWARD)) {
+            graph.nodes.at(prev_idx).num_edges_out++;
+            graph.nodes.at(idx).num_edges_out++;
+          } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
+            graph.nodes.at(prev_idx).num_edges_out++;
+            graph.nodes.at(idx).num_edges_inverted++;
+          } else {
+            CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
+            graph.nodes.at(prev_idx).num_edges_inverted++;
+            graph.nodes.at(idx).num_edges_out++;
+          }
+        }
+        prev_idx = idx;
+      }
+    }
+  };
+}
+
+void ComputeEdgeCounts(GraphMetaData* meta) {
+  FUNC_TIMER();
+  std::mutex mut;
+  const size_t unit_length = 25000;
+  ThreadPool pool;
+  for (size_t start_pos = 0; start_pos < meta->graph.ways.size();
+       start_pos += unit_length) {
+    pool.AddWork([meta, &mut, start_pos, unit_length](int thread_idx) {
+      const size_t stop_pos =
+          std::min(start_pos + unit_length, meta->graph.ways.size());
+      ComputeEdgeCountsWorker(start_pos, stop_pos, meta, mut);
+    });
+  }
+  pool.Start(meta->opt.n_threads);
+  pool.WaitAllFinished();
+}
+
+void AllocateEdgeArrays(GraphMetaData* meta) {
+  FUNC_TIMER();
+  for (GNode& n : meta->graph.nodes) {
+    const std::uint32_t num_edges = gnode_total_edges(n);
+    CHECK_GT_S(num_edges, 0u);
+    if (num_edges > 0) {
+      n.edges = (GEdge*)meta->graph.aligned_pool_.AllocBytes(num_edges *
+                                                             sizeof(GEdge));
+      for (size_t k = 0; k < num_edges; ++k) {
+        n.edges[k].other_node_idx = INFU32;
+      }
+    }
+  }
+}
+
+void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
+                              GraphMetaData* meta, std::mutex& mut) {
+  Graph& graph = meta->graph;
+  std::vector<uint64_t> ids;
+  std::vector<size_t> node_idx;
+  std::vector<uint64_t> dist_sums;
+
+  // Compute distances between the nodes of the way and store
+  for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
+    const GWay& way = graph.ways.at(way_idx);
+    ids.clear();
+    node_idx.clear();
+    dist_sums.clear();
+    // Decode node_ids.
+    std::uint64_t num_nodes;
+    std::uint8_t* ptr = way.node_ids;
+    ptr += DecodeUInt(ptr, &num_nodes);
+    ptr += DecodeNodeIds(ptr, num_nodes, &ids);
+
+    // Compute distances sum from start and store in distance vector.
+    // Non-existing nodes add 0 to the distance.
+    NodeBuilder::VNode prev_node = {.id = 0, .lat = 0, .lon = 0};
+    int64_t sum = 0;
+    for (const uint64_t id : ids) {
+      if (meta->way_nodes_seen->GetBit(id)) {
+        NodeBuilder::VNode node;
+        if (!NodeBuilder::FindNode(*meta->node_table, id, &node)) {
+          // Should not happen, all 'seen' nodes should exist.
+          ABORT_S() << absl::StrFormat("Way:%llu has missing node %llu", way.id,
+                                       id);
+        }
+        // Sum up distance so far.
+        if (prev_node.id != 0) {
+          sum += calculate_distance(prev_node.lat, prev_node.lon, node.lat,
+                                    node.lon);
+        }
+        prev_node = node;
+      }
+      dist_sums.push_back(sum);
+      if (meta->way_nodes_needed->GetBit(id)) {
+        std::size_t idx = graph.FindNodeIndex(id);
+        CHECK_S(idx >= 0 && idx < graph.nodes.size());
+        node_idx.push_back(idx);
+      } else {
+        node_idx.push_back(std::numeric_limits<size_t>::max());
+      }
+    }
+    CHECK_EQ_S(ids.size(), dist_sums.size());
+    CHECK_EQ_S(ids.size(), node_idx.size());
+
+    // Go through 'needed' nodes (skip the others) and output edges.
+    {
+      const WaySharedAttrs& wsa = GetWSA(graph, way);
+      std::unique_lock<std::mutex> l(mut);
+      int last_pos = -1;
+      for (size_t pos = 0; pos < ids.size(); ++pos) {
+        uint64_t id = ids.at(pos);
+        if (meta->way_nodes_needed->GetBit(id)) {
+          if (last_pos >= 0) {
+            // Emit edge.
+            std::size_t idx1 = node_idx.at(last_pos);
+            std::size_t idx2 = node_idx.at(pos);
+            uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(last_pos);
+            // Store edges with the summed up distance.
+
+            if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
+                WSAAnyRoutable(wsa, DIR_BACKWARD)) {
+              AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
+                      /*both_directions=*/true, way_idx, distance_cm);
+              AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
+                      /*both_directions=*/true, way_idx, distance_cm);
+            } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
+              AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
+                      /*both_directions=*/false, way_idx, distance_cm);
+              AddEdge(graph, idx2, idx1, /*out=*/false, /*contra_way=*/true,
+                      /*both_directions=*/false, way_idx, distance_cm);
+            } else {
+              CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
+              AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
+                      /*both_directions=*/false, way_idx, distance_cm);
+              AddEdge(graph, idx1, idx2, /*out=*/false, /*contra_way=*/false,
+                      /*both_directions=*/false, way_idx, distance_cm);
+            }
+          }
+          last_pos = pos;
+        }
+      }
+    }
+  }
+}
+
+void PopulateEdgeArrays(GraphMetaData* meta) {
+  FUNC_TIMER();
+  std::mutex mut;
+  const size_t unit_length = 25000;
+  ThreadPool pool;
+  for (size_t start_pos = 0; start_pos < meta->graph.ways.size();
+       start_pos += unit_length) {
+    pool.AddWork([meta, &mut, start_pos, unit_length](int thread_idx) {
+      const size_t stop_pos =
+          std::min(start_pos + unit_length, meta->graph.ways.size());
+      PopulateEdgeArraysWorker(start_pos, stop_pos, meta, mut);
+    });
+  }
+  pool.Start(meta->opt.n_threads);
+  pool.WaitAllFinished();
+}
+
+void MarkUniqueEdges(GraphMetaData* meta) {
+  FUNC_TIMER();
+  for (GNode& n : meta->graph.nodes) {
+    MarkUniqueOther(&n);
+  }
+}
+
+void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
+  FUNC_TIMER();
+  RoutingMetricTime metric;
+  if (!meta->graph.clusters.empty()) {
+    ThreadPool pool;
+    for (GCluster& cluster : meta->graph.clusters) {
+      pool.AddWork([meta, &metric, &cluster](int) {
+        // TODO: support the other vehicle types.
+        build_clusters::ComputeShortestClusterPaths(meta->graph, metric,
+                                                    VH_MOTOR_VEHICLE, &cluster);
+      });
+    }
+    // Faster with few threads only.
+    pool.Start(std::min(5, meta->opt.n_threads));
+    pool.WaitAllFinished();
+  }
+}
+
+void ExecuteLouvain(const bool merge_tiny_clusters, GraphMetaData* meta) {
+  FUNC_TIMER();
+  build_clusters::ExecuteLouvainStages(meta->opt.n_threads, &meta->graph);
+  build_clusters::UpdateGraphClusterInformation(&meta->graph);
+
+  if (merge_tiny_clusters) {
+    build_clusters::MergeTinyClusters(&(meta->graph));
+    build_clusters::UpdateGraphClusterInformation(&meta->graph);
+  }
+
+  // build_clusters::StoreClusterInformation(gvec, &meta->graph);
+  build_clusters::PrintClusterInformation(meta->graph);
+
+  ComputeShortestPathsInAllClusters(meta);
+
+  if (meta->opt.check_shortest_cluster_paths) {
+    // Check if astar and dijkstra find the same shortest paths.
+    build_clusters::CheckShortestClusterPaths(meta->graph, meta->opt.n_threads);
+  }
+}
+
+void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
+  FUNC_TIMER();
+  const Graph& g = meta->graph;
+  BuildGraphStats& stats = meta->stats;
+
+  stats.num_nodes_in_pbf = reader.CountEntries(OsmPbfReader::ContentNodes);
+  stats.num_ways_in_pbf = reader.CountEntries(OsmPbfReader::ContentWays);
+  stats.num_relations_in_pbf =
+      reader.CountEntries(OsmPbfReader::ContentRelations);
+
+  for (const GWay& w : g.ways) {
+    const WaySharedAttrs& wsa = GetWSA(g, w);
+    const RoutingAttrs ra_forw =
+        GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_FORWARD);
+    const RoutingAttrs ra_backw =
+        GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_BACKWARD);
+
+    if (RoutableAccess(ra_forw.access) && RoutableAccess(ra_backw.access) &&
+        ra_forw.maxspeed != ra_backw.maxspeed) {
+      stats.num_ways_diff_maxspeed += 1;
+    }
+    if ((RoutableAccess(ra_forw.access) && ra_forw.maxspeed == 0) ||
+        (RoutableAccess(ra_backw.access) && ra_backw.maxspeed == 0)) {
+      stats.num_ways_no_maxspeed += 1;
+    }
+    stats.num_ways_has_country += w.uniform_country;
+    stats.num_ways_has_streetname += w.streetname == nullptr ? 0 : 1;
+    stats.num_ways_oneway_car +=
+        (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
+  }
+
+  for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
+    const GNode& n = g.nodes.at(node_idx);
+    if (n.cluster_id != INVALID_CLUSTER_ID) {
+      stats.num_nodes_in_cluster++;
+    }
+    if (n.large_component == 0) {
+      stats.num_nodes_in_small_component++;
+    }
+    stats.num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
+
+    stats.num_edges_inverted += n.num_edges_inverted;
+    stats.num_edges_out += n.num_edges_out;
+    stats.max_edges_inverted =
+        std::max(stats.max_edges_inverted, (int64_t)n.num_edges_inverted);
+    stats.max_edges_out =
+        std::max(stats.max_edges_out, (int64_t)n.num_edges_out);
+    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
+      const GEdge& edge = n.edges[edge_pos];
+      if (!edge.unique_other) {
+        stats.num_edges_non_unique++;
+      }
+      if (edge_pos < n.num_edges_out && edge.other_node_idx != node_idx) {
+        stats.sum_edge_length_cm += edge.distance_cm;
+        if (edge.distance_cm == 0) {
+          LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
+                      << g.nodes.at(edge.other_node_idx).node_id;
+        }
+        stats.min_edge_length_cm =
+            std::min(stats.min_edge_length_cm, (int64_t)edge.distance_cm);
+        stats.max_edge_length_cm =
+            std::max(stats.max_edge_length_cm, (int64_t)edge.distance_cm);
+      }
+      stats.num_cross_country_edges += (edge.contra_way && edge.cross_country);
+    }
+  }
+}
+
+void PrintStats(const GraphMetaData& meta) {
+  const Graph& graph = meta.graph;
+  const BuildGraphStats& stats = meta.stats;
+
+  LOG_S(INFO) << "=========== Pbf Stats ============";
+  LOG_S(INFO) << absl::StrFormat("Nodes:              %12lld",
+                                 stats.num_nodes_in_pbf);
+  LOG_S(INFO) << absl::StrFormat("Ways:               %12lld",
+                                 stats.num_ways_in_pbf);
+  LOG_S(INFO) << absl::StrFormat("Relations:          %12lld",
+                                 stats.num_relations_in_pbf);
+  LOG_S(INFO) << absl::StrFormat("Ways with hw tag:   %12lld",
+                                 stats.num_ways_with_highway_tag);
+  LOG_S(INFO) << absl::StrFormat("Edges with hw tag:  %12lld",
+                                 stats.num_edges_with_highway_tag);
+  LOG_S(INFO) << absl::StrFormat("Noderefs with hw tag:%11lld",
+                                 stats.num_noderefs_with_highway_tag);
+  LOG_S(INFO) << absl::StrFormat("Ways too short:     %12lld",
+                                 stats.num_ways_too_short);
+  LOG_S(INFO) << absl::StrFormat("Missing-nodes ways: %12lld",
+                                 stats.num_ways_missing_nodes);
+
+  LOG_S(INFO) << "========= Various Stats ==========";
+  LOG_S(INFO) << absl::StrFormat("Num var-nodes:      %12lld",
+                                 meta.node_table->total_records());
+  LOG_S(INFO) << absl::StrFormat(
+      "  bytes/var-node:   %12.2f",
+      static_cast<double>(meta.node_table->mem_allocated()) /
+          meta.node_table->total_records());
+  LOG_S(INFO) << absl::StrFormat("Num turn restrictions:%10lld",
+                                 meta.turn_restrictions.size());
+  LOG_S(INFO) << absl::StrFormat("Num turn restr errors:%10lld",
+                                 stats.num_turn_restriction_errors);
+
+  LOG_S(INFO) << "========= Graph Stats ============";
+  std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
+  std::int64_t way_added_bytes = graph.unaligned_pool_.MemAllocated();
+  std::int64_t way_shared_attrs_bytes =
+      graph.way_shared_attrs.size() * sizeof(WaySharedAttrs);
+  LOG_S(INFO) << absl::StrFormat("Ways selected:      %12lld",
+                                 graph.ways.size());
+
+  LOG_S(INFO) << absl::StrFormat("  Nodes \"seen\":     %12lld",
+                                 meta.way_nodes_seen->CountBits());
+
+  LOG_S(INFO) << absl::StrFormat("  Nodes \"needed\":   %12lld",
+                                 meta.way_nodes_needed->CountBits());
+
+  LOG_S(INFO) << absl::StrFormat("  No maxspeed:      %12lld",
+                                 stats.num_ways_no_maxspeed);
+  LOG_S(INFO) << absl::StrFormat("  Diff maxspeed/dir:%12lld",
+                                 stats.num_ways_diff_maxspeed);
+  LOG_S(INFO) << absl::StrFormat("  Has country:      %12lld",
+                                 stats.num_ways_has_country);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Has no country:   %12lld",
+      graph.ways.size() - stats.num_ways_has_country);
+  LOG_S(INFO) << absl::StrFormat("  Has streetname:   %12lld",
+                                 stats.num_ways_has_streetname);
+  LOG_S(INFO) << absl::StrFormat("  Oneway for cars:  %12lld",
+                                 stats.num_ways_oneway_car);
+  LOG_S(INFO) << absl::StrFormat("  Closed ways:      %12lld",
+                                 stats.num_ways_closed);
+  LOG_S(INFO) << absl::StrFormat("  Bytes per way     %12.2f",
+                                 (double)way_bytes / graph.ways.size());
+  LOG_S(INFO) << absl::StrFormat("  Added per way     %12.2f",
+                                 (double)way_added_bytes / graph.ways.size());
+  LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
+                                 way_bytes + way_added_bytes);
+
+  LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld",
+                                 graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
+                                 stats.num_dead_end_nodes);
+  LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld",
+                                 stats.num_nodes_in_cluster);
+  LOG_S(INFO) << absl::StrFormat("  Node in small comp:%11lld",
+                                 stats.num_nodes_in_small_component);
+  LOG_S(INFO) << absl::StrFormat("  Nodes no country: %12lld",
+                                 stats.num_nodes_no_country);
+
+  LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld",
+                                 stats.num_edges_out);
+  LOG_S(INFO) << absl::StrFormat("  Num edges inverted: %10lld",
+                                 stats.num_edges_inverted);
+  LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
+                                 stats.num_edges_non_unique);
+
+  LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
+                                 stats.min_edge_length_cm);
+  LOG_S(INFO) << absl::StrFormat("  Max edge length:  %12lld",
+                                 stats.max_edge_length_cm);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Avg edge length   %12.0f",
+      (double)stats.sum_edge_length_cm / stats.num_edges_out);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Num edges/node:   %12.2f",
+      static_cast<double>(stats.num_edges_inverted + stats.num_edges_out) /
+          graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld",
+                                 stats.max_edges_out);
+  LOG_S(INFO) << absl::StrFormat("  Max edges inverted: %10lld",
+                                 stats.max_edges_inverted);
+  LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
+                                 stats.num_cross_country_edges);
+
+  std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
+  std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
+  LOG_S(INFO) << absl::StrFormat("  Bytes per node    %12.2f",
+                                 (double)node_bytes / graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Added per node    %12.2f",
+                                 (double)node_added_bytes / graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
+                                 node_bytes + node_added_bytes);
+
+  LOG_S(INFO) << "========= Memory Stats ===========";
+  LOG_S(INFO) << absl::StrFormat("Bitset memory:      %12.2f MB",
+                                 (meta.way_nodes_seen->NumUsedBytes() +
+                                  meta.way_nodes_needed->NumUsedBytes()) /
+                                     1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Varnode memory:     %12.2f MB",
+                                 meta.node_table->mem_allocated() / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Node graph memory:  %12.2f MB",
+                                 (node_bytes + node_added_bytes) / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Way graph memory:   %12.2f MB",
+                                 (way_bytes + way_added_bytes) / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Way shared attrs:   %12.2f MB",
+                                 way_shared_attrs_bytes / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Total graph memory: %12.2f MB",
+                                 (node_bytes + node_added_bytes + way_bytes +
+                                  way_added_bytes + way_shared_attrs_bytes) /
+                                     1000000.0);
+}
+
+void PrintWayTagStats(const GraphMetaData& meta) {
+  const FrequencyTable& ft = meta.stats.way_tag_stats;
+  const std::vector<FrequencyTable::Entry> v = ft.GetSortedElements();
+  for (size_t i = 0; i < v.size(); ++i) {
+    const FrequencyTable::Entry& e = v.at(i);
+    char cc[3] = "--";  // Way not found, can easily happen because many ways
+                        // are not stored in the graph.
+    {
+      const GWay* way = meta.graph.FindWay(e.example_id);
+      if (way != nullptr) {
+        strcpy(cc, ">1");
+        if (way->uniform_country) {
+          CountryNumToTwoLetter(way->ncc, cc);
+        }
+      }
+    }
+
+    RAW_LOG_F(INFO, "%7lu %10ld id:%10ld %s %s", i, e.ref_count, e.example_id,
+              cc, std::string(e.key).c_str());
+  }
+  LOG_S(INFO) << absl::StrFormat(
+      "Number of different ways tag configurations: %ld, total %ld (%.2f%%)",
+      ft.TotalUnique(), ft.Total(), (100.0 * ft.TotalUnique()) / ft.Total());
+}
+}  // namespace
+
+GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
+  GraphMetaData meta;
+  meta.opt = opt;
+  meta.way_nodes_seen.reset(new HugeBitset);
+  meta.way_nodes_needed.reset(new HugeBitset);
+  meta.node_table.reset(new DataBlockTable);
+
+  // Reading is fastest with 7 threads on my hardware.
+  OsmPbfReader reader(opt.pbf_filename, std::min(7, opt.n_threads));
+
+  // Combine a few setup operations that can be done in parallel.
+  {
+    ThreadPool pool;
+    // Read file structure of pbf file.
+    pool.AddWork([&reader](int thread_idx) { reader.ReadFileStructure(); });
+    // Read country polygons and initialise tiler.
+    pool.AddWork([&meta](int thread_idx) {
+      meta.tiler.reset(new TiledCountryLookup(
+          meta.opt.admin_filepattern,
+          /*tile_size=*/TiledCountryLookup::kDegreeUnits / 5));
+    });
+    // Read routing config.
+    pool.AddWork([&meta](int) {
+      meta.per_country_config.reset(new PerCountryConfig);
+      meta.per_country_config->ReadConfig(meta.opt.routing_config);
+    });
+    pool.Start(std::min(meta.opt.n_threads, 3));
+    pool.WaitAllFinished();
+  }
+
+  LoadNodeCoordinates(&reader, meta.node_table.get(), &meta.stats);
+
+  {
+    DeDuperWithIds<WaySharedAttrs> deduper;
+    reader.ReadWays([&deduper, &meta](const OSMTagHelper& tagh,
+                                      const OSMPBF::Way& way, std::mutex& mut) {
+      ConsumeWayWorker(tagh, way, mut, &deduper, &meta);
+    });
+    {
+      // Sort and build the vector with shared way attributes.
+      deduper.SortByPopularity();
+      meta.graph.way_shared_attrs = deduper.GetObjVector();
+      const std::vector<uint32_t> mapping = deduper.GetSortMapping();
+      for (GWay& w : meta.graph.ways) {
+        w.wsa_id = mapping.at(w.wsa_id);
+      }
+      LOG_S(INFO) << absl::StrFormat(
+          "Shared way attributes de-duping %u -> %u (%.2f%%)",
+          deduper.num_added(), deduper.num_unique(),
+          (100.0 * deduper.num_unique()) / std::max(1u, deduper.num_added()));
+    }
+  }
+  SortGWays(&meta);
+
+  // TurnRestriction currently not used.
+  reader.ReadRelations(
+      [&meta](const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
+              std::mutex& mut) { ConsumeRelation(tagh, osm_rel, mut, &meta); });
+
+  AllocateGNodes(&meta);
+  SetCountryInGNodes(&meta);
+
+  // Now we know exactly which ways we have and which nodes are needed.
+  // Creade edges.
+  ComputeEdgeCounts(&meta);
+  AllocateEdgeArrays(&meta);
+  PopulateEdgeArrays(&meta);
+  MarkUniqueEdges(&meta);
+
+  // =========================================================================
+
+  {
+    NodeBuilder::VNode n;
+    bool found = NodeBuilder::FindNode(*meta.node_table, 207718684, &n);
+    LOG_S(INFO) << "Search node 207718684 expect lat:473492652 lon:87012469";
+    LOG_S(INFO) << absl::StrFormat("Find node   %llu        lat:%llu lon:%llu",
+                                   207718684, found ? n.lat : 0,
+                                   found ? n.lon : 0);
+  }
+
+  FindLargeComponents(&meta.graph);
+  ApplyTarjan(meta.graph, &meta);
+
+  ExecuteLouvain(meta.opt.merge_tiny_clusters, &meta);
+
+  // Output.
+  if (meta.opt.log_way_tag_stats) {
+    PrintWayTagStats(meta);
+  }
+  FillStats(reader, &meta);
+  PrintStats(meta);
+  LogMemoryUsage();
+  return meta;
+}
 }  // namespace build_graph

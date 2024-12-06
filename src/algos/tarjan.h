@@ -73,7 +73,7 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
 //
 // As a result, node1_idx is the node on the dead-end side of the bridge and
 // node2_idx on the non-dead-end side of the bridge.
-void FindBridge(const Graph& g, const uint32_t start_node_idx,
+inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
                 uint32_t* node1_idx, uint32_t* node2_idx) {
   // Stop after too many iterations, looks like a program error.
   int32_t count = 10000000;

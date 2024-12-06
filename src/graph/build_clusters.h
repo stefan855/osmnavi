@@ -7,6 +7,7 @@
 
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
+#include "algos/astar.h"
 #include "algos/compact_dijkstra.h"
 #include "algos/louvain.h"
 #include "base/thread_pool.h"
@@ -162,7 +163,7 @@ void AddClustersAndClusterIds(
 }  // namespace
 
 // Experimental.
-void ExecuteLouvainStages(int n_threads, Graph* graph) {
+inline void ExecuteLouvainStages(int n_threads, Graph* graph) {
   FUNC_TIMER();
 
   // 'np_to_louvain_pos' contains a mapping from a node position in
@@ -221,7 +222,7 @@ void ExecuteLouvainStages(int n_threads, Graph* graph) {
   pool.WaitAllFinished();
 }
 
-void UpdateGraphClusterInformation(Graph* g) {
+inline void UpdateGraphClusterInformation(Graph* g) {
   FUNC_TIMER();
   // Mark cross-cluster edges and count edge types.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
@@ -285,7 +286,7 @@ void UpdateGraphClusterInformation(Graph* g) {
 
 // Compute all shortest paths between border nodes in a cluster. The results
 // are stored in 'cluster.distances'.
-void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
+inline void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
                                  VEHICLE vt, GCluster* cluster) {
   CHECK_S(cluster->distances.empty());
   const size_t num_border_nodes = cluster->border_nodes.size();
@@ -320,7 +321,42 @@ void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
   CHECK_EQ_S(cluster->distances.size(), cluster->border_nodes.size());
 }
 
-void PrintClusterInformation(const Graph& g) {
+inline void CheckShortestClusterPaths(const Graph& g, int n_threads) {
+  FUNC_TIMER();
+  const RoutingMetricTime metric;
+  ThreadPool pool;
+  for (const GCluster& c : g.clusters) {
+    pool.AddWork([&g, &c, &metric](int) {
+      RoutingOptions opt;
+      opt.avoid_dead_end = true;
+      opt.restrict_to_cluster = true;
+      opt.cluster_id = c.cluster_id;
+      for (uint32_t idx = 0; idx < c.num_border_nodes; ++idx) {
+        for (uint32_t idx2 = 0; idx2 < c.num_border_nodes; ++idx2) {
+          AStarRouter rt(g, /*verbose=*/false);
+          auto result = rt.Route(c.border_nodes.at(idx),
+                                 c.border_nodes.at(idx2), metric, opt);
+
+          if (c.distances.at(idx).at(idx2) != result.found_distance) {
+            LOG_S(INFO) << absl::StrFormat(
+                "Cluster:%u path from %u to %u differs -- stored:%u vs. "
+                "computed:%u",
+                c.cluster_id, idx, idx2, c.distances.at(idx).at(idx2),
+                result.found_distance);
+          }
+          // CHECK(c.distances.at(idx).at(idx2), result.found_distance);
+        }
+      }
+      LOG_S(INFO) << absl::StrFormat(
+          "Checks paths in cluster:%u #border:%u finished", c.cluster_id,
+          c.num_border_nodes);
+    });
+  }
+  pool.Start(n_threads);
+  pool.WaitAllFinished();
+}
+
+inline void PrintClusterInformation(const Graph& g) {
   std::vector<GCluster> stats(g.clusters.begin(), g.clusters.end());
   std::sort(stats.begin(), stats.end(), [](const auto& a, const auto& b) {
     if (a.ncc != b.ncc) return a.ncc < b.ncc;
@@ -397,48 +433,5 @@ void PrintClusterInformation(const Graph& g) {
       replacement_edges, total_edges,
       (100.0 * total_edges) / ((sum_in + sum_out) / 2), total_nodes,
       (100.0 * total_nodes) / sum_nodes);
-}
-
-void WriteLouvainGraph(const Graph& g, const std::string& filename) {
-  LOG_S(INFO) << absl::StrFormat("Write louvain graph to %s", filename.c_str());
-  std::ofstream myfile;
-  myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
-
-  uint64_t count = 0;
-  for (uint32_t node_pos = 0; node_pos < g.nodes.size(); ++node_pos) {
-    const GNode& n0 = g.nodes.at(node_pos);
-    if (n0.cluster_id == INVALID_CLUSTER_ID) {
-      continue;
-    }
-
-    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos) {
-      const GEdge& e = n0.edges[edge_pos];
-      if (e.bridge || !e.unique_other) continue;
-      const GNode& n1 = g.nodes.at(e.other_node_idx);
-      // Ignore half of the edges and nodes that are not in a cluster.
-      if (e.other_node_idx <= node_pos || n1.cluster_id == INVALID_CLUSTER_ID) {
-        continue;
-      }
-
-      std::string_view color = "dpink";  // edges between clusters
-      if (n0.cluster_id == n1.cluster_id) {
-        // Edge within cluster.
-        constexpr int32_t kMaxColor = 17;
-        static std::string_view colors[kMaxColor] = {
-            "blue",   "green",  "red",     "yel",    "violet", "olive",
-            "lblue",  "dgreen", "dred",    "brown",  "grey",   "gblue",
-            "orange", "lgreen", "greenbl", "lbrown", "pink",
-        };
-        color = colors[n0.cluster_id % kMaxColor];
-      }
-
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, n0.lat, n0.lon,
-                                n1.lat, n1.lon);
-      count++;
-    }
-  }
-
-  myfile.close();
-  LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
 }
 }  // namespace build_clusters
