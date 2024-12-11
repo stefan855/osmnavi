@@ -1132,7 +1132,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   meta.node_table.reset(new DataBlockTable);
 
   // Reading is fastest with 7 threads on my hardware.
-  OsmPbfReader reader(opt.pbf_filename, std::min(7, opt.n_threads));
+  OsmPbfReader reader(opt.pbf, std::min(7, opt.n_threads));
 
   // Combine a few setup operations that can be done in parallel.
   {

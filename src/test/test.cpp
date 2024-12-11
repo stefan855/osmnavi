@@ -13,6 +13,7 @@
 #include "base/thread_pool.h"
 #include "base/util.h"
 #include "base/varbyte.h"
+#include "geometry/closest_node.h"
 #include "geometry/distance.h"
 #include "geometry/line_clipping.h"
 #include "geometry/polygon.h"
@@ -1203,6 +1204,71 @@ void TestDeDuperWithIdsString() {
   CHECK_EQ_S(els.at(2), "ccc");
 }
 
+namespace {
+int64_t qdist(int64_t lat, int64_t lon, const GNode& n) {
+  int64_t dlat = lat - n.lat;
+  int64_t dlon = lon - n.lon;
+  return dlat * dlat + dlon * dlon;
+}
+}  // namespace
+
+void TestClosestPoint() {
+  FUNC_TIMER();
+  Graph g;
+  // Coords (-1,-1) (0,0) (1,1) (2,2)
+  g.nodes.push_back({.lat = 0, .lon = 0});
+  g.nodes.push_back({.lat = 40'000'000, .lon = 20'000'000});
+  g.nodes.push_back({.lat = 20'000'000, .lon = 10'000'000});
+  g.nodes.push_back({.lat = -20'000'000, .lon = -10'000'000});
+
+  auto idx = SortNodeIndexesByLon(g);
+  CHECK_EQ_S(idx.size(), 4);
+  CHECK_EQ_S(idx.at(0), 3);
+  CHECK_EQ_S(idx.at(1), 0);
+  CHECK_EQ_S(idx.at(2), 2);
+  CHECK_EQ_S(idx.at(3), 1);
+
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -10'000'001), 0);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -10'000'000), 0);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -9'999'999), 1);
+
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -1), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 0), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 1), 2);
+
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 9'999'999), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 10'000'000), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 10'000'001), 3);
+
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 19'999'999), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 20'000'000), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 20'000'001), 4);
+
+  // Note, we've found two (lat,lon) pairs that different results slow vs. fast
+  // because the have the same qdist:
+  // (-20689183,66378366)
+  // (-3708155,-17583690)
+  srand(1);
+  for (int i = 0; i < 100'000; ++i) {
+    // Random coordinates in the range [-10, +10) degrees.
+    int64_t lat = (rand() % (2 * 90 * TEN_POW_7)) - 90 * TEN_POW_7;
+    int64_t lon = (rand() % (2 * 180 * TEN_POW_7)) - 180 * TEN_POW_7;
+    auto slow = FindClosestNodeSlow(g, lat, lon);
+    auto fast = FindClosestNodeFast(g, idx, lat, lon);
+    if (slow.dist != fast.dist) {
+      const GNode& nslow = g.nodes.at(slow.node_pos);
+      const GNode& nfast = g.nodes.at(fast.node_pos);
+      int64_t slow_qdist = qdist(lat, lon, nslow);
+      int64_t fast_qdist = qdist(lat, lon, nfast);
+      LOG_S(INFO) << absl::StrFormat(
+          "Searching for (%d,%d)\nslow (%d,%d) qdist:%d cm:%d\nfast (%d,%d) "
+          "qdist:%d cm:%d",
+          lat, lon, nslow.lat, nslow.lon, slow_qdist, slow.dist, nfast.lat,
+          nfast.lon, fast_qdist, fast.dist);
+    }
+  }
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1236,6 +1302,7 @@ int main(int argc, char* argv[]) {
 
   TestDeDuperWithIdsInt();
   TestDeDuperWithIdsString();
+  TestClosestPoint();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

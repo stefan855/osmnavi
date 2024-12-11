@@ -19,16 +19,17 @@ struct POI {
   std::string type;
 
   // lat/lon of the point or the average lat/lon if a way or relation.
-  std::uint32_t lat = INFU32;
-  std::uint32_t lon = INFU32;
+  std::int32_t lat = INF32;
+  std::int32_t lon = INF32;
 
   // Cumulative numbers to compute average lat/lon values above.
-  std::uint64_t sum_lat = 0;
-  std::uint64_t sum_lon = 0;
-  std::uint64_t num_points = 0;
+  std::int64_t sum_lat = 0;
+  std::int64_t sum_lon = 0;
+  std::int64_t num_points = 0;
 
   // Node in the road graph that is closest to the POI by lat/lon.
-  std::uint32_t road_graph_node_idx = INFU32;
+  std::uint32_t routing_node_idx = INFU32;
+  std::int64_t routing_node_dist = INF64;
 };
 
 struct CollectedData {
@@ -136,8 +137,8 @@ void ComputeAverages(CollectedData* data) {
       poi.lon = poi.sum_lon / poi.num_points;
     } else {
       CHECK_EQ_S(poi.obj_type, 'n');
-      CHECK_EQ_S(poi.lat, poi.sum_lat);
-      CHECK_EQ_S(poi.lon, poi.sum_lon);
+      CHECK_EQ_S(poi.lat, poi.sum_lat) << poi.id << " #" << poi.num_points;
+      CHECK_EQ_S(poi.lon, poi.sum_lon) << poi.id << " #" << poi.num_points;
     }
   }
 }

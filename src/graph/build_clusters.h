@@ -56,16 +56,6 @@ inline TGVec CreateInitalLouvainGraph(const Graph& graph,
         auto it = np_to_louvain_pos.find(e.other_node_idx);
         CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
         g->AddEdge(it->second, /*weight=*/n.ncc != other.ncc ? 1 : 1);
-#if 0
-        const GWay& way = graph.ways.at(e.way_idx);
-        if (way.highway_label == HW_RESIDENTIAL ||
-            way.highway_label == HW_LIVING_STREET ||
-            way.highway_label == HW_SERVICE) {
-          g->AddEdge(it->second, /*weight=*/1);
-        } else {
-          g->AddEdge(it->second, /*weight=*/1);
-        }
-#endif
       }
     }
     // Check that the new node has actually some edges.
@@ -286,8 +276,9 @@ inline void UpdateGraphClusterInformation(Graph* g) {
 
 // Compute all shortest paths between border nodes in a cluster. The results
 // are stored in 'cluster.distances'.
-inline void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& metric,
-                                 VEHICLE vt, GCluster* cluster) {
+inline void ComputeShortestClusterPaths(const Graph& g,
+                                        const RoutingMetric& metric, VEHICLE vt,
+                                        GCluster* cluster) {
   CHECK_S(cluster->distances.empty());
   const size_t num_border_nodes = cluster->border_nodes.size();
   if (num_border_nodes == 0) {
@@ -297,12 +288,13 @@ inline void ComputeShortestClusterPaths(const Graph& g, const RoutingMetric& met
   // Construct a minimal graph with all necessary information.
   uint32_t num_nodes = 0;
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
-  compact_dijkstra::CollectEdges(g, metric,
-                                 {.vt = vt,
-                                  .restrict_to_cluster = true,
-                                  .cluster_id = cluster->cluster_id},
-                                 cluster->border_nodes, &num_nodes,
-                                 &full_edges);
+  compact_dijkstra::CollectEdgesForCompactGraph(
+      g, metric,
+      {.vt = vt,
+       .restrict_to_cluster = true,
+       .cluster_id = cluster->cluster_id},
+      cluster->border_nodes,
+      /*undirected_expand=*/false, &num_nodes, &full_edges);
   compact_dijkstra::SortAndCleanupEdges(&full_edges);
   const CompactDirectedGraph cg(num_nodes, full_edges);
   cg.LogStats();

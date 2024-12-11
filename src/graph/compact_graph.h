@@ -45,6 +45,18 @@ class CompactDirectedGraph {
   // in positions edges_start()[k]..edges_start()[k+1] - 1.
   const std::vector<PartialEdge>& edges() const { return edges_; }
 
+  // Return the position of the edge (from_node, to_node) in edges().
+  // Returns -1 in case the edge does not exist.
+  const int64_t FindEdge(uint32_t from_node, uint32_t to_node) const {
+    for (size_t i = edges_start_.at(from_node);
+         i < edges_start_.at(from_node + 1); ++i) {
+      if (edges_.at(i).to_idx == to_node) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   // Log stats about the graph.
   void LogStats() const {
     int32_t min_weight = std::numeric_limits<int32_t>::max();
@@ -53,14 +65,12 @@ class CompactDirectedGraph {
       if (e.weight < min_weight) min_weight = e.weight;
       if (e.weight > max_weight) max_weight = e.weight;
     }
-#if 0
     LOG_S(INFO) << absl::StrFormat(
         "CompactGraph #nodes:%u #edges:%u mem:%u weight=[%u,%u]",
         edges_start_.size() - 1, edges_.size(),
         edges_start_.size() * sizeof(uint32_t) +
             edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
         min_weight, max_weight);
-#endif
   }
 
  private:
@@ -105,7 +115,7 @@ class CompactDirectedGraph {
 };
 
 inline bool operator<(const CompactDirectedGraph::FullEdge& a,
-               const CompactDirectedGraph::FullEdge& b) {
+                      const CompactDirectedGraph::FullEdge& b) {
   return std::tie(a.from_idx, a.to_idx, a.weight) <
          std::tie(b.from_idx, b.to_idx, b.weight);
 }

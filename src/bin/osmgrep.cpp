@@ -145,14 +145,14 @@ int main(int argc, char* argv[]) {
            .desc = "Input OSM pbf file (such as planet file)."},
           {.name = "ways",
            .type = "string",
-           .desc = "Select ways that should be logged. Syntax is "
-                   "<regexp>{&&[!]<regexp>}."
-                   "<regexp> is a regular expression that needs to match a "
-                   "substring in one "
-                   "of the tags expressed as \"<key>=<value>\". Additional "
-                   "regexps can be and-ed with '&&', they have to match "
-                   "the same tag as the first expression. The additional can "
-                   "be negated with \"!\"."},
+           .desc =
+               "Select ways that should be logged. Syntax is "
+               "<regexp>{&&[!]<regexp>}."
+               "<regexp> is a regular expression that needs to match a "
+               "substring in one of the tags expressed as \"<key>=<value>\". "
+               "Additional regexps can be and-ed with '&&', they have to match "
+               "the same tag as the first expression. The additional regexps "
+               "can be individually negated with \"!\"."},
           {.name = "relations",
            .type = "string",
            .desc = "Select relations that should be logged. For syntax see "

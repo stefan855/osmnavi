@@ -7,7 +7,7 @@
 #include "base/util.h"
 #include "graph/graph_def.h"
 
-// Find largest Component in undirected graph.
+// Find large components in undirected graph.
 class ComponentAnalyzer {
  public:
   ComponentAnalyzer(const Graph& g) : g_(g) {}

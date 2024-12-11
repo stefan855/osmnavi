@@ -26,10 +26,15 @@ struct BuildGraphOptions {
   // are supported.
   std::vector<VEHICLE> vehicle_types = {VH_MOTOR_VEHICLE};
   // Path to input OSM pbf file. Must not be empty.
-  std::string pbf_filename;
+  std::string pbf;
   // File pattern for admin files (country polygons).
   std::string admin_filepattern = "../../data/admin/??_*.csv";
   std::string routing_config = "../config/routing.cfg";
+  // Clusters are aligned to country border. This sometimes causes small
+  // clusters containing little disconnected road segments, for instance when a
+  // street meanders around the border. Setting this to true merge these tiny
+  // clusters across the border, such that some clusters at the border contain a
+  // few nodes across the border.
   bool merge_tiny_clusters = true;
 
   // Max number of threads to use for parallel processing.

@@ -34,7 +34,11 @@ inline ACCESS InterpretAccessValue(std::string_view val, bool lanes,
   return acc;
 }
 
-inline void SetAccess(const ParsedTag& pt, std::string_view value,
+// Set access in forward and backward direction based on tags. 
+// 'weak' indicates that only access that already is better than 'no' should be
+// modified. For instance, a way with "highway=footway access=permissive" should
+// not be set permissive for cars.
+inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
                       RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
   ACCESS acc =
       InterpretAccessValue(value, BitIsContained(KEY_BIT_LANES_INNER, pt.bits),
@@ -45,15 +49,20 @@ inline void SetAccess(const ParsedTag& pt, std::string_view value,
     // For instance, 'agricultural' or 'forestry' will go here.
     acc = ACC_NO;
   }
-  if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
-    ra_forw->access = acc;
-  } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
-    ra_backw->access = acc;
-  } else {
-    // forward/backward are missing, either nothing or both_ways is
-    // specified, so set both.
-    ra_forw->access = acc;
-    ra_backw->access = acc;
+
+  const bool forward = BitIsContained(KEY_BIT_FORWARD, pt.bits);
+  const bool backward = BitIsContained(KEY_BIT_BACKWARD, pt.bits);
+  // If forward/backward are missing, either nothing or both_ways is
+  // specified, so set both.
+  if (forward || !backward) {
+    if (!weak || ra_forw->access != ACC_NO) {
+      ra_forw->access = acc;
+    }
+  }
+  if (backward || !forward) {
+    if (!weak || ra_backw->access != ACC_NO) {
+      ra_backw->access = acc;
+    }
   }
 }
 }  // namespace
@@ -88,7 +97,9 @@ inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
       case GetBitMask(KEY_BIT_VEHICLE):
       case GetBitMask(KEY_BIT_MOTOR_VEHICLE):
       case GetBitMask(KEY_BIT_MOTORCAR): {
-        SetAccess(pt, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+        const bool weak =
+            (pt.bits & ~modifier_bits) == GetBitMask(KEY_BIT_ACCESS);
+        SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
         break;
       }
       default:
@@ -119,7 +130,9 @@ inline void BicycleAccess(const OSMTagHelper& tagh, std::int64_t way_id,
       // Instead of access:bicycle=... one can say bicycle=...
       case GetBitMask(KEY_BIT_VEHICLE):
       case GetBitMask(KEY_BIT_BICYCLE): {
-        SetAccess(pt, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+        const bool weak =
+            (pt.bits & ~modifier_bits) == GetBitMask(KEY_BIT_ACCESS);
+        SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
         break;
       }
       default:

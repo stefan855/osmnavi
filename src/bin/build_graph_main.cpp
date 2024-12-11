@@ -414,7 +414,7 @@ int main(int argc, char* argv[]) {
 
   // TODO: Pass vehicle types from command line.
   opt.vehicle_types = {VH_MOTOR_VEHICLE};
-  opt.pbf_filename = argli.GetString("pbf");
+  opt.pbf = argli.GetString("pbf");
   opt.admin_filepattern = argli.GetString("admin_filepattern");
   opt.routing_config = argli.GetString("routing_config");
   opt.merge_tiny_clusters = argli.GetBool("merge_tiny_clusters");
