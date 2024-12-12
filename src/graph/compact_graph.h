@@ -24,8 +24,9 @@ class CompactDirectedGraph {
 
   // Create a graph with the given number of nodes and edges in 'full_edges'.
   // 'full_edges' must be sorted non-decreasing by (from_idx, to_idx).
-  // Note: You can sort the edges with
-  //     std::sort(full_edges.begin(), full_edges.end());
+  //
+  // Note: this file implements operator "<" for full edges, i.e. you can sort
+  // the edges with std::sort(full_edges.begin(), full_edges.end());
   CompactDirectedGraph(uint32_t num_nodes,
                        const std::vector<FullEdge>& full_edges)
       : num_nodes_(num_nodes) {

@@ -3,6 +3,7 @@
 #include <charconv>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /*
@@ -86,7 +87,10 @@ class Argli {
       } else if (!arg.def.positional && !arg.def.required) {
         msg << "  [--" + arg.def.name << "=<value>]";
       }
-      msg << " (" << arg.def.type << ") --- " << arg.def.desc << std::endl;
+      msg << " (" << arg.def.type << ")" << std::endl;
+      for (std::string_view text = arg.def.desc; !text.empty();) {
+        msg << "     " << GetWrappedLine(&text, 75) << std::endl;
+      }
       // TODO: bool has special syntax
     }
     return msg.str();
@@ -253,5 +257,19 @@ class Argli {
       }
     }
     return "";
+  }
+
+  // Returns a line of at most 'width' characters from text. Wraps at <space>
+  // or hard cuts text if no <space> is found.
+  static std::string_view GetWrappedLine(std::string_view* text, size_t width) {
+    if (text->size() <= width) {
+      auto line = *text;
+      *text = "";
+      return line;
+    }
+    size_t cut = text->rfind(' ', width);
+    auto line = text->substr(0, cut != std::string_view::npos ? cut : width);
+    *text = text->substr(cut != std::string_view::npos ? cut + 1 : width);
+    return line;
   }
 };

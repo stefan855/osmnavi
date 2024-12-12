@@ -8,8 +8,8 @@
 #include "absl/container/flat_hash_map.h"
 #include "base/util.h"
 
-// De-duplicate a series of objects (for instance strings) of type TObj and
-// assign consecutive ids 0, 1, 2, etc. to them. When the same "==" object is
+// De-duplicate a series of objects (for instance strings) of templated type and
+// assign consecutive ids 0,1,2,.. to them. When the same ("==") object is
 // inserted multiple times, identical ids are returned and the object is only
 // stored once.
 //

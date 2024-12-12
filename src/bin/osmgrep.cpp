@@ -147,7 +147,7 @@ int main(int argc, char* argv[]) {
            .type = "string",
            .desc =
                "Select ways that should be logged. Syntax is "
-               "<regexp>{&&[!]<regexp>}."
+               "<regexp>{&&[!]<regexp>}. "
                "<regexp> is a regular expression that needs to match a "
                "substring in one of the tags expressed as \"<key>=<value>\". "
                "Additional regexps can be and-ed with '&&', they have to match "
@@ -175,7 +175,7 @@ int main(int argc, char* argv[]) {
            .desc = "Print each result object that matches"},
           {.name = "one_line",
            .type = "bool",
-           .desc = "Print each result object way/relation on one line"},
+           .desc = "Print each result object on one line"},
           {.name = "n_threads",
            .type = "int",
            .dflt = "22",

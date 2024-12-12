@@ -56,37 +56,6 @@ void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
   pool.WaitAllFinished();
 }
 
-#if 0
-void WriteCrossCountryEdges(const build_graph::GraphMetaData& meta,
-                            const std::string& filename) {
-  LOG_S(INFO) << absl::StrFormat("Write cross country_edges to %s",
-                                 filename.c_str());
-  std::ofstream myfile;
-  myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
-
-  uint64_t count = 0;
-  for (const GWay& way : meta.graph.ways) {
-    if (way.uniform_country == 1) {
-      continue;
-    }
-    const std::vector<size_t> node_idx =
-        meta.graph.GetGWayNodeIndexes(*(meta.way_nodes_needed), way);
-    for (size_t pos = 0; pos < node_idx.size() - 1; ++pos) {
-      const GNode& n1 = meta.graph.nodes.at(node_idx.at(pos));
-      const GNode& n2 = meta.graph.nodes.at(node_idx.at(pos + 1));
-      if (n1.ncc != n2.ncc) {
-        count++;
-        myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat, n1.lon,
-                                  n2.lat, n2.lon);
-      }
-    }
-  }
-
-  myfile.close();
-  LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
-}
-#endif
-
 namespace {
 void WriteCSVs(const Graph& g, const CompactDirectedGraph cg,
                std::vector<std::uint32_t>& graph_node_refs,
