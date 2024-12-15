@@ -49,12 +49,28 @@
         attribution: my_attribution
       });
 
-      var route = L.tileLayer('http://localhost:8080/tiles/route/{z}/{x}/{y}.png', {
+      var dijks_forward = L.tileLayer('http://localhost:8080/tiles/dijks_forward/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var dijks_backward = L.tileLayer('http://localhost:8080/tiles/dijks_backward/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var dijks_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/dijks_forward_hybrid/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
 
-      var astar_route = L.tileLayer('http://localhost:8080/tiles/astar_route/{z}/{x}/{y}.png', {
+      var astar_forward = L.tileLayer('http://localhost:8080/tiles/astar_forward/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var astar_backward = L.tileLayer('http://localhost:8080/tiles/astar_backward/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var astar_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/astar_forward_hybrid/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -111,6 +127,30 @@
         maxZoom: 21,
         attribution: my_attribution
       });
+      var experimental4 = L.tileLayer('http://localhost:8080/tiles/experimental4/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental5 = L.tileLayer('http://localhost:8080/tiles/experimental5/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental6 = L.tileLayer('http://localhost:8080/tiles/experimental6/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental7 = L.tileLayer('http://localhost:8080/tiles/experimental7/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental8 = L.tileLayer('http://localhost:8080/tiles/experimental8/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var experimental9 = L.tileLayer('http://localhost:8080/tiles/experimental9/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
 
       var map = L.map('map', {
         center: [46.78566, 8.1596],
@@ -127,8 +167,12 @@
         "Graph Cars": graph_motor_vehicle,
         "Graph Bicycles": graph_bicycle,
         "Louvain": louvain,
-        "Route": route,
-        "A*-Route": astar_route,
+        "Route Dijkstra Forward": dijks_forward,
+        "Route Dijkstra Backward": dijks_backward,
+        "Route Dijkstra Forward Hybrid": dijks_forward_hybrid,
+        "Route AStar Forward": astar_forward,
+        "Route AStar Backward": astar_backward,
+        "Route AStar Forward Hybrid": astar_forward_hybrid,
         "Länder": ALL,
         "Schweiz": CH,
         "Deutschland": DE,
@@ -139,7 +183,13 @@
         "Cross-Country Edges": cross,
         "Experimental 1": experimental1,
         "Experimental 2": experimental2,
-        "Experimental 3": experimental3
+        "Experimental 3": experimental3,
+        "Experimental 4": experimental4,
+        "Experimental 5": experimental5,
+        "Experimental 6": experimental6,
+        "Experimental 7": experimental7,
+        "Experimental 8": experimental8,
+        "Experimental 9": experimental9
       };
 
       var layerControl = L.control.layers(baseMaps, overlayMaps).addTo(map);

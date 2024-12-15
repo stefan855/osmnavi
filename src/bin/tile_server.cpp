@@ -354,8 +354,16 @@ int main(int argc, char* argv[]) {
   std::map<std::string, LayerData> layers;
   LoadFiles(root + "/graph_motor_vehicle.csv", &layers["graph_motor_vehicle"]);
   LoadFiles(root + "/graph_bicycle.csv", &layers["graph_bicycle"]);
-  LoadFiles(root + "/route_time.csv", &layers["route"]);
-  LoadFiles(root + "/astar_route_time.csv", &layers["astar_route"]);
+
+  LoadFiles(root + "/dijks_forward.csv", &layers["dijks_forward"]);
+  LoadFiles(root + "/dijks_backward.csv", &layers["dijks_backward"]);
+  LoadFiles(root + "/dijks_forward_hybrid.csv",
+            &layers["dijks_forward_hybrid"]);
+  LoadFiles(root + "/astar_forward.csv", &layers["astar_forward"]);
+  LoadFiles(root + "/astar_backward.csv", &layers["astar_backward"]);
+  LoadFiles(root + "/astar_forward_hybrid.csv",
+            &layers["astar_forward_hybrid"]);
+
   LoadFiles(admin_root + "/admin/??_*.csv", &layers["ALL"]);
   LoadFiles(admin_root + "/admin/CH_756_*.csv", &layers["CH"]);
   LoadFiles(admin_root + "/admin/DE_276_*.csv", &layers["DE"]);
@@ -371,6 +379,12 @@ int main(int argc, char* argv[]) {
   LoadFiles(root + "/experimental1.csv", &layers["experimental1"]);
   LoadFiles(root + "/experimental2.csv", &layers["experimental2"]);
   LoadFiles(root + "/experimental3.csv", &layers["experimental3"]);
+  LoadFiles(root + "/experimental4.csv", &layers["experimental4"]);
+  LoadFiles(root + "/experimental5.csv", &layers["experimental5"]);
+  LoadFiles(root + "/experimental6.csv", &layers["experimental6"]);
+  LoadFiles(root + "/experimental7.csv", &layers["experimental7"]);
+  LoadFiles(root + "/experimental8.csv", &layers["experimental8"]);
+  LoadFiles(root + "/experimental9.csv", &layers["experimental9"]);
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");

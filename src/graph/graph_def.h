@@ -179,7 +179,24 @@ struct GCluster {
   // Graph::nodes). Sorted to improve data locality.
   std::vector<std::uint32_t> border_nodes;
   // For each border node, list distances to all other border nodes.
+  // Distance INFU32 indicates that a node can't be reached.
   std::vector<std::vector<std::uint32_t>> distances;
+
+  uint32_t FindBorderNodePos(uint32_t node_idx) const {
+    const auto it =
+        std::lower_bound(border_nodes.begin(), border_nodes.end(), node_idx);
+    if (it == border_nodes.end()) {
+      return border_nodes.size();
+    }
+    return it - border_nodes.begin();
+  }
+
+  const std::vector<std::uint32_t>& GetBorderNodeDistances(
+      uint32_t node_idx) const {
+    const uint32_t bn_pos = FindBorderNodePos(node_idx);
+    CHECK_LT_S(bn_pos, border_nodes.size());
+    return distances.at(bn_pos);
+  }
 };
 
 struct Graph {

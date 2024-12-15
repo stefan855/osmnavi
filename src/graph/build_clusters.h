@@ -232,7 +232,7 @@ inline void UpdateGraphClusterInformation(Graph* g) {
       // through a bridge.
       // CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge != 0);
       if (e.bridge) {
-        ;  // do nothing
+        ;  // do nothing, ignore dead-ends.
       } else if (n.cluster_id == other.cluster_id) {
         // Count inner edges only once (instead of twice). Self-edges are not
         // counted.
@@ -270,7 +270,10 @@ inline void UpdateGraphClusterInformation(Graph* g) {
   for (GCluster& cluster : g->clusters) {
     // By construction, we should not have empty clusters.
     CHECK_GT_S(cluster.num_nodes, 0);
-    std::sort(cluster.border_nodes.begin(), cluster.border_nodes.end());
+    // By construction, the node positions should be sorted.
+    CHECK_S(std::is_sorted(cluster.border_nodes.begin(),
+                           cluster.border_nodes.end()));
+    // std::sort(cluster.border_nodes.begin(), cluster.border_nodes.end());
   }
 }
 
@@ -292,7 +295,7 @@ inline void ComputeShortestClusterPaths(const Graph& g,
       g, metric,
       {.vt = vt,
        .restrict_to_cluster = true,
-       .cluster_id = cluster->cluster_id},
+       .restrict_cluster_id = cluster->cluster_id},
       cluster->border_nodes,
       /*undirected_expand=*/false, &num_nodes, &full_edges);
   compact_dijkstra::SortAndCleanupEdges(&full_edges);
@@ -322,7 +325,7 @@ inline void CheckShortestClusterPaths(const Graph& g, int n_threads) {
       RoutingOptions opt;
       opt.avoid_dead_end = true;
       opt.restrict_to_cluster = true;
-      opt.cluster_id = c.cluster_id;
+      opt.restrict_cluster_id = c.cluster_id;
       for (uint32_t idx = 0; idx < c.num_border_nodes; ++idx) {
         for (uint32_t idx2 = 0; idx2 < c.num_border_nodes; ++idx2) {
           AStarRouter rt(g, /*verbose=*/false);

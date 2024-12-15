@@ -16,12 +16,13 @@ class AStarRouter {
  public:
   // This exists once per 'node_idx'.
   struct VisitedNode {
-    std::uint32_t node_idx;             // Index into global node vector.
-    std::uint32_t min_metric;           // The minimal metric seen so far.
-    std::uint32_t heuristic_to_target;  // Estimated heuristic metric to target.
-    std::uint32_t from_v_idx : 30;      // Predecessor in visited_nodes vector.
-    std::uint32_t done : 1;             // 1 <=> node has been finalized.
-    std::uint32_t shortest_route : 1;   // 1 <=> node is part of shortest route.
+    std::uint32_t node_idx;            // Index into global node vector.
+    std::uint32_t from_v_idx;          // Predecessor in visited_nodes vector.
+    std::uint32_t min_metric;          // The minimal metric seen so far.
+    std::uint32_t done : 1;            // 1 <=> node has been finalized.
+    std::uint32_t shortest_route : 1;  // 1 <=> node is part of shortest route.
+    std::uint32_t
+        heuristic_to_target : 30;  // Estimated heuristic metric to target.
   };
 
   // This might exist multiple times for each 'node_idx', when a node gets
@@ -31,22 +32,31 @@ class AStarRouter {
     std::uint32_t visited_node_idx;  // Index into visited_nodes vector.
   };
 
-  AStarRouter(const Graph& g, bool verbose = true)
+  AStarRouter(const Graph& g, int verbosity = 1)
       : g_(g),
         pq_(&MetricCmp),
         target_visited_node_index_(INFU32),
-        verbose_(verbose) {
+        verbosity_(verbosity) {
     Clear();
+  }
+
+  std::string AlgoName() {
+    return "astar";
+  }
+
+  std::string Name(const RoutingMetric& metric, const RoutingOptions& opt) {
+    return absl::StrFormat("AStar, %s, %s%s", metric.Name(),
+                           opt.backward_search ? "backward" : "forward ",
+                           opt.hybrid.on ? ", hybrid" : "");
   }
 
   RoutingResult Route(std::uint32_t start_idx, std::uint32_t target_idx,
                       const RoutingMetric& metric, const RoutingOptions& opt) {
-    if (verbose_) {
-      LOG_S(INFO) << "Start routing from " << g_.nodes.at(start_idx).node_id
-                  << " to " << g_.nodes.at(target_idx).node_id << " (A*, "
-                  << metric.Name() << ")"
-                  << (opt.backward_search ? " backward search"
-                                          : " forward search");
+    if (verbosity_ > 0) {
+      LOG_S(INFO) << absl::StrFormat(
+          "Start routing from %u to %u (A*%s, %s, %s)", start_idx, target_idx,
+          opt.hybrid.on ? "-hybrid" : "", metric.Name(),
+          opt.backward_search ? "backward" : "forward");
     }
     Clear();
     const std::int32_t target_lat = g_.nodes.at(target_idx).lat;
@@ -54,7 +64,7 @@ class AStarRouter {
 
     std::uint32_t start_v_idx = FindOrAddVisitedNode(start_idx);
     CHECK_EQ_S(start_v_idx, 0);
-    CHECK_EQ_S(visited_nodes_.at(0).from_v_idx, INF30);
+    CHECK_EQ_S(visited_nodes_.at(0).from_v_idx, INFU32);
 
     visited_nodes_.front().min_metric = 0;
 
@@ -68,24 +78,36 @@ class AStarRouter {
         continue;  // "old" entry in priority queue.
       }
       vnode.done = 1;
+      if (verbosity_ > 1) {
+        LOG_S(INFO) << absl::StrFormat("POP node:%u(m:%d) done:0->1",
+                                       g_.nodes.at(vnode.node_idx).node_id,
+                                       qnode.metric);
+      }
 
       // shortest route found?
       if (vnode.node_idx == target_idx) {
         target_visited_node_index_ = qnode.visited_node_idx;
-        if (verbose_) {
+        // Mark nodes on shortest route.
+        auto current_idx = target_visited_node_index_;
+        while (current_idx != INFU32) {
+          visited_nodes_.at(current_idx).shortest_route = 1;
+          current_idx = visited_nodes_.at(current_idx).from_v_idx;
+          if (verbosity_ > 1) {
+            const GNode& n = g_.nodes.at(vnode.node_idx);
+            LOG_S(INFO) << absl::StrFormat(
+                "Shortest route: metric:%12u node:%u cluster:%u",
+                vnode.min_metric, n.node_id, n.cluster_id);
+          }
+        }
+        result.found = true;
+        result.found_distance = vnode.min_metric;
+        result.num_visited_nodes = visited_nodes_.size();
+        if (verbosity_ > 0) {
           LOG_S(INFO) << absl::StrFormat(
               "Route found, visited nodes:%u metric:%u", visited_nodes_.size(),
               vnode.min_metric);
         }
 
-        // Mark nodes on shortest route.
-        auto current_idx = target_visited_node_index_;
-        while (current_idx != INF30) {
-          visited_nodes_.at(current_idx).shortest_route = 1;
-          current_idx = visited_nodes_.at(current_idx).from_v_idx;
-        }
-        result.found = true;
-        result.found_distance = vnode.min_metric;
         return result;
       }
 
@@ -97,36 +119,38 @@ class AStarRouter {
                                  vnode.min_metric, target_lat, target_lon);
       }
     }
-    if (verbose_) {
+    if (verbosity_ > 0) {
       LOG_S(INFO) << "Route not found";
     }
     return result;
   }
 
   void SaveSpanningTreeSegments(const std::string& filename) {
-    if (verbose_) {
+    if (verbosity_ > 0) {
       LOG_S(INFO) << "Write route to " << filename;
     }
     std::ofstream myfile;
     myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
-    for (const VisitedNode& n : visited_nodes_) {
-      if (n.done && n.from_v_idx != INF30) {
-        const VisitedNode& from = visited_nodes_.at(n.from_v_idx);
-        const GNode& sn = g_.nodes.at(n.node_idx);
-        const GNode& sfrom = g_.nodes.at(from.node_idx);
-        bool shortest = from.shortest_route && n.shortest_route;
-        myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
-                                  shortest ? "red" : "black", sfrom.lat,
-                                  sfrom.lon, sn.lat, sn.lon);
+    // Draw the shortest route in red over the spanning tree in black.
+    for (int output_shortest = 0; output_shortest <= 1; output_shortest++) {
+      for (const VisitedNode& n : visited_nodes_) {
+        if (n.done && n.from_v_idx != INFU32) {
+          const VisitedNode& from = visited_nodes_.at(n.from_v_idx);
+          const GNode& sn = g_.nodes.at(n.node_idx);
+          const GNode& sfrom = g_.nodes.at(from.node_idx);
+          bool shortest = from.shortest_route && n.shortest_route;
+          if (shortest == (output_shortest > 0)) {
+            myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
+                                      shortest ? "red" : "black", sfrom.lat,
+                                      sfrom.lon, sn.lat, sn.lon);
+          }
+        }
       }
     }
     myfile.close();
   }
 
  private:
-  static constexpr std::uint32_t INF32 = 1 << 31;
-  static constexpr std::uint32_t INF30 = 1 << 29;
-
   static bool MetricCmp(const QueuedNode& left, const QueuedNode& right) {
     return left.metric > right.metric;
   }
@@ -145,7 +169,12 @@ class AStarRouter {
         NodeIdMap::value_type(node_idx, visited_nodes_.size()));
     if (iter.second) {
       // Key didn't exist and was inserted, so add it to visited_nodes_ too.
-      visited_nodes_.emplace_back(node_idx, INF32, INF32, INF30, 0, 0);
+      visited_nodes_.push_back({.node_idx = node_idx,
+                                .from_v_idx = INFU32,
+                                .min_metric = INFU32,
+                                .done = 0,
+                                .shortest_route = 0,
+                                .heuristic_to_target = INFU30});
     }
     return iter.first->second;
   }
@@ -191,19 +220,85 @@ class AStarRouter {
       if (vother.done) {
         continue;
       }
+
       std::uint32_t new_metric =
           min_metric + metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge);
+      if (verbosity_ > 1) {
+        LOG_S(INFO) << absl::StrFormat(
+            "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
+            "old-metric:%d",
+            node.node_id, qnode.metric,
+            g_.nodes.at(edge.other_node_idx).node_id, vother.done, new_metric,
+            vother.min_metric);
+      }
+
       if (new_metric < vother.min_metric) {
         vother.min_metric = new_metric;
         vother.from_v_idx = qnode.visited_node_idx;
 
         // Compute heuristic distance from new node to target.
-        if (vother.heuristic_to_target == INF32) {
-          vother.heuristic_to_target =
+        if (vother.heuristic_to_target == INFU30) {
+          const uint32_t h =
               ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx),
                                        target_lat, target_lon, metric, opt);
+          CHECK_LT_S(h, INFU30);
+          vother.heuristic_to_target = h;
         }
         pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
+      }
+    }
+
+    if (opt.hybrid.on && node.cluster_border_node &&
+        node.cluster_id != opt.hybrid.start_cluster_id &&
+        node.cluster_id != opt.hybrid.target_cluster_id) {
+      // Expand the 'virtual' links within the cluster, using the precomputed
+      // distances.
+      const GCluster& cluster = g_.clusters.at(node.cluster_id);
+      const std::vector<std::uint32_t>& v_dist =
+          cluster.GetBorderNodeDistances(node_idx);
+
+      for (size_t i = 0; i < cluster.border_nodes.size(); ++i) {
+        uint32_t other_idx = cluster.border_nodes.at(i);
+        if (other_idx == node_idx) continue;
+        const std::uint32_t dist = v_dist.at(i);
+        if (dist == INFU32) continue;  // node is not reachable.
+        CHECK_LT_S(dist, INFU30);      // This shouldn't be so big.
+        // TODO: check for potential overflow.
+        const std::uint32_t v_other_idx = FindOrAddVisitedNode(other_idx);
+        VisitedNode& vother = visited_nodes_.at(v_other_idx);
+        std::uint32_t new_metric = min_metric + dist;
+
+        if (verbosity_ > 1) {
+          LOG_S(INFO) << absl::StrFormat(
+              "CLUSTER %5u from:%u(m:%d) to:%u done:%d new-metric:%d "
+              "old-metric:%d",
+              node.cluster_id, node.node_id, qnode.metric,
+              g_.nodes.at(other_idx).node_id, vother.done, new_metric,
+              vother.min_metric);
+        }
+
+#if 0
+        if (!vother.done && new_metric < vother.min_metric) {
+          // node.node_id == 104271819 || node.node_id == 1479539537
+          vother.min_metric = new_metric;
+          vother.from_v_idx = qnode.visited_node_idx;
+          pq_.emplace(new_metric, v_other_idx);
+        }
+#endif
+
+        if (!vother.done && new_metric < vother.min_metric) {
+          vother.min_metric = new_metric;
+          vother.from_v_idx = qnode.visited_node_idx;
+
+          // Compute heuristic distance from new node to target.
+          if (vother.heuristic_to_target == INFU30) {
+            const uint32_t h = ComputeHeuristicToTarget(
+                g_.nodes.at(other_idx), target_lat, target_lon, metric, opt);
+            CHECK_LT_S(h, INFU30);
+            vother.heuristic_to_target = h;
+          }
+          pq_.emplace(new_metric + vother.heuristic_to_target, v_other_idx);
+        }
       }
     }
   }
@@ -243,10 +338,12 @@ class AStarRouter {
         vother.from_v_idx = qnode.visited_node_idx;
 
         // Compute heuristic distance from new node to target.
-        if (vother.heuristic_to_target == INF32) {
-          vother.heuristic_to_target =
+        if (vother.heuristic_to_target == INFU30) {
+          const uint32_t h =
               ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx),
                                        target_lat, target_lon, metric, opt);
+          CHECK_LT_S(h, INFU30);
+          vother.heuristic_to_target = h;
         }
         pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
       }
@@ -263,5 +360,5 @@ class AStarRouter {
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, decltype(&MetricCmp)>
       pq_;
   std::uint32_t target_visited_node_index_;
-  const bool verbose_;
+  const int verbosity_;
 };

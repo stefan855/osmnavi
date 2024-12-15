@@ -4,6 +4,22 @@
 #include "base/util.h"
 #include "graph/graph_def.h"
 
+// Return the cluster of a node. If the nodes is in a dead end, then the bridge
+// is found and the cluster id of the node on the other side of the bridge is
+// returned.
+inline uint32_t FindClusterOfNode(const Graph& g, std::uint32_t node_idx) {
+  const GNode& n = g.nodes.at(node_idx);
+  if (!n.dead_end) {
+    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
+    return n.cluster_id;
+  }
+  std::uint32_t cluster_node_idx;
+  FindBridge(g, node_idx, nullptr, &cluster_node_idx);
+  const GNode& cluster_node = g.nodes.at(cluster_node_idx);
+  CHECK_NE_S(cluster_node.cluster_id, INVALID_CLUSTER_ID);
+  return cluster_node.cluster_id;
+}
+
 struct RoutingOptions {
   VEHICLE vt = VH_MOTOR_VEHICLE;
   // Avoid travelling *into* a dead-end over a bridge. Note that the other
@@ -11,13 +27,22 @@ struct RoutingOptions {
   // start node can be in a dead end.
   bool avoid_dead_end = true;
   bool restrict_to_cluster = false;
-  // Search the shortest way inforward (false) or backward (true) mode.
+  // Search the shortest way forward (false) or backward (true) mode.
   bool backward_search = false;
   // Node index (in graph.nodes) of a node that is on the non-dead-end side of a
   // bridge. Setting this node allows to travel the bridge from the non-dead-end
   // part of the network.
   std::uint32_t allow_bridge_node_idx = INFU32;
-  std::uint32_t cluster_id = INFU32;
+  std::uint32_t restrict_cluster_id = INFU32;
+
+  struct HybridOptions {
+    bool on = false;
+    std::uint32_t start_idx = INFU32;
+    std::uint32_t target_idx = INFU32;
+    std::uint32_t start_cluster_id = INFU32;
+    std::uint32_t target_cluster_id = INFU32;
+  };
+  HybridOptions hybrid;
 
   // If the target node is in a dead-end, fills 'allow_bridge_node_id' with
   // the node_id of the bridge leading to node 'target_idx'. Does nothing if
@@ -28,22 +53,38 @@ struct RoutingOptions {
     }
     std::uint32_t bridge_node_idx;
     FindBridge(g, target_idx, nullptr, &bridge_node_idx);
-    LOG_S(INFO) << "Bridge node " << g.nodes.at(bridge_node_idx).node_id;
+    // LOG_S(INFO) << "Bridge node " << g.nodes.at(bridge_node_idx).node_id;
     allow_bridge_node_idx = bridge_node_idx;
   }
+
+  // Sets the options in 'hybrid' and 'allow_bridge_node_idx' if the target node
+  // is in a dead end.
+  void SetHybridOptions(const Graph& g, std::uint32_t start_idx,
+                        std::uint32_t target_idx) {
+    hybrid = {.on = true,
+              .start_idx = start_idx,
+              .target_idx = target_idx,
+              .start_cluster_id = FindClusterOfNode(g, start_idx),
+              .target_cluster_id = FindClusterOfNode(g, target_idx)};
+    MayFillBridgeNodeId(g, target_idx);
+    CHECK_S(!restrict_to_cluster);
+  }
+
+ private:
 };
 
 struct RoutingResult {
   bool found = false;
   // If a route was found, the distance from start to target node.
   uint32_t found_distance = INFU32;
+  uint32_t num_visited_nodes = 0;
   /*
   // If a route was found, the internal visited index of the target node.
   uint32_t found_target_visited_node_index = INFU32;
   */
 };
 
-// Handle the common reasons why we reject to follow an edge.
+// Check if the routing options 'opt' make us reject to follow 'edge'.
 inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
                               const GNode& node, std::uint32_t node_idx,
                               const GEdge& edge, const WaySharedAttrs& wsa,
@@ -54,10 +95,32 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
     // do not enter the dead end.
     return true;
   }
-  if (opt.restrict_to_cluster &&
-      g.nodes.at(edge.other_node_idx).cluster_id != opt.cluster_id) {
+
+  const GNode& other = g.nodes.at(edge.other_node_idx);
+  if (opt.restrict_to_cluster && other.cluster_id != opt.restrict_cluster_id) {
     return true;
   }
-  // Is edge routable for the given vehicle type in the opt?
+
+  // Hybrid search.
+  // If we are in a dead-end (or entering one), then we must be in start or
+  // target cluster. That's ok in all cases.
+  if (opt.hybrid.on && !node.dead_end && !other.dead_end) {
+    bool to_start_or_end = (other.cluster_id == opt.hybrid.start_cluster_id) ||
+                           (other.cluster_id == opt.hybrid.target_cluster_id);
+    // Always ok if the edge goes to the start or to the end cluster.
+    if (!to_start_or_end) {
+      // A connection to outside start/target clusters must be - by construction
+      // - from a border node (in any cluster).
+      CHECK_S(node.cluster_border_node) << node.node_id;
+      // Outside connections must be between border nodes in different clusters.
+      // Same cluster is not ok because this would be an inner edge for this
+      // cluster, even if it connects border nodes.
+      if (!other.cluster_border_node || node.cluster_id == other.cluster_id) {
+        return true;
+      }
+    }
+  }
+
+  // Is edge routable in 'opt' for the given vehicle type?
   return !RoutableAccess(GetRAFromWSA(wsa, opt.vt, edge_direction).access);
 }

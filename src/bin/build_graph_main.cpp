@@ -50,188 +50,63 @@ void PrintStructSizes() {
                                  sizeof(std::pair<int32_t, int32_t>));
 }
 
-#if 0
-std::uint32_t RandomNodeIdx(const Graph& g) {
-  std::uint32_t pos = INFU32;
-  do {
-    pos = rand() % g.nodes.size();
-  } while (!g.nodes.at(pos).large_component);
-  return pos;
+template <typename TRouter>
+void DoOneRoute(const Graph& g, std::uint32_t start_idx,
+                std::uint32_t target_idx, const RoutingMetric& metric,
+                bool backward, bool hybrid, bool csv) {
+  RoutingOptions opt;
+  if (backward) {
+    std::swap(start_idx, target_idx);
+    opt.backward_search = true;
+  }
+  if (hybrid) {
+    opt.SetHybridOptions(g, start_idx, target_idx);
+  } else {
+    opt.MayFillBridgeNodeId(g, target_idx);
+  }
+
+  const absl::Time start = absl::Now();
+  TRouter router(g, 0);
+  auto res = router.Route(start_idx, target_idx, metric, opt);
+  const double elapsed = ToDoubleSeconds(absl::Now() - start);
+
+  if (csv) {
+    router.SaveSpanningTreeSegments(absl::StrFormat(
+        "/tmp/%s_%s%s.csv", router.AlgoName().substr(0, 5),
+        backward ? "backward" : "forward", hybrid ? "_hybrid" : ""));
+  }
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Metric: %s%12u secs:%6.3f visits:%12u %s", res.found ? "SUC" : "ERR",
+      res.found ? res.found_distance : 0, elapsed, res.num_visited_nodes,
+      router.Name(metric, opt));
 }
 
-void RandomShortestPaths(const Graph& g) {
-  FUNC_TIMER();
-  std::srand(1);  // Get always the same pseudo-random numbers.
-  ThreadPool pool;
-  for (int i = 0; i < 10000; ++i) {
-    uint32_t start = RandomNodeIdx(g);
-    uint32_t target = RandomNodeIdx(g);
-    pool.AddWork([&g, start, target](int thread_idx) {
-      AStarRouter router(g);
-      RoutingOptions opt;
-      opt.MayFillBridgeNodeId(g, target);
-      router.Route(start, target, RoutingMetricTime(), opt);
-    });
+void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
+               const std::string& start_name, const std::string& target_name,
+               bool csv = false) {
+  std::uint32_t start_idx = g.FindNodeIndex(start_node_id);
+  std::uint32_t target_idx = g.FindNodeIndex(target_node_id);
+  LOG_S(INFO) << absl::StrFormat("**** Route from %s(%u) to %s(%u)", start_name,
+                                 start_node_id, target_name, target_node_id);
+  if (start_idx >= g.nodes.size() || target_idx >= g.nodes.size()) {
+    LOG_S(INFO) << "Can't find endpoints";
+    return;
   }
-  pool.Start(23);
-  pool.WaitAllFinished();
-}
-#endif
 
-void TestRoutes(const Graph& g) {
-  if (true) {
-    // Usterstrasse, Pfäffikon ZH  (not a dead end)
-    std::uint32_t start_idx = g.FindNodeIndex(49973500);
-    // Bremgartenstrasse, Bern
-    std::uint32_t target_idx = g.FindNodeIndex(805904068);
-    LOG_S(INFO) << "Route from Pfäffikon ZH (49973500) to Bern (805904068)";
-    if (start_idx >= g.nodes.size() || target_idx >= g.nodes.size()) {
-      LOG_S(INFO) << absl::StrFormat(
-          "failed to find end points of Pfäffikon/Bern start:%d target:%d",
-          start_idx, target_idx);
-    } else {
-      {
-        DijkstraRouter router(g);
-        RoutingOptions opt;
-        auto result =
-            router.Route(start_idx, target_idx, RoutingMetricDistance(), opt);
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/route_dist.csv");
-        } else {
-          LOG_S(INFO) << "failed to find dijkstra route!";
-        }
-      }
-      {
-        DijkstraRouter router(g);
-        RoutingOptions opt;
-        auto result =
-            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
-        } else {
-          LOG_S(INFO) << "failed to find dijkstra route!";
-        }
-      }
-      {
-        DijkstraRouter router(g);
-        RoutingOptions opt;
-        opt.backward_search = true;
-        auto result =
-            router.Route(target_idx, start_idx, RoutingMetricDistance(), opt);
-        if (!result.found) {
-          LOG_S(INFO) << "failed to find dijkstra route!";
-        }
-      }
-      {
-        DijkstraRouter router(g);
-        RoutingOptions opt;
-        opt.backward_search = true;
-        auto result =
-            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
-        if (!result.found) {
-          LOG_S(INFO) << "failed to find dijkstra route!";
-        }
-      }
-      {
-        AStarRouter router(g);
-        RoutingOptions opt;
-        auto result =
-            router.Route(start_idx, target_idx, RoutingMetricDistance(), opt);
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/astar_route_dist.csv");
-        } else {
-          LOG_S(INFO) << "failed to find astar route!";
-        }
-      }
-      {
-        AStarRouter router(g);
-        RoutingOptions opt;
-        auto result =
-            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
-        } else {
-          LOG_S(INFO) << "failed to find astar route!";
-        }
-      }
+  DoOneRoute<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+                             /*backward=*/false, /*hybrid=*/false, /*csv=*/csv);
+  DoOneRoute<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+                             /*backward=*/true, /*hybrid=*/false, /*csv=*/csv);
+  DoOneRoute<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+                             /*backward=*/false, /*hybrid=*/true, /*csv=*/csv);
 
-      {
-        AStarRouter router(g);
-        RoutingOptions opt;
-        opt.backward_search = true;
-        auto result =
-            router.Route(target_idx, start_idx, RoutingMetricDistance(), opt);
-        if (!result.found) {
-          LOG_S(INFO) << "failed to find astar route!";
-        }
-      }
-      {
-        AStarRouter router(g);
-        RoutingOptions opt;
-        opt.backward_search = true;
-        auto result =
-            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
-        if (!result.found) {
-          LOG_S(INFO) << "failed to find astar route!";
-        }
-      }
-    }
-  }
-  if (true) {
-    // Ackerstrasse Uster (deadend)
-    std::uint32_t start_idx = g.FindNodeIndex(3108534441);
-    // Mürtschenweg Weesen (deadend)
-    std::uint32_t target_idx = g.FindNodeIndex(3019156898);
-    LOG_S(INFO) << "=======================================================";
-    LOG_S(INFO) << "Route from Uster ZH (3108534441) to Weesen (3019156898)";
-    if (start_idx >= g.nodes.size() || target_idx >= g.nodes.size()) {
-      LOG_S(INFO) << absl::StrFormat("failed to find end points", start_idx,
-                                     target_idx);
-    } else {
-      {
-        DijkstraRouter router(g);
-        RoutingOptions opt;
-        opt.MayFillBridgeNodeId(g, target_idx);
-        auto result =
-            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
-        if (result.found) {
-          // router.SaveSpanningTreeSegments("/tmp/route_time.csv");
-        }
-      }
-      {
-        DijkstraRouter router(g);
-        RoutingOptions opt;
-        opt.MayFillBridgeNodeId(g, start_idx);
-        opt.backward_search = true;
-        auto result =
-            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/route_time.csv");
-        }
-      }
-      {
-        AStarRouter router(g);
-        RoutingOptions opt;
-        opt.MayFillBridgeNodeId(g, target_idx);
-        auto result =
-            router.Route(start_idx, target_idx, RoutingMetricTime(), opt);
-        if (result.found) {
-          // router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
-        }
-      }
-      {
-        AStarRouter router(g);
-        RoutingOptions opt;
-        opt.backward_search = true;
-        opt.MayFillBridgeNodeId(g, start_idx);
-        auto result =
-            router.Route(target_idx, start_idx, RoutingMetricTime(), opt);
-        if (result.found) {
-          router.SaveSpanningTreeSegments("/tmp/astar_route_time.csv");
-        }
-      }
-    }
-  }
+  DoOneRoute<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+                          /*backward=*/false, /*hybrid=*/false, /*csv=*/csv);
+  DoOneRoute<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+                          /*backward=*/true, /*hybrid=*/false, /*csv=*/csv);
+  DoOneRoute<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+                          /*backward=*/false, /*hybrid=*/true, /*csv=*/csv);
 }
 
 void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
@@ -252,15 +127,15 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
       }
       /*
       if (n.node_id == other.node_id) {
-        LOG_S(INFO) << absl::StrFormat("Node %lld length %fm way %lld name %s",
-      n.node_id, e.distance_cm / 100.0, w.id, w.streetname != nullptr ?
+        LOG_S(INFO) << absl::StrFormat("Node %lld length %fm way %lld name
+      %s", n.node_id, e.distance_cm / 100.0, w.id, w.streetname != nullptr ?
       w.streetname : "n/a");
       }
       */
       if (RoutableForward(g, w, vt) && RoutableBackward(g, w, vt) &&
           n.lat > other.lat) {
-        // Edges that have both directions will show up twice when iterating, so
-        // ignore one of the two edges for this case.
+        // Edges that have both directions will show up twice when iterating,
+        // so ignore one of the two edges for this case.
         continue;
       }
       if (!n.large_component) {
@@ -425,35 +300,27 @@ int main(int argc, char* argv[]) {
       argli.GetBool("check_shortest_cluster_paths");
 
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
+  const Graph& g = meta.graph;
 
-  TestRoutes(meta.graph);
   PrintStructSizes();
 
-  WriteGraphToCSV(meta.graph, VH_MOTOR_VEHICLE, "/tmp/graph_motor_vehicle.csv");
-  WriteGraphToCSV(meta.graph, VH_BICYCLE, "/tmp/graph_bicycle.csv");
-  WriteLouvainGraph(meta.graph, "/tmp/louvain.csv");
+  WriteGraphToCSV(g, VH_MOTOR_VEHICLE, "/tmp/graph_motor_vehicle.csv");
+  WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
+  WriteLouvainGraph(g, "/tmp/louvain.csv");
   WriteCrossCountryEdges(meta, "/tmp/cross.csv");
 
-#if 0
-  // RandomShortestPaths(meta.graph);
+  // TestRoutes(g);
+  TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern", /*csv=*/true);
+  TestRoute(g, 805904068, 49973500, "Bern", "Pfäffikon ZH");
 
-  LOG_S(INFO)
-      << "Find node closest to 46,956106, 7,423648. Node 805904068 is good";
-  int64_t found_id = 0;
-  int64_t min_dist = INF64;
-  constexpr int64_t lat = 469561060;
-  constexpr int64_t lon = 74236480;
-  for (const GNode& n : meta.graph.nodes) {
-    int64_t dlat = lat - n.lat;
-    int64_t dlon = lon - n.lon;
-    int64_t dist = dlat * dlat + dlon * dlon;
-    if (dist < min_dist) {
-      min_dist = dist;
-      found_id = n.node_id;
-    }
-  }
-  LOG_S(INFO) << "found node " << found_id << " square-dist " << min_dist;
-#endif
+  TestRoute(g, 3108534441, 3019156898, "Uster ZH", "Weesen");
+  TestRoute(g, 3019156898, 3108534441, "Weesen", "Uster ZH");
+
+  TestRoute(g, 26895904, 300327675, "Augsburg", "Stralsund");
+  TestRoute(g, 300327675, 26895904, "Stralsund", "Augsburg");
+
+  TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp-Norwegen");
+  TestRoute(g, 899297768, 1131001345, "Nordkapp-Norwegen", "Lissabon");
 
   LOG_S(INFO) << "Finished.";
   return 0;

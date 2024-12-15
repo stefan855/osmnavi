@@ -126,12 +126,12 @@ inline std::vector<std::uint32_t> NodeMapToGraphNodeRefs(
     const absl::flat_hash_map<uint32_t, uint32_t>& compact_nodemap) {
   const uint32_t num_nodes = compact_nodemap.size();
   std::vector<std::uint32_t> node_refs;
-  node_refs.assign(num_nodes, INF32);
+  node_refs.assign(num_nodes, INFU32);
   for (auto [graph_idx, compact_idx] : compact_nodemap) {
     node_refs.at(compact_idx) = graph_idx;
   }
   for (size_t i = 0; i < num_nodes; ++i) {
-    CHECK_NE_S(node_refs.at(i), INF32);
+    CHECK_NE_S(node_refs.at(i), INFU32);
   }
   return node_refs;
 }
@@ -185,7 +185,8 @@ inline std::vector<VisitedNode> SingleSourceDijkstra(
     const CompactDirectedGraph& cg, std::uint32_t start_idx,
     std::vector<uint32_t>* spanning_tree_nodes = nullptr) {
   CHECK_LT_S(cg.num_nodes(), 1 << 31) << "currently not supported";
-  std::vector<VisitedNode> visited_nodes(cg.num_nodes(), {INFU32, 0, 0});
+  std::vector<VisitedNode> visited_nodes(
+      cg.num_nodes(), {.min_weight = INFU32, .done = 0, .from_v_idx = 0});
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, MetricCmp> pq;
   const std::vector<uint32_t>& edges_start = cg.edges_start();
   const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();

@@ -33,12 +33,8 @@ struct WayContext {
   GWay way;
   const OSMPBF::Way& osm_way;
   const std::vector<ParsedTag> ptags;
-  // const std::vector<NodeCountry> node_countries;
-  // WayTaggedZones rural;
   PerCountryConfig::ConfigValue config_forw;
   PerCountryConfig::ConfigValue config_backw;
-  // std::string_view streetname;
-  // WriteBuff node_ids_buff;
 };
 }  // namespace
 
@@ -482,7 +478,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   WriteBuff node_ids_buff;
   EncodeNodeIds(node_countries, &node_ids_buff);
-  const uint32_t prev_num_unique = deduper->num_unique();
+  // const uint32_t prev_num_unique = deduper->num_unique();
 
   // Run modifications of global data behind a mutex.
   {
@@ -505,6 +501,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     wc.way.wsa_id = deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
 
+#if 0
     if (prev_num_unique != deduper->num_unique()) {
       LOG_S(INFO) << "Number of unique way-routingattrs "
                   << deduper->num_unique() << " for way " << wc.way.id;
@@ -512,6 +509,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
         LOG_S(INFO) << "  " << i << ":" << RoutingAttrsDebugString(wsa.ra[i]);
       }
     }
+#endif
   }
 }
 

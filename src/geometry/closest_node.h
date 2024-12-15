@@ -22,7 +22,7 @@ struct ClosestNodeResult {
 // shortest distance.
 inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, int64_t lat,
                                              int64_t lon) {
-  uint32_t found_pos = INF32;
+  uint32_t found_pos = INFU32;
   int64_t min_dist = INF64;
   for (uint32_t i = 0; i < g.nodes.size(); ++i) {
     const GNode& n = g.nodes.at(i);
@@ -148,7 +148,7 @@ inline ClosestNodeResult FindClosestNodeFast(const Graph& g,
                            .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat),
                            .min_dist = INF64,
                            .max_dlon = INF64,
-                           .found_pos = INF32};
+                           .found_pos = INFU32};
   int count = 0;
   while (posf < (int64_t)idx.size() || posb >= 0) {
     count++;

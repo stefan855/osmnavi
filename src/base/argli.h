@@ -87,7 +87,8 @@ class Argli {
       } else if (!arg.def.positional && !arg.def.required) {
         msg << "  [--" + arg.def.name << "=<value>]";
       }
-      msg << " (" << arg.def.type << ")" << std::endl;
+      msg << " (" << arg.def.type << ", default:\"" << arg.def.dflt << "\")"
+          << std::endl;
       for (std::string_view text = arg.def.desc; !text.empty();) {
         msg << "     " << GetWrappedLine(&text, 75) << std::endl;
       }
