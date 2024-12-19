@@ -7,7 +7,7 @@
 
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
-#include "algos/astar.h"
+#include "algos/router.h"
 #include "algos/compact_dijkstra.h"
 #include "algos/louvain.h"
 #include "base/thread_pool.h"
@@ -323,12 +323,13 @@ inline void CheckShortestClusterPaths(const Graph& g, int n_threads) {
   for (const GCluster& c : g.clusters) {
     pool.AddWork([&g, &c, &metric](int) {
       RoutingOptions opt;
+      opt.use_astar_heuristic = true;
       opt.avoid_dead_end = true;
       opt.restrict_to_cluster = true;
       opt.restrict_cluster_id = c.cluster_id;
       for (uint32_t idx = 0; idx < c.num_border_nodes; ++idx) {
         for (uint32_t idx2 = 0; idx2 < c.num_border_nodes; ++idx2) {
-          AStarRouter rt(g, /*verbose=*/false);
+          Router rt(g, /*verbosity=*/0);
           auto result = rt.Route(c.border_nodes.at(idx),
                                  c.border_nodes.at(idx2), metric, opt);
 

@@ -355,14 +355,27 @@ int main(int argc, char* argv[]) {
   LoadFiles(root + "/graph_motor_vehicle.csv", &layers["graph_motor_vehicle"]);
   LoadFiles(root + "/graph_bicycle.csv", &layers["graph_bicycle"]);
 
-  LoadFiles(root + "/dijks_forward.csv", &layers["dijks_forward"]);
-  LoadFiles(root + "/dijks_backward.csv", &layers["dijks_backward"]);
-  LoadFiles(root + "/dijks_forward_hybrid.csv",
-            &layers["dijks_forward_hybrid"]);
-  LoadFiles(root + "/astar_forward.csv", &layers["astar_forward"]);
-  LoadFiles(root + "/astar_backward.csv", &layers["astar_backward"]);
-  LoadFiles(root + "/astar_forward_hybrid.csv",
-            &layers["astar_forward_hybrid"]);
+  LoadFiles(root + "/pb_dijks_forward.csv", &layers["pb_dijks_forward"]);
+  LoadFiles(root + "/pb_dijks_backward.csv", &layers["pb_dijks_backward"]);
+  LoadFiles(root + "/pb_dijks_forward_hybrid.csv",
+            &layers["pb_dijks_forward_hybrid"]);
+  LoadFiles(root + "/pb_astar_forward.csv", &layers["pb_astar_forward"]);
+  LoadFiles(root + "/pb_astar_backward.csv", &layers["pb_astar_backward"]);
+  LoadFiles(root + "/pb_astar_forward_hybrid.csv",
+            &layers["pb_astar_forward_hybrid"]);
+
+  LoadFiles(root + "/uw_dijks_forward_hybrid.csv",
+            &layers["uw_dijks_forward_hybrid"]);
+  LoadFiles(root + "/uw_astar_forward_hybrid.csv",
+            &layers["uw_astar_forward_hybrid"]);
+  LoadFiles(root + "/as_dijks_forward_hybrid.csv",
+            &layers["as_dijks_forward_hybrid"]);
+  LoadFiles(root + "/as_astar_forward_hybrid.csv",
+            &layers["as_astar_forward_hybrid"]);
+  LoadFiles(root + "/ln_dijks_forward_hybrid.csv",
+            &layers["ln_dijks_forward_hybrid"]);
+  LoadFiles(root + "/ln_astar_forward_hybrid.csv",
+            &layers["ln_astar_forward_hybrid"]);
 
   LoadFiles(admin_root + "/admin/??_*.csv", &layers["ALL"]);
   LoadFiles(admin_root + "/admin/CH_756_*.csv", &layers["CH"]);
@@ -376,6 +389,7 @@ int main(int argc, char* argv[]) {
   LoadFiles(root + "/louvain.csv", &layers["louvain"]);
   LoadFiles(root + "/cross.csv", &layers["cross"]);
 
+  LoadFiles(root + "/traffic.csv", &layers["traffic"]);
   LoadFiles(root + "/experimental1.csv", &layers["experimental1"]);
   LoadFiles(root + "/experimental2.csv", &layers["experimental2"]);
   LoadFiles(root + "/experimental3.csv", &layers["experimental3"]);

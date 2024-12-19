@@ -19,7 +19,7 @@ class RoutingMetricDistance : public RoutingMetric {
     return edge.distance_cm;
   }
 
-  std::string_view Name() const override final { return "Distance(cm)"; }
+  std::string_view Name() const override final { return "distance(cm)"; }
 };
 
 class RoutingMetricTime : public RoutingMetric {
@@ -34,5 +34,5 @@ class RoutingMetricTime : public RoutingMetric {
     return (36ull * edge.distance_cm) / km_per_hour;
   }
 
-  std::string_view Name() const override final { return "Time(ms)"; }
+  std::string_view Name() const override final { return "time(ms)"; }
 };

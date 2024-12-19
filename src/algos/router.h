@@ -12,7 +12,13 @@
 #include "geometry/distance.h"
 #include "graph/graph_def.h"
 
-class AStarRouter {
+// A router that can run in Dijkstra or in AStar mode, and may use precomputed
+// routs from clusters (see 'hyrbid').
+//
+// In AStar mode, the router uses a heuristic to estimate a lower bound (see
+// 'heuristic_to_target') that is needed to travel from the current node to the
+// target.
+class Router {
  public:
   // This exists once per 'node_idx'.
   struct VisitedNode {
@@ -32,7 +38,7 @@ class AStarRouter {
     std::uint32_t visited_node_idx;  // Index into visited_nodes vector.
   };
 
-  AStarRouter(const Graph& g, int verbosity = 1)
+  Router(const Graph& g, int verbosity = 1)
       : g_(g),
         pq_(&MetricCmp),
         target_visited_node_index_(INFU32),
@@ -40,25 +46,28 @@ class AStarRouter {
     Clear();
   }
 
-  std::string AlgoName() { return "astar"; }
+  std::string AlgoName(const RoutingOptions& opt) {
+    return opt.use_astar_heuristic ? "astar" : "dijkstra";
+  }
 
   std::string Name(const RoutingMetric& metric, const RoutingOptions& opt) {
-    return absl::StrFormat("AStar, %s, %s%s", metric.Name(),
-                           opt.backward_search ? "backward" : "forward ",
-                           opt.hybrid.on ? ", hybrid" : "");
+    return absl::StrFormat("%s-%s-%s%s", AlgoName(opt), metric.Name(),
+                           opt.backward_search ? "backward" : "forward",
+                           opt.hybrid.on ? "-hybrid" : "");
   }
 
   RoutingResult Route(std::uint32_t start_idx, std::uint32_t target_idx,
                       const RoutingMetric& metric, const RoutingOptions& opt) {
     if (verbosity_ > 0) {
-      LOG_S(INFO) << absl::StrFormat(
-          "Start routing from %u to %u (A*%s, %s, %s)", start_idx, target_idx,
-          opt.hybrid.on ? "-hybrid" : "", metric.Name(),
-          opt.backward_search ? "backward" : "forward");
+      LOG_S(INFO) << absl::StrFormat("Start routing from %u to %u (%s)",
+                                     start_idx, target_idx, Name(metric, opt));
     }
     Clear();
-    const std::int32_t target_lat = g_.nodes.at(target_idx).lat;
-    const std::int32_t target_lon = g_.nodes.at(target_idx).lon;
+
+    Context ctx = {.opt = opt,
+                   .metric = metric,
+                   .target_lat = g_.nodes.at(target_idx).lat,
+                   .target_lon = g_.nodes.at(target_idx).lon};
 
     std::uint32_t start_v_idx =
         FindOrAddVisitedNode(start_idx, /*use_astar_heuristic=*/false);
@@ -67,7 +76,6 @@ class AStarRouter {
 
     visited_nodes_.front().min_metric = 0;
 
-    RoutingResult result;
     pq_.emplace(0, start_v_idx);
     while (!pq_.empty()) {
       const QueuedNode qnode = pq_.top();
@@ -85,10 +93,12 @@ class AStarRouter {
 
       // shortest route found?
       if (vnode.node_idx == target_idx) {
+        RoutingResult result;
         target_visited_node_index_ = qnode.visited_node_idx;
         // Mark nodes on shortest route.
         auto current_idx = target_visited_node_index_;
         while (current_idx != INFU32) {
+          result.num_shortest_route_nodes++;
           visited_nodes_.at(current_idx).shortest_route = 1;
           current_idx = visited_nodes_.at(current_idx).from_v_idx;
           if (verbosity_ > 1) {
@@ -110,18 +120,17 @@ class AStarRouter {
         return result;
       }
 
-      if (!opt.backward_search) {
-        ExpandNeighboursForward(qnode, metric, opt, vnode.node_idx,
-                                vnode.min_metric, target_lat, target_lon);
+      if (!ctx.opt.backward_search) {
+        ExpandNeighboursForward(qnode, ctx, vnode.node_idx, vnode.min_metric,
+                                vnode.from_v_idx);
       } else {
-        ExpandNeighboursBackward(qnode, metric, opt, vnode.node_idx,
-                                 vnode.min_metric, target_lat, target_lon);
+        ExpandNeighboursBackward(qnode, ctx, vnode.node_idx, vnode.min_metric);
       }
     }
     if (verbosity_ > 0) {
       LOG_S(INFO) << "Route not found";
     }
-    return result;
+    return RoutingResult();
   }
 
   void SaveSpanningTreeSegments(const std::string& filename) {
@@ -150,6 +159,13 @@ class AStarRouter {
   }
 
  private:
+  struct Context {
+    const RoutingOptions opt;
+    const RoutingMetric& metric;
+    int32_t target_lat;
+    int32_t target_lon;
+  };
+
   static bool MetricCmp(const QueuedNode& left, const QueuedNode& right) {
     return left.metric > right.metric;
   }
@@ -175,16 +191,15 @@ class AStarRouter {
            .min_metric = INFU32,
            .done = 0,
            .shortest_route = 0,
-           .heuristic_to_target = INFU30});
+           .heuristic_to_target = use_astar_heuristic ? INFU30 : 0});
     }
     return iter.first->second;
   }
 
   // Compute the metric to get from 'node' to the target node, on a hypothetical
   // straight street which allows maximum speed.
-  static inline std::uint32_t ComputeHeuristicToTarget(
-      const GNode& node, std::int32_t target_lat, std::int32_t target_lon,
-      const RoutingMetric& metric, const RoutingOptions& opt) {
+  static inline std::uint32_t ComputeHeuristicToTarget(const GNode& node,
+                                                       const Context& ctx) {
     // TODO: use country specific maxspeed.
     // TODO: support mexspeed for different vehicles.
     // SOLUTION: Should use per (country, vehicle) maxspeed. If target
@@ -192,39 +207,37 @@ class AStarRouter {
     static const RoutingAttrs g_ra = {.access = ACC_YES, .maxspeed = 120};
     static const WaySharedAttrs g_wsa = {.ra =
                                              g_ra};  // Sets .ra[0] and .ra[1]!
-    return metric.Compute(
-        g_wsa, opt.vt, DIR_FORWARD,
+    return ctx.metric.Compute(
+        g_wsa, ctx.opt.vt, DIR_FORWARD,
         {.distance_cm = static_cast<uint64_t>(
-             1.00 *
-             calculate_distance(node.lat, node.lon, target_lat, target_lon)),
+             1.00 * calculate_distance(node.lat, node.lon, ctx.target_lat,
+                                       ctx.target_lon)),
          .contra_way = 0});
   }
 
   // Expand the forward edges.
-  void ExpandNeighboursForward(const QueuedNode& qnode,
-                               const RoutingMetric& metric,
-                               const RoutingOptions& opt,
+  void ExpandNeighboursForward(const QueuedNode& qnode, const Context& ctx,
                                std::uint32_t node_idx, std::uint32_t min_metric,
-                               std::int32_t target_lat,
-                               std::int32_t target_lon) {
+                               std::uint32_t from_v_idx) {
     const GNode& node = g_.nodes.at(node_idx);
     for (size_t i = 0; i < node.num_edges_out; ++i) {
       const GEdge& edge = node.edges[i];
       const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
-      if (RoutingRejectEdge(g_, opt, node, node_idx, edge, wsa,
+      if (RoutingRejectEdge(g_, ctx.opt, node, node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
         continue;
       }
 
-      std::uint32_t v_idx =
-          FindOrAddVisitedNode(edge.other_node_idx, opt.use_astar_heuristic);
+      std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx,
+                                                 ctx.opt.use_astar_heuristic);
       VisitedNode& vother = visited_nodes_.at(v_idx);
       if (vother.done) {
         continue;
       }
 
       std::uint32_t new_metric =
-          min_metric + metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge);
+          min_metric +
+          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge);
       if (verbosity_ > 1) {
         LOG_S(INFO) << absl::StrFormat(
             "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
@@ -241,8 +254,7 @@ class AStarRouter {
         // Compute heuristic distance from new node to target.
         if (vother.heuristic_to_target == INFU30) {
           const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx),
-                                       target_lat, target_lon, metric, opt);
+              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx), ctx);
           CHECK_LT_S(h, INFU30);
           vother.heuristic_to_target = h;
         }
@@ -250,9 +262,20 @@ class AStarRouter {
       }
     }
 
-    if (opt.hybrid.on && node.cluster_border_node &&
-        node.cluster_id != opt.hybrid.start_cluster_id &&
-        node.cluster_id != opt.hybrid.target_cluster_id) {
+    if (ctx.opt.hybrid.on && node.cluster_border_node &&
+        node.cluster_id != ctx.opt.hybrid.start_cluster_id &&
+        node.cluster_id != ctx.opt.hybrid.target_cluster_id) {
+      {
+        // Check if we just traversed this cluster in the shortest path to this
+        // node. A cluster can not be traversed more than once in the shortest
+        // path!
+        const GNode& parent_node =
+            g_.nodes.at(visited_nodes_.at(from_v_idx).node_idx);
+        if (parent_node.cluster_id == node.cluster_id) {
+          return;
+        }
+      }
+
       // Expand the 'virtual' links within the cluster, using the precomputed
       // distances.
       const GCluster& cluster = g_.clusters.at(node.cluster_id);
@@ -267,7 +290,7 @@ class AStarRouter {
         CHECK_LT_S(dist, INFU30);      // This shouldn't be so big.
         // TODO: check for potential overflow.
         const std::uint32_t v_other_idx =
-            FindOrAddVisitedNode(other_idx, opt.use_astar_heuristic);
+            FindOrAddVisitedNode(other_idx, ctx.opt.use_astar_heuristic);
         VisitedNode& vother = visited_nodes_.at(v_other_idx);
         std::uint32_t new_metric = min_metric + dist;
 
@@ -295,8 +318,8 @@ class AStarRouter {
 
           // Compute heuristic distance from new node to target.
           if (vother.heuristic_to_target == INFU30) {
-            const uint32_t h = ComputeHeuristicToTarget(
-                g_.nodes.at(other_idx), target_lat, target_lon, metric, opt);
+            const uint32_t h =
+                ComputeHeuristicToTarget(g_.nodes.at(other_idx), ctx);
             CHECK_LT_S(h, INFU30);
             vother.heuristic_to_target = h;
           }
@@ -307,13 +330,9 @@ class AStarRouter {
   }
 
   // Expand the backward edges (for traveling backwards).
-  void ExpandNeighboursBackward(const QueuedNode& qnode,
-                                const RoutingMetric& metric,
-                                const RoutingOptions& opt,
+  void ExpandNeighboursBackward(const QueuedNode& qnode, const Context& ctx,
                                 std::uint32_t node_idx,
-                                std::uint32_t min_metric,
-                                std::int32_t target_lat,
-                                std::int32_t target_lon) {
+                                std::uint32_t min_metric) {
     const GNode& node = g_.nodes.at(node_idx);
     for (size_t i = 0; i < gnode_total_edges(node); ++i) {
       const GEdge& edge = node.edges[i];
@@ -323,20 +342,20 @@ class AStarRouter {
       }
 
       const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
-      if (RoutingRejectEdge(g_, opt, node, node_idx, edge, wsa,
+      if (RoutingRejectEdge(g_, ctx.opt, node, node_idx, edge, wsa,
                             EDGE_INVERSE_DIR(edge))) {
         continue;
       }
 
-      std::uint32_t v_idx =
-          FindOrAddVisitedNode(edge.other_node_idx, opt.use_astar_heuristic);
+      std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx,
+                                                 ctx.opt.use_astar_heuristic);
       VisitedNode& vother = visited_nodes_.at(v_idx);
       if (vother.done) {
         continue;
       }
       std::uint32_t new_metric =
           min_metric +
-          metric.Compute(wsa, opt.vt, EDGE_INVERSE_DIR(edge), edge);
+          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_INVERSE_DIR(edge), edge);
       if (new_metric < vother.min_metric) {
         vother.min_metric = new_metric;
         vother.from_v_idx = qnode.visited_node_idx;
@@ -344,8 +363,7 @@ class AStarRouter {
         // Compute heuristic distance from new node to target.
         if (vother.heuristic_to_target == INFU30) {
           const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx),
-                                       target_lat, target_lon, metric, opt);
+              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx), ctx);
           CHECK_LT_S(h, INFU30);
           vother.heuristic_to_target = h;
         }

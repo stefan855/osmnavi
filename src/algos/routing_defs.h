@@ -29,6 +29,8 @@ struct RoutingOptions {
   bool restrict_to_cluster = false;
   // Search the shortest way forward (false) or backward (true) mode.
   bool backward_search = false;
+  // If to use AStar heuristic.
+  bool use_astar_heuristic = false;
   // Node index (in graph.nodes) of a node that is on the non-dead-end side of a
   // bridge. Setting this node allows to travel the bridge from the non-dead-end
   // part of the network.
@@ -76,12 +78,9 @@ struct RoutingOptions {
 struct RoutingResult {
   bool found = false;
   // If a route was found, the distance from start to target node.
-  uint32_t found_distance = INFU32;
+  uint32_t found_distance = 0;
   uint32_t num_visited_nodes = 0;
-  /*
-  // If a route was found, the internal visited index of the target node.
-  uint32_t found_target_visited_node_index = INFU32;
-  */
+  uint32_t num_shortest_route_nodes = 0;
 };
 
 // Check if the routing options 'opt' make us reject to follow 'edge'.

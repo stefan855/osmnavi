@@ -49,28 +49,55 @@
         attribution: my_attribution
       });
 
-      var dijks_forward = L.tileLayer('http://localhost:8080/tiles/dijks_forward/{z}/{x}/{y}.png', {
+      var pb_dijks_forward = L.tileLayer('http://localhost:8080/tiles/pb_dijks_forward/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
-      var dijks_backward = L.tileLayer('http://localhost:8080/tiles/dijks_backward/{z}/{x}/{y}.png', {
+      var pb_dijks_backward = L.tileLayer('http://localhost:8080/tiles/pb_dijks_backward/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
-      var dijks_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/dijks_forward_hybrid/{z}/{x}/{y}.png', {
+      var pb_dijks_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/pb_dijks_forward_hybrid/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
 
-      var astar_forward = L.tileLayer('http://localhost:8080/tiles/astar_forward/{z}/{x}/{y}.png', {
+      var pb_astar_forward = L.tileLayer('http://localhost:8080/tiles/pb_astar_forward/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
-      var astar_backward = L.tileLayer('http://localhost:8080/tiles/astar_backward/{z}/{x}/{y}.png', {
+      var pb_astar_backward = L.tileLayer('http://localhost:8080/tiles/pb_astar_backward/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
-      var astar_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/astar_forward_hybrid/{z}/{x}/{y}.png', {
+      var pb_astar_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/pb_astar_forward_hybrid/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
+      var uw_dijks_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/uw_dijks_forward_hybrid/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var uw_astar_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/uw_astar_forward_hybrid/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
+      var as_dijks_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/as_dijks_forward_hybrid/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var as_astar_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/as_astar_forward_hybrid/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
+      var ln_dijks_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/ln_dijks_forward_hybrid/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+      var ln_astar_forward_hybrid = L.tileLayer('http://localhost:8080/tiles/ln_astar_forward_hybrid/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -111,6 +138,11 @@
       });
 
       var cross = L.tileLayer('http://localhost:8080/tiles/cross/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
+      var traffic = L.tileLayer('http://localhost:8080/tiles/traffic/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -167,12 +199,19 @@
         "Graph Cars": graph_motor_vehicle,
         "Graph Bicycles": graph_bicycle,
         "Louvain": louvain,
-        "Route Dijkstra Forward": dijks_forward,
-        "Route Dijkstra Backward": dijks_backward,
-        "Route Dijkstra Forward Hybrid": dijks_forward_hybrid,
-        "Route AStar Forward": astar_forward,
-        "Route AStar Backward": astar_backward,
-        "Route AStar Forward Hybrid": astar_forward_hybrid,
+        "Cross-Country Edges": cross,
+        "PB Route Dijkstra Forward": pb_dijks_forward,
+        "PB_Route Dijkstra Backward": pb_dijks_backward,
+        "PB_Route Dijkstra Forward Hybrid": pb_dijks_forward_hybrid,
+        "PB_Route AStar Forward": pb_astar_forward,
+        "PB_Route AStar Backward": pb_astar_backward,
+        "PB_Route AStar Forward Hybrid": pb_astar_forward_hybrid,
+        "UW_Route Dijkstra Forward Hybrid": uw_dijks_forward_hybrid,
+        "UW_Route AStar Forward Hybrid": uw_astar_forward_hybrid,
+        "AS_Route Dijkstra Forward Hybrid": as_dijks_forward_hybrid,
+        "AS_Route AStar Forward Hybrid": as_astar_forward_hybrid,
+        "LN_Route Dijkstra Forward Hybrid": ln_dijks_forward_hybrid,
+        "LN_Route AStar Forward Hybrid": ln_astar_forward_hybrid,
         "Länder": ALL,
         "Schweiz": CH,
         "Deutschland": DE,
@@ -180,7 +219,7 @@
         "Jordanien": JO,
         "Ukraine": UA,
         "Russland": RU,
-        "Cross-Country Edges": cross,
+        "Traffic": traffic,
         "Experimental 1": experimental1,
         "Experimental 2": experimental2,
         "Experimental 3": experimental3,

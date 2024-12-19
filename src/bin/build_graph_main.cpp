@@ -14,9 +14,8 @@
 #include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "algos/astar.h"
 #include "algos/compact_dijkstra.h"
-#include "algos/dijkstra.h"
+#include "algos/router.h"
 #include "base/argli.h"
 #include "base/huge_bitset.h"
 #include "base/thread_pool.h"
@@ -29,13 +28,9 @@
 void PrintStructSizes() {
   LOG_S(INFO) << "----------- Struct Sizes ---------";
   LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(VisitedNode): %4u",
-                                 sizeof(DijkstraRouter::VisitedNode));
+                                 sizeof(Router::VisitedNode));
   LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(QueuedNode):  %4u",
-                                 sizeof(DijkstraRouter::QueuedNode));
-  LOG_S(INFO) << absl::StrFormat("AStar: sizeof(VisitedNode):    %4u",
-                                 sizeof(AStarRouter::VisitedNode));
-  LOG_S(INFO) << absl::StrFormat("AStar: sizeof(QueuedNode):     %4u",
-                                 sizeof(AStarRouter::QueuedNode));
+                                 sizeof(Router::QueuedNode));
   LOG_S(INFO) << absl::StrFormat("sizeof(GNode):                 %4u",
                                  sizeof(GNode));
   LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                 %4u",
@@ -50,8 +45,9 @@ void PrintStructSizes() {
                                  sizeof(std::pair<int32_t, int32_t>));
 }
 
+#if 0
 template <typename TRouter>
-void DoOneRoute(const Graph& g, std::uint32_t start_idx,
+void DoOneRouteOld(const Graph& g, std::uint32_t start_idx,
                 std::uint32_t target_idx, const RoutingMetric& metric,
                 bool backward, bool hybrid, bool csv) {
   RoutingOptions opt;
@@ -81,10 +77,44 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
       res.found ? res.found_distance : 0, elapsed, res.num_visited_nodes,
       router.Name(metric, opt));
 }
+#endif
+
+void DoOneRoute(const Graph& g, std::uint32_t start_idx,
+                std::uint32_t target_idx, bool astar,
+                const RoutingMetric& metric, bool backward, bool hybrid,
+                std::string_view csv_prefix) {
+  RoutingOptions opt;
+  opt.use_astar_heuristic = astar;
+  if (backward) {
+    std::swap(start_idx, target_idx);
+    opt.backward_search = true;
+  }
+  if (hybrid) {
+    opt.SetHybridOptions(g, start_idx, target_idx);
+  } else {
+    opt.MayFillBridgeNodeId(g, target_idx);
+  }
+
+  const absl::Time start = absl::Now();
+  Router router(g, 0);
+  auto res = router.Route(start_idx, target_idx, metric, opt);
+  const double elapsed = ToDoubleSeconds(absl::Now() - start);
+
+  if (!csv_prefix.empty()) {
+    router.SaveSpanningTreeSegments(absl::StrFormat(
+        "/tmp/%s_%s_%s%s.csv", csv_prefix, router.AlgoName(opt).substr(0, 5),
+        backward ? "backward" : "forward", hybrid ? "_hybrid" : ""));
+  }
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Metric:%u %s secs:%6.3f #nodes:%5u visits:%10u %s", res.found_distance,
+      res.found ? "SUC" : "ERR", elapsed, res.num_shortest_route_nodes,
+      res.num_visited_nodes, router.Name(metric, opt));
+}
 
 void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
                const std::string& start_name, const std::string& target_name,
-               bool csv = false) {
+               std::string_view csv_prefix = "") {
   std::uint32_t start_idx = g.FindNodeIndex(start_node_id);
   std::uint32_t target_idx = g.FindNodeIndex(target_node_id);
   LOG_S(INFO) << absl::StrFormat("**** Route from %s(%u) to %s(%u)", start_name,
@@ -94,19 +124,35 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
     return;
   }
 
-  DoOneRoute<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+#if 0
+  DoOneRouteOld<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
                              /*backward=*/false, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRoute<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+  DoOneRouteOld<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
                              /*backward=*/true, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRoute<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+  DoOneRouteOld<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
                              /*backward=*/false, /*hybrid=*/true, /*csv=*/csv);
 
-  DoOneRoute<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+  DoOneRouteOld<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRoute<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+  DoOneRouteOld<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
                           /*backward=*/true, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRoute<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
+  DoOneRouteOld<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/true, /*csv=*/csv);
+#endif
+
+  DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
+             /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
+             /*backward=*/true, /*hybrid=*/false, csv_prefix);
+  DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
+             /*backward=*/false, /*hybrid=*/true, csv_prefix);
+
+  DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
+             /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
+             /*backward=*/true, /*hybrid=*/false, csv_prefix);
+  DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
+             /*backward=*/false, /*hybrid=*/true, csv_prefix);
 }
 
 void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
@@ -310,17 +356,25 @@ int main(int argc, char* argv[]) {
   WriteCrossCountryEdges(meta, "/tmp/cross.csv");
 
   // TestRoutes(g);
-  TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern", /*csv=*/true);
-  TestRoute(g, 805904068, 49973500, "Bern", "Pfäffikon ZH");
+  TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern",
+            /*csv_prefix=*/"pb");
+  TestRoute(g, 805904068, 49973500, "Bern", "Pfäffikon ZH",
+            /*csv_prefix=*/"bp");
 
-  TestRoute(g, 3108534441, 3019156898, "Uster ZH", "Weesen");
-  TestRoute(g, 3019156898, 3108534441, "Weesen", "Uster ZH");
+  TestRoute(g, 3108534441, 3019156898, "Uster ZH", "Weesen",
+            /*csv_prefix=*/"uw");
+  TestRoute(g, 3019156898, 3108534441, "Weesen", "Uster ZH",
+            /*csv_prefix=*/"wu");
 
-  TestRoute(g, 26895904, 300327675, "Augsburg", "Stralsund");
-  TestRoute(g, 300327675, 26895904, "Stralsund", "Augsburg");
+  TestRoute(g, 26895904, 300327675, "Augsburg", "Stralsund",
+            /*csv_prefix=*/"as");
+  TestRoute(g, 300327675, 26895904, "Stralsund", "Augsburg",
+            /*csv_prefix=*/"sa");
 
-  TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp-Norwegen");
-  TestRoute(g, 899297768, 1131001345, "Nordkapp-Norwegen", "Lissabon");
+  TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp-Norwegen",
+            /*csv_prefix=*/"ln");
+  TestRoute(g, 899297768, 1131001345, "Nordkapp-Norwegen", "Lissabon",
+            /*csv_prefix=*/"");
 
   LOG_S(INFO) << "Finished.";
   return 0;
