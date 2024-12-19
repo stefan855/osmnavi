@@ -18,7 +18,7 @@
 #include "osm/read_osm_pbf.h"
 
 namespace {
-// For each PPOI, find the closest node in the road network.
+// For each POI, find the closest node in the road network.
 void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
                       pois::CollectedData* data) {
   FUNC_TIMER();
@@ -57,29 +57,64 @@ void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
 }
 
 namespace {
-void WriteCSVs(const Graph& g, const CompactDirectedGraph cg,
-               std::vector<std::uint32_t>& graph_node_refs,
-               std::vector<std::vector<int64_t>>& v_edge_traffic) {
+
+const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
+                                  uint32_t n2_idx, VEHICLE vt) {
+  uint32_t best_maxspeed = 0;
+  const GEdge* best_edge = nullptr;
+  for (size_t i = 0; i < n1.num_edges_out; ++i) {
+    const GEdge& edge = n1.edges[i];
+    if (edge.other_node_idx != n2_idx) {
+      continue;
+    }
+    const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
+    const RoutingAttrs& ra = GetRAFromWSA(wsa, vt, EDGE_DIR(edge));
+    if (RoutableAccess(ra.access) && ra.maxspeed > best_maxspeed) {
+      best_maxspeed = ra.maxspeed;
+      best_edge = &edge;
+    }
+  }
+  return best_edge;
+}
+
+// Write: way_id, start_lon, start_lat, end_lon, end_lat, visits
+void WriteCSV(const Graph& g, const CompactDirectedGraph cg,
+              const std::vector<std::uint32_t>& graph_node_refs,
+              const std::vector<int64_t>& edge_traffic, bool export_format) {
   const std::vector<uint32_t>& edges_start = cg.edges_start();
   const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
   int64_t count = 0;
 
   std::ofstream myfile;
-  const std::string filename = "/tmp/experimental1.csv";
+  const std::string filename =
+      export_format ? "/tmp/traffic_export.csv" : "/tmp/traffic.csv";
   myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
+  if (export_format) {
+    myfile << "way_id,start_lon,start_lat,end_lon,end_lat,visits,deadend\n";
+  }
 
   for (size_t from_node = 0; from_node < cg.num_nodes(); ++from_node) {
     for (size_t i = edges_start.at(from_node);
          i < edges_start.at(from_node + 1); ++i) {
-      int64_t traffic = 0;
-      for (const std::vector<int64_t>& et : v_edge_traffic) {
-        traffic += et.at(i);
+      if (edge_traffic.at(i) == 0) {
+        continue;
       }
-      if (traffic > 100'000) {
-        count++;
-        const GNode& n1 = g.nodes.at(graph_node_refs.at(from_node));
-        const GNode& n2 = g.nodes.at(graph_node_refs.at(edges.at(i).to_idx));
-        myfile << absl::StrFormat("line,red,%d,%d,%d,%d\n", n1.lat, n1.lon,
+      count++;
+      const GNode& n1 = g.nodes.at(graph_node_refs.at(from_node));
+      uint32_t n2_idx = graph_node_refs.at(edges.at(i).to_idx);
+      const GEdge* edge = FindEdgeBetweenNodes(g, n1, n2_idx, VH_MOTOR_VEHICLE);
+      const GNode& n2 = g.nodes.at(n2_idx);
+      CHECK_NE_S(edge, nullptr);
+      int64_t way_id = g.ways.at(edge->way_idx).id;
+      // Check if the edge is fully in a dead end or a bridge.
+      bool dead_end = n1.dead_end || n2.dead_end;
+      if (export_format) {
+        myfile << absl::StrFormat("%lld,%d,%d,%d,%d,%lld,%d\n", way_id, n1.lat,
+                                  n1.lon, n2.lat, n2.lon, edge_traffic.at(i),
+                                  dead_end);
+      } else {
+        myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
+                                  dead_end ? "grey" : "red", n1.lat, n1.lon,
                                   n2.lat, n2.lon);
       }
     }
@@ -117,10 +152,66 @@ void SingleSourceDijkstraWorker(const Graph& g, const CompactDirectedGraph& cg,
     traffic.at(parent_idx) += traffic.at(child_idx);
   }
 }
+
+// Sum up the edge traffic that was collected in parallel in multiple threads.
+// Return a vector with one number for each edge.
+std::vector<int64_t> SumUpEdgeTraffic(
+    const std::vector<std::vector<int64_t>>& threaded_edge_traffic) {
+  std::vector<int64_t> edge_traffic;
+  size_t num_edges = threaded_edge_traffic.at(0).size();
+  for (size_t i = 0; i < num_edges; ++i) {
+    int64_t sum = 0;
+    for (const auto& v : threaded_edge_traffic) {
+      sum += v.at(i);
+    }
+    edge_traffic.push_back(sum);
+  }
+  return edge_traffic;
+}
+
+std::vector<int64_t> RunCompactGraphRandomTraffic(
+    const Graph& g, const CompactDirectedGraph& cg,
+    const absl::flat_hash_map<uint32_t, uint32_t>& compact_nodemap,
+    const pois::CollectedData& data, int n_threads) {
+  ThreadPool pool;
+  // Contains for each thread a vector with cg.edges().size() traffic counts,
+  // one for every edge in the compact graph.
+  std::vector<std::vector<int64_t>> threaded_edge_traffic(n_threads);
+  for (std::vector<int64_t>& edge_traffic : threaded_edge_traffic) {
+    edge_traffic.assign(cg.edges().size(), 0);
+  }
+  uint32_t count = 0;
+  for (size_t i = 0; i < data.pois.size(); ++i) {
+    const pois::POI& p = data.pois.at(i);
+    if (p.routing_node_dist < 10000) {  // < 100m.
+      const auto iter = compact_nodemap.find(p.routing_node_idx);
+      if (iter == compact_nodemap.end()) continue;
+      count++;
+
+      pool.AddWork([&g, &cg, poi_compact_idx = iter->second, i,
+                    total = data.pois.size(),
+                    &threaded_edge_traffic](int thread_idx) {
+        LOG_S(INFO) << absl::StrFormat(
+            "SingleSourceDijkstra for POI %u (%u total)", i, total);
+        SingleSourceDijkstraWorker(g, cg, poi_compact_idx,
+                                   &threaded_edge_traffic.at(thread_idx));
+      });
+    }
+  }
+  pool.Start(n_threads);
+  pool.WaitAllFinished();
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Executed SingleSourceDijkstra for %u of total %u POIS", count,
+      data.pois.size());
+
+  return SumUpEdgeTraffic(threaded_edge_traffic);
+}
+
 }  // namespace
 
 void CollectRandomTraffic(const Graph& g, int n_threads,
-                          pois::CollectedData* data) {
+                          const pois::CollectedData& data, bool export_format) {
   FUNC_TIMER();
   const RoutingMetricTime metric;
   uint32_t num_nodes = 0;
@@ -129,6 +220,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
       g.large_components.front().start_node};
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
   std::vector<std::uint32_t> graph_node_refs;
+  // Maps node index in graph.nodes to node index in compact graph.
   absl::flat_hash_map<uint32_t, uint32_t> compact_nodemap;
 
   // Create a compact graph for the largest component in the graph.
@@ -146,39 +238,10 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   const CompactDirectedGraph cg(num_nodes, full_edges);
   cg.LogStats();
 
-  ThreadPool pool;
-  // Contains for each thread a vector with cg.edges().size() traffic counts,
-  // one for every edge in the compact graph.
-  std::vector<std::vector<int64_t>> v_edge_traffic(n_threads);
-  for (std::vector<int64_t>& edge_traffic : v_edge_traffic) {
-    edge_traffic.assign(cg.edges().size(), 0);
-  }
-  uint32_t count = 0;
-  for (size_t i = 0; i < data->pois.size(); ++i) {
-    pois::POI& p = data->pois.at(i);
-    if (p.routing_node_dist < 10000) {
-      const auto iter = compact_nodemap.find(p.routing_node_idx);
-      if (iter == compact_nodemap.end()) continue;
-      count++;
+  const std::vector<int64_t> edge_traffic =
+      RunCompactGraphRandomTraffic(g, cg, compact_nodemap, data, n_threads);
 
-      pool.AddWork([&g, &cg, poi_compact_idx = iter->second, i,
-                    total = data->pois.size(),
-                    &v_edge_traffic](int thread_idx) {
-        LOG_S(INFO) << absl::StrFormat(
-            "SingleSourceDijkstra for POI %u (%u total)", i, total);
-        SingleSourceDijkstraWorker(g, cg, poi_compact_idx,
-                                   &v_edge_traffic.at(thread_idx));
-      });
-    }
-  }
-  pool.Start(n_threads);
-  pool.WaitAllFinished();
-
-  WriteCSVs(g, cg, graph_node_refs, v_edge_traffic);
-
-  LOG_S(INFO) << absl::StrFormat(
-      "Executed SingleSourceDijkstra for %u of total %u POIS", count,
-      data->pois.size());
+  WriteCSV(g, cg, graph_node_refs, edge_traffic, export_format);
 }
 
 }  // namespace
@@ -211,13 +274,17 @@ int main(int argc, char* argv[]) {
           {.name = "check_slow",
            .type = "bool",
            .desc = "Check ClosestPoint algorithm against slow variant."},
+          {.name = "export_format",
+           .type = "bool",
+           .desc = "Write output csv in export format or not."},
       });
 
   const std::string command = argli.GetString("command");
   const std::string pbf = argli.GetString("pbf");
-  const int max_pois = argli.GetInt("max_pois");
+  const int64_t max_pois = argli.GetInt("max_pois");
   const int n_threads = argli.GetInt("n_threads");
   const int check_slow = argli.GetBool("check_slow");
+  const int export_format = argli.GetBool("export_format");
   CHECK_GT_S(max_pois, 0);
   CHECK_EQ_S(command, "pois");
 
@@ -225,11 +292,14 @@ int main(int argc, char* argv[]) {
   pois::CollectedData data;
   pois::ReadPBF(pbf, n_threads, &data);
 
-  if ((size_t)max_pois < data.pois.size()) {
+  int64_t pois_size = data.pois.size();
+  if (max_pois < pois_size) {
     // Pseudo random number generator with a constant seed, to be reproducible.
     std::mt19937 myrandom(1);
     // Shuffle the POIs so we can run over a subset of size max_pois without
     // introducing a bias.
+    LOG_S(INFO) << "Randomizing+shrinking " << pois_size << " POIs to "
+                << max_pois;
     std::shuffle(data.pois.begin(), data.pois.end(), myrandom);
     data.pois.resize(max_pois);
   }
@@ -242,17 +312,10 @@ int main(int argc, char* argv[]) {
   MatchPOIsToRoads(g, n_threads, check_slow, &data);
 
   // Execute random queries and collect traffic.
-  CollectRandomTraffic(g, n_threads, &data);
+  CollectRandomTraffic(g, n_threads, data, export_format);
 
-  /*
-  for (size_t i = 0; i < data.pois.size(); ++i) {
-    const pois::POI& p = data.pois.at(i);
-    LOG_S(INFO) << absl::StrFormat("%10u. %c %10d lat:%d lon:%d #n:%d %s %s", i,
-                                   p.obj_type, p.id, p.lat, p.lon, p.num_points,
-                                   p.type, p.name);
-  }
-  */
-
+  LOG_S(INFO) << absl::StrFormat("Collected traffic for %llu of %lld POIs",
+                                 std::min(max_pois, pois_size), pois_size);
   LOG_S(INFO) << "Finished.";
   return 0;
 }
