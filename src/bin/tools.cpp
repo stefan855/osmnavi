@@ -80,16 +80,17 @@ const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
 // Write: way_id, start_lon, start_lat, end_lon, end_lat, visits
 void WriteCSV(const Graph& g, const CompactDirectedGraph cg,
               const std::vector<std::uint32_t>& graph_node_refs,
-              const std::vector<int64_t>& edge_traffic, bool export_format) {
+              const std::vector<int64_t>& edge_traffic,
+              std::string_view export_file) {
   const std::vector<uint32_t>& edges_start = cg.edges_start();
   const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
   int64_t count = 0;
 
   std::ofstream myfile;
   const std::string filename =
-      export_format ? "/tmp/traffic_export.csv" : "/tmp/traffic.csv";
+      export_file.empty() ? "/tmp/traffic.csv" : std::string(export_file);
   myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
-  if (export_format) {
+  if (!export_file.empty()) {
     myfile << "way_id,start_lon,start_lat,end_lon,end_lat,visits,deadend\n";
   }
 
@@ -108,7 +109,7 @@ void WriteCSV(const Graph& g, const CompactDirectedGraph cg,
       int64_t way_id = g.ways.at(edge->way_idx).id;
       // Check if the edge is fully in a dead end or a bridge.
       bool dead_end = n1.dead_end || n2.dead_end;
-      if (export_format) {
+      if (!export_file.empty()) {
         myfile << absl::StrFormat("%lld,%d,%d,%d,%d,%lld,%d\n", way_id, n1.lat,
                                   n1.lon, n2.lat, n2.lon, edge_traffic.at(i),
                                   dead_end);
@@ -211,7 +212,8 @@ std::vector<int64_t> RunCompactGraphRandomTraffic(
 }  // namespace
 
 void CollectRandomTraffic(const Graph& g, int n_threads,
-                          const pois::CollectedData& data, bool export_format) {
+                          const pois::CollectedData& data,
+                          std::string_view export_file) {
   FUNC_TIMER();
   const RoutingMetricTime metric;
   uint32_t num_nodes = 0;
@@ -241,7 +243,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   const std::vector<int64_t> edge_traffic =
       RunCompactGraphRandomTraffic(g, cg, compact_nodemap, data, n_threads);
 
-  WriteCSV(g, cg, graph_node_refs, edge_traffic, export_format);
+  WriteCSV(g, cg, graph_node_refs, edge_traffic, export_file);
 }
 
 }  // namespace
@@ -274,9 +276,9 @@ int main(int argc, char* argv[]) {
           {.name = "check_slow",
            .type = "bool",
            .desc = "Check ClosestPoint algorithm against slow variant."},
-          {.name = "export_format",
-           .type = "bool",
-           .desc = "Write output csv in export format or not."},
+          {.name = "export_file",
+           .type = "string",
+           .desc = "Write output in export format to file <export_file>."},
       });
 
   const std::string command = argli.GetString("command");
@@ -284,7 +286,7 @@ int main(int argc, char* argv[]) {
   const int64_t max_pois = argli.GetInt("max_pois");
   const int n_threads = argli.GetInt("n_threads");
   const int check_slow = argli.GetBool("check_slow");
-  const int export_format = argli.GetBool("export_format");
+  const std::string export_file = argli.GetString("export_file");
   CHECK_GT_S(max_pois, 0);
   CHECK_EQ_S(command, "pois");
 
@@ -312,7 +314,7 @@ int main(int argc, char* argv[]) {
   MatchPOIsToRoads(g, n_threads, check_slow, &data);
 
   // Execute random queries and collect traffic.
-  CollectRandomTraffic(g, n_threads, data, export_format);
+  CollectRandomTraffic(g, n_threads, data, export_file);
 
   LOG_S(INFO) << absl::StrFormat("Collected traffic for %llu of %lld POIs",
                                  std::min(max_pois, pois_size), pois_size);
