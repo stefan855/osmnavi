@@ -255,11 +255,6 @@ int main(int argc, char* argv[]) {
   Argli argli(
       argc, argv,
       {
-          {.name = "command",
-           .type = "string",
-           .positional = true,
-           .required = true,
-           .desc = "Command to execute, possible values are \"pois\""},
           {.name = "pbf",
            .type = "string",
            .positional = true,
@@ -281,14 +276,12 @@ int main(int argc, char* argv[]) {
            .desc = "Write output in export format to file <export_file>."},
       });
 
-  const std::string command = argli.GetString("command");
   const std::string pbf = argli.GetString("pbf");
   const int64_t max_pois = argli.GetInt("max_pois");
   const int n_threads = argli.GetInt("n_threads");
   const int check_slow = argli.GetBool("check_slow");
   const std::string export_file = argli.GetString("export_file");
   CHECK_GT_S(max_pois, 0);
-  CHECK_EQ_S(command, "pois");
 
   // Read POIs.
   pois::CollectedData data;

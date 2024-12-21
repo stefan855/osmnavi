@@ -70,7 +70,7 @@ add_executable(extract_admin src/bin/extract_admin.cpp)
 target_include_directories(extract_admin SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
 target_link_libraries(extract_admin PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time)
 
-add_executable(tools src/bin/tools.cpp)
-target_include_directories(tools SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
-target_link_libraries(tools PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
+add_executable(poi_traffic src/bin/poi_traffic.cpp)
+target_include_directories(poi_traffic SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
+target_link_libraries(poi_traffic PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
 
