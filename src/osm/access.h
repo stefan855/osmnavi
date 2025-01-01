@@ -34,7 +34,7 @@ inline ACCESS InterpretAccessValue(std::string_view val, bool lanes,
   return acc;
 }
 
-// Set access in forward and backward direction based on tags. 
+// Set access in forward and backward direction based on tags.
 // 'weak' indicates that only access that already is better than 'no' should be
 // modified. For instance, a way with "highway=footway access=permissive" should
 // not be set permissive for cars.
@@ -79,9 +79,12 @@ inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
   constexpr uint64_t selector_bits =
       GetBitMask(KEY_BIT_ACCESS) | GetBitMask(KEY_BIT_VEHICLE) |
       GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
-  constexpr uint64_t modifier_bits =
-      GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER);
+  // ":both_ways" is not used here. It means a lane that is allowed for both
+  // directions, not both ":forward" and ":backward" for the read. See
+  // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
+  constexpr uint64_t modifier_bits = GetBitMask(KEY_BIT_FORWARD) |
+                                     GetBitMask(KEY_BIT_BACKWARD) |
+                                     GetBitMask(KEY_BIT_LANES_INNER);
 
   for (const ParsedTag& pt : ptags) {
     if ((pt.bits & selector_bits) == 0) {

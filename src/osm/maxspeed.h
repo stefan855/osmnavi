@@ -47,11 +47,13 @@ inline void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
                                std::uint16_t* maxspeed_backw) {
   // Special (hard) cases:
   constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
+  // ":both_ways" is not used here. It means a lane that is allowed for both
+  // directions, not both ":forward" and ":backward" for the read. See
+  // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
   constexpr uint64_t modifier_bits =
       GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER) |
-      GetBitMask(KEY_BIT_VEHICLE) | GetBitMask(KEY_BIT_MOTOR_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTORCAR);
+      GetBitMask(KEY_BIT_LANES_INNER) | GetBitMask(KEY_BIT_VEHICLE) |
+      GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
   *maxspeed_forw = 0;
   *maxspeed_backw = 0;
 
@@ -94,8 +96,8 @@ inline void BicycleMaxspeedFromWay(const OSMTagHelper& tagh,
   constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
   constexpr uint64_t modifier_bits =
       GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER) |
-      GetBitMask(KEY_BIT_VEHICLE) | GetBitMask(KEY_BIT_BICYCLE);
+      GetBitMask(KEY_BIT_LANES_INNER) | GetBitMask(KEY_BIT_VEHICLE) |
+      GetBitMask(KEY_BIT_BICYCLE);
   *maxspeed_forw = 0;
   *maxspeed_backw = 0;
 
