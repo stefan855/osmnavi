@@ -13,7 +13,7 @@
 #include "graph/graph_def.h"
 
 // A router that can run in Dijkstra or in AStar mode, and may use precomputed
-// routs from clusters (see 'hyrbid').
+// routes from clusters (see 'hybrid').
 //
 // In AStar mode, the router uses a heuristic to estimate a lower bound (see
 // 'heuristic_to_target') that is needed to travel from the current node to the
@@ -121,10 +121,9 @@ class Router {
       }
 
       if (!ctx.opt.backward_search) {
-        ExpandNeighboursForward(qnode, ctx, vnode.node_idx, vnode.min_metric,
-                                vnode.from_v_idx);
+        ExpandNeighboursForward(qnode, ctx, vnode);
       } else {
-        ExpandNeighboursBackward(qnode, ctx, vnode.node_idx, vnode.min_metric);
+        ExpandNeighboursBackward(qnode, ctx, vnode);
       }
     }
     if (verbosity_ > 0) {
@@ -216,14 +215,15 @@ class Router {
   }
 
   // Expand the forward edges.
+  // Note: It is important to pass vnode by value, because a call to
+  // FindOrAddVisitedNode() may invalidate a reference.
   void ExpandNeighboursForward(const QueuedNode& qnode, const Context& ctx,
-                               std::uint32_t node_idx, std::uint32_t min_metric,
-                               std::uint32_t from_v_idx) {
-    const GNode& node = g_.nodes.at(node_idx);
+                               const VisitedNode vnode) {
+    const GNode& node = g_.nodes.at(vnode.node_idx);
     for (size_t i = 0; i < node.num_edges_out; ++i) {
       const GEdge& edge = node.edges[i];
       const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
-      if (RoutingRejectEdge(g_, ctx.opt, node, node_idx, edge, wsa,
+      if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
         continue;
       }
@@ -236,7 +236,7 @@ class Router {
       }
 
       std::uint32_t new_metric =
-          min_metric +
+          vnode.min_metric +
           ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge);
       if (verbosity_ > 1) {
         LOG_S(INFO) << absl::StrFormat(
@@ -270,7 +270,7 @@ class Router {
         // node. A cluster can not be traversed more than once in the shortest
         // path!
         const GNode& parent_node =
-            g_.nodes.at(visited_nodes_.at(from_v_idx).node_idx);
+            g_.nodes.at(visited_nodes_.at(vnode.from_v_idx).node_idx);
         if (parent_node.cluster_id == node.cluster_id) {
           return;
         }
@@ -280,11 +280,11 @@ class Router {
       // distances.
       const GCluster& cluster = g_.clusters.at(node.cluster_id);
       const std::vector<std::uint32_t>& v_dist =
-          cluster.GetBorderNodeDistances(node_idx);
+          cluster.GetBorderNodeDistances(vnode.node_idx);
 
       for (size_t i = 0; i < cluster.border_nodes.size(); ++i) {
         uint32_t other_idx = cluster.border_nodes.at(i);
-        if (other_idx == node_idx) continue;
+        if (other_idx == vnode.node_idx) continue;
         const std::uint32_t dist = v_dist.at(i);
         if (dist == INFU32) continue;  // node is not reachable.
         CHECK_LT_S(dist, INFU30);      // This shouldn't be so big.
@@ -292,7 +292,7 @@ class Router {
         const std::uint32_t v_other_idx =
             FindOrAddVisitedNode(other_idx, ctx.opt.use_astar_heuristic);
         VisitedNode& vother = visited_nodes_.at(v_other_idx);
-        std::uint32_t new_metric = min_metric + dist;
+        std::uint32_t new_metric = vnode.min_metric + dist;
 
         if (verbosity_ > 1) {
           LOG_S(INFO) << absl::StrFormat(
@@ -302,15 +302,6 @@ class Router {
               g_.nodes.at(other_idx).node_id, vother.done, new_metric,
               vother.min_metric);
         }
-
-#if 0
-        if (!vother.done && new_metric < vother.min_metric) {
-          // node.node_id == 104271819 || node.node_id == 1479539537
-          vother.min_metric = new_metric;
-          vother.from_v_idx = qnode.visited_node_idx;
-          pq_.emplace(new_metric, v_other_idx);
-        }
-#endif
 
         if (!vother.done && new_metric < vother.min_metric) {
           vother.min_metric = new_metric;
@@ -330,10 +321,11 @@ class Router {
   }
 
   // Expand the backward edges (for traveling backwards).
+  // Note: It is important to pass vnode by value, because a call to
+  // FindOrAddVisitedNode() may invalidate a reference.
   void ExpandNeighboursBackward(const QueuedNode& qnode, const Context& ctx,
-                                std::uint32_t node_idx,
-                                std::uint32_t min_metric) {
-    const GNode& node = g_.nodes.at(node_idx);
+                                const VisitedNode vnode) {
+    const GNode& node = g_.nodes.at(vnode.node_idx);
     for (size_t i = 0; i < gnode_total_edges(node); ++i) {
       const GEdge& edge = node.edges[i];
       // Skip edges that are forward only.
@@ -342,7 +334,7 @@ class Router {
       }
 
       const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
-      if (RoutingRejectEdge(g_, ctx.opt, node, node_idx, edge, wsa,
+      if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
                             EDGE_INVERSE_DIR(edge))) {
         continue;
       }
@@ -354,7 +346,7 @@ class Router {
         continue;
       }
       std::uint32_t new_metric =
-          min_metric +
+          vnode.min_metric +
           ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_INVERSE_DIR(edge), edge);
       if (new_metric < vother.min_metric) {
         vother.min_metric = new_metric;
@@ -373,11 +365,10 @@ class Router {
   }
 
   const Graph& g_;
-  std::deque<VisitedNode> visited_nodes_;
+  std::vector<VisitedNode> visited_nodes_;
 
   typedef absl::flat_hash_map<uint32_t, uint32_t> NodeIdMap;
   NodeIdMap node_to_vnode_idx_;
-  // absl::flat_hash_map<std::uint32_t, std::uint32_t> node_to_vnode_idx_;
 
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, decltype(&MetricCmp)>
       pq_;

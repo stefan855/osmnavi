@@ -48,6 +48,7 @@ struct BuildGraphOptions {
   // Compute all cluster shortest paths a second time with A* and compare to the
   // results of single source Dijkstra. This is extremely time consuming.
   bool check_shortest_cluster_paths = false;
+  bool keep_all_nodes = false;
 };
 
 struct BuildGraphStats {
@@ -72,6 +73,9 @@ struct BuildGraphStats {
   int64_t num_ways_has_country = 0;
   int64_t num_ways_has_streetname = 0;
   int64_t num_ways_oneway_car = 0;
+  // Count ways with restricted access in one direction and free access in the
+  // other direction.
+  int64_t num_ways_mixed_restricted_car = 0;
 
   int64_t num_cross_country_edges = 0;
 
@@ -80,6 +84,12 @@ struct BuildGraphStats {
   int64_t num_nodes_no_country = 0;
   int64_t num_edges_inverted = 0;
   int64_t num_edges_out = 0;
+  int64_t num_edges_out_car_restr_unset = 0;
+  int64_t num_edges_out_car_restr_free = 0;
+  int64_t num_edges_out_car_restricted = 0;
+  int64_t num_edges_out_car_restricted2 = 0;
+  int64_t num_edges_out_car_strange = 0;
+  int64_t num_edges_out_car_forbidden = 0;
   int64_t num_edges_non_unique = 0;
   int64_t max_edges_inverted = 0;
   int64_t max_edges_out = 0;

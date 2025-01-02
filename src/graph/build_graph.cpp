@@ -4,6 +4,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
+#include "algos/restricted_edges.h"
 #include "base/huge_bitset.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"
@@ -247,6 +248,14 @@ void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
 // access rules etc.
 void MarkSeenAndNeeded(GraphMetaData* meta,
                        const std::vector<NodeCountry>& ncs) {
+  if (meta->opt.keep_all_nodes) {
+    for (const NodeCountry& nc : ncs) {
+      meta->way_nodes_seen->SetBit(nc.id, true);
+      meta->way_nodes_needed->SetBit(nc.id, true);
+    }
+    return;
+  }
+
   // Mark nodes at country-crossing edges as 'needed' .
   for (size_t i = 0; i < ncs.size() - 1; ++i) {
     if (ncs.at(i).ncc != ncs.at(i + 1).ncc) {
@@ -516,7 +525,8 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 namespace {
 void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const bool out, const bool contra_way, const bool both_directions,
-             const size_t way_idx, const std::uint64_t distance_cm) {
+             const size_t way_idx, const std::uint64_t distance_cm,
+             bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
   GEdge* edges = out ? n.edges : n.edges + n.num_edges_out;
@@ -534,6 +544,8 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
       edges[pos].contra_way = contra_way ? 1 : 0;
       edges[pos].both_directions = both_directions ? 1 : 0;
       edges[pos].cross_country = n.ncc != other.ncc;
+      edges[pos].car_label =
+          car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
       return;
     }
   }
@@ -793,6 +805,13 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
     // Go through 'needed' nodes (skip the others) and output edges.
     {
       const WaySharedAttrs& wsa = GetWSA(graph, way);
+      const ACCESS acc_car_f =
+          GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_FORWARD).access;
+      const ACCESS acc_car_b =
+          GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_BACKWARD).access;
+      const bool restr_car_f = RestrictedAccess(acc_car_f);
+      const bool restr_car_b = RestrictedAccess(acc_car_b);
+
       std::unique_lock<std::mutex> l(mut);
       int last_pos = -1;
       for (size_t pos = 0; pos < ids.size(); ++pos) {
@@ -808,20 +827,26 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
             if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
                 WSAAnyRoutable(wsa, DIR_BACKWARD)) {
               AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
-                      /*both_directions=*/true, way_idx, distance_cm);
+                      /*both_directions=*/true, way_idx, distance_cm,
+                      restr_car_f);
               AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
-                      /*both_directions=*/true, way_idx, distance_cm);
+                      /*both_directions=*/true, way_idx, distance_cm,
+                      restr_car_b);
             } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
               AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
-                      /*both_directions=*/false, way_idx, distance_cm);
+                      /*both_directions=*/false, way_idx, distance_cm,
+                      restr_car_f);
               AddEdge(graph, idx2, idx1, /*out=*/false, /*contra_way=*/true,
-                      /*both_directions=*/false, way_idx, distance_cm);
+                      /*both_directions=*/false, way_idx, distance_cm,
+                      restr_car_f);
             } else {
               CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
               AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
-                      /*both_directions=*/false, way_idx, distance_cm);
+                      /*both_directions=*/false, way_idx, distance_cm,
+                      restr_car_b);
               AddEdge(graph, idx1, idx2, /*out=*/false, /*contra_way=*/false,
-                      /*both_directions=*/false, way_idx, distance_cm);
+                      /*both_directions=*/false, way_idx, distance_cm,
+                      restr_car_b);
             }
           }
           last_pos = pos;
@@ -923,6 +948,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
     stats.num_ways_has_streetname += w.streetname == nullptr ? 0 : 1;
     stats.num_ways_oneway_car +=
         (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
+    if ((FreeAccess(wsa.ra[0].access) && RestrictedAccess(wsa.ra[1].access)) ||
+        (RestrictedAccess(wsa.ra[0].access) && FreeAccess(wsa.ra[1].access))) {
+      LOG_S(INFO) << "AA: " << w.id;
+      stats.num_ways_mixed_restricted_car += 1;
+    }
   }
 
   for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
@@ -956,6 +986,22 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
             std::min(stats.min_edge_length_cm, (int64_t)edge.distance_cm);
         stats.max_edge_length_cm =
             std::max(stats.max_edge_length_cm, (int64_t)edge.distance_cm);
+        stats.num_edges_out_car_restr_unset +=
+            (edge.car_label == GEdge::LABEL_UNSET);
+        stats.num_edges_out_car_restr_free +=
+            (edge.car_label == GEdge::LABEL_FREE);
+        stats.num_edges_out_car_restricted +=
+            (edge.car_label == GEdge::LABEL_RESTRICTED);
+        stats.num_edges_out_car_restricted2 +=
+            (edge.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
+        stats.num_edges_out_car_strange +=
+            (edge.car_label == GEdge::LABEL_STRANGE);
+        CHECK_NE_S(edge.car_label, GEdge::LABEL_TEMPORARY);
+        /*
+            RestrictedAccess(GetRAFromWSA(g, edge, VH_MOTOR_VEHICLE).access);
+            */
+        stats.num_edges_out_car_forbidden +=
+            !RoutableAccess(GetRAFromWSA(g, edge, VH_MOTOR_VEHICLE).access);
       }
       stats.num_cross_country_edges += (edge.contra_way && edge.cross_country);
     }
@@ -1023,6 +1069,8 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.num_ways_has_streetname);
   LOG_S(INFO) << absl::StrFormat("  Oneway for cars:  %12lld",
                                  stats.num_ways_oneway_car);
+  LOG_S(INFO) << absl::StrFormat("  Mixed restr cars: %12lld",
+                                 stats.num_ways_mixed_restricted_car);
   LOG_S(INFO) << absl::StrFormat("  Closed ways:      %12lld",
                                  stats.num_ways_closed);
   LOG_S(INFO) << absl::StrFormat("  Bytes per way     %12.2f",
@@ -1043,12 +1091,34 @@ void PrintStats(const GraphMetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("  Nodes no country: %12lld",
                                  stats.num_nodes_no_country);
 
-  LOG_S(INFO) << absl::StrFormat("  Num edges out:    %12lld",
+  std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
+  std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
+  LOG_S(INFO) << absl::StrFormat("  Bytes per node    %12.2f",
+                                 (double)node_bytes / graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Added per node    %12.2f",
+                                 (double)node_added_bytes / graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
+                                 node_bytes + node_added_bytes);
+
+  LOG_S(INFO) << "Edges";
+  LOG_S(INFO) << absl::StrFormat("  Num out:          %12lld",
                                  stats.num_edges_out);
-  LOG_S(INFO) << absl::StrFormat("  Num edges inverted: %10lld",
+  LOG_S(INFO) << absl::StrFormat("  Num inverted:     %12lld",
                                  stats.num_edges_inverted);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  stats.num_edges_non_unique);
+  LOG_S(INFO) << absl::StrFormat("  Car restr unset:  %12lld",
+                                 stats.num_edges_out_car_restr_unset);
+  LOG_S(INFO) << absl::StrFormat("  Car restr free:   %12lld",
+                                 stats.num_edges_out_car_restr_free);
+  LOG_S(INFO) << absl::StrFormat("  Car restricted:   %12lld",
+                                 stats.num_edges_out_car_restricted);
+  LOG_S(INFO) << absl::StrFormat("  Car restricted2:  %12lld",
+                                 stats.num_edges_out_car_restricted2);
+  LOG_S(INFO) << absl::StrFormat("  Car strange:      %12lld",
+                                 stats.num_edges_out_car_strange);
+  LOG_S(INFO) << absl::StrFormat("  Car forbidden:    %12lld",
+                                 stats.num_edges_out_car_forbidden);
 
   LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
                                  stats.min_edge_length_cm);
@@ -1067,15 +1137,6 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.max_edges_inverted);
   LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  stats.num_cross_country_edges);
-
-  std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
-  std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
-  LOG_S(INFO) << absl::StrFormat("  Bytes per node    %12.2f",
-                                 (double)node_bytes / graph.nodes.size());
-  LOG_S(INFO) << absl::StrFormat("  Added per node    %12.2f",
-                                 (double)node_added_bytes / graph.nodes.size());
-  LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
-                                 node_bytes + node_added_bytes);
 
   LOG_S(INFO) << "========= Memory Stats ===========";
   LOG_S(INFO) << absl::StrFormat("Bitset memory:      %12.2f MB",
@@ -1204,6 +1265,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 
   FindLargeComponents(&meta.graph);
   ApplyTarjan(meta.graph, &meta);
+  LabelAllCarEdges(&meta.graph);
 
   ExecuteLouvain(meta.opt.merge_tiny_clusters, &meta);
 

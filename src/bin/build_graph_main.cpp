@@ -35,6 +35,8 @@ void PrintStructSizes() {
                                  sizeof(GNode));
   LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                 %4u",
                                  sizeof(GEdge));
+  LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):              %4u",
+                                 sizeof(GEdgeKey));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                  %4u",
                                  sizeof(GWay));
   LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):          %4u",
@@ -44,40 +46,6 @@ void PrintStructSizes() {
   LOG_S(INFO) << absl::StrFormat("sizeof(pair<int32_t,int32_t>): %4u",
                                  sizeof(std::pair<int32_t, int32_t>));
 }
-
-#if 0
-template <typename TRouter>
-void DoOneRouteOld(const Graph& g, std::uint32_t start_idx,
-                std::uint32_t target_idx, const RoutingMetric& metric,
-                bool backward, bool hybrid, bool csv) {
-  RoutingOptions opt;
-  if (backward) {
-    std::swap(start_idx, target_idx);
-    opt.backward_search = true;
-  }
-  if (hybrid) {
-    opt.SetHybridOptions(g, start_idx, target_idx);
-  } else {
-    opt.MayFillBridgeNodeId(g, target_idx);
-  }
-
-  const absl::Time start = absl::Now();
-  TRouter router(g, 0);
-  auto res = router.Route(start_idx, target_idx, metric, opt);
-  const double elapsed = ToDoubleSeconds(absl::Now() - start);
-
-  if (csv) {
-    router.SaveSpanningTreeSegments(absl::StrFormat(
-        "/tmp/%s_%s%s.csv", router.AlgoName().substr(0, 5),
-        backward ? "backward" : "forward", hybrid ? "_hybrid" : ""));
-  }
-
-  LOG_S(INFO) << absl::StrFormat(
-      "Metric: %s%12u secs:%6.3f visits:%12u %s", res.found ? "SUC" : "ERR",
-      res.found ? res.found_distance : 0, elapsed, res.num_visited_nodes,
-      router.Name(metric, opt));
-}
-#endif
 
 void DoOneRoute(const Graph& g, std::uint32_t start_idx,
                 std::uint32_t target_idx, bool astar,
@@ -123,22 +91,6 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
     LOG_S(INFO) << "Can't find endpoints";
     return;
   }
-
-#if 0
-  DoOneRouteOld<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
-                             /*backward=*/false, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRouteOld<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
-                             /*backward=*/true, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRouteOld<DijkstraRouter>(g, start_idx, target_idx, RoutingMetricTime(),
-                             /*backward=*/false, /*hybrid=*/true, /*csv=*/csv);
-
-  DoOneRouteOld<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
-                          /*backward=*/false, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRouteOld<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
-                          /*backward=*/true, /*hybrid=*/false, /*csv=*/csv);
-  DoOneRouteOld<AStarRouter>(g, start_idx, target_idx, RoutingMetricTime(),
-                          /*backward=*/false, /*hybrid=*/true, /*csv=*/csv);
-#endif
 
   DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
              /*backward=*/false, /*hybrid=*/false, csv_prefix);
@@ -202,6 +154,55 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
           color = "green";
         }
       }
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
+                                n.lon, other.lat, other.lon);
+      count++;
+    }
+  }
+  myfile.close();
+  LOG_S(INFO) << absl::StrFormat("Written %u lines", count);
+}
+
+void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
+                               const std::string& filename) {
+  FuncTimer timer(
+      absl::StrFormat("Write restricted roads to %s", filename.c_str()),
+      __FILE__, __LINE__);
+  std::ofstream myfile;
+  myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
+
+  size_t count = 0;
+  std::string color;
+  for (const GNode& n : g.nodes) {
+    for (const GEdge& e : std::span(n.edges, n.num_edges_out)) {
+      if (!e.unique_other) continue;
+      const GWay& w = g.ways.at(e.way_idx);
+      const auto& wsa = GetWSA(g, w);
+      const auto& ra_forw = GetRAFromWSA(wsa, vt, EDGE_DIR(e));
+      const auto& ra_backw = GetRAFromWSA(wsa, vt, EDGE_INVERSE_DIR(e));
+
+      const bool restricted =
+          RestrictedAccess(ra_forw.access) || RestrictedAccess(ra_backw.access);
+      const bool service = (w.highway_label == HW_SERVICE);
+      const bool residential = (w.highway_label == HW_RESIDENTIAL);
+      const bool unclassified = (w.highway_label == HW_UNCLASSIFIED);
+
+      if (!restricted && !service && !residential && !unclassified) {
+        continue;
+      }
+
+      if (restricted) {
+        color = "green";
+      } else if (service) {
+        color = "pink";
+      } else if (residential) {
+        color = "dpink";
+      } else if (unclassified) {
+        color = "violet";
+      } else {
+        CHECK_S(false);
+      }
+      const GNode& other = g.nodes.at(e.other_node_idx);
       myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
                                 n.lon, other.lat, other.lon);
       count++;
@@ -331,6 +332,10 @@ int main(int argc, char* argv[]) {
            .desc = "Compute all cluster shortest paths a second time with A* "
                    "and compare to the results of single source Dijkstra. This "
                    "is extremely time consuming."},
+          {.name = "keep_all_nodes",
+           .type = "bool",
+           .desc = "Keep all nodes instead of pruning nodes that are needed "
+                   "for geometry only."},
       });
 
   // TODO: Pass vehicle types from command line.
@@ -344,6 +349,7 @@ int main(int argc, char* argv[]) {
   opt.log_way_tag_stats = argli.GetBool("log_way_tag_stats");
   opt.check_shortest_cluster_paths =
       argli.GetBool("check_shortest_cluster_paths");
+  opt.keep_all_nodes = argli.GetBool("keep_all_nodes");
 
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
@@ -354,6 +360,7 @@ int main(int argc, char* argv[]) {
   WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
   WriteLouvainGraph(g, "/tmp/louvain.csv");
   WriteCrossCountryEdges(meta, "/tmp/cross.csv");
+  WriteRestrictedRoadsToCSV(g, VH_MOTOR_VEHICLE, "/tmp/experimental1.csv");
 
   // TestRoutes(g);
   TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern",

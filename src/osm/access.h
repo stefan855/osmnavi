@@ -52,8 +52,7 @@ inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
 
   const bool forward = BitIsContained(KEY_BIT_FORWARD, pt.bits);
   const bool backward = BitIsContained(KEY_BIT_BACKWARD, pt.bits);
-  // If forward/backward are missing, either nothing or both_ways is
-  // specified, so set both.
+  // If forward/backward are missing, then set both.
   if (forward || !backward) {
     if (!weak || ra_forw->access != ACC_NO) {
       ra_forw->access = acc;
@@ -73,14 +72,11 @@ inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
   // Special (hard) cases:
   // 1) access:lanes:backward=motorcar;motorcycle|hgv (TODO!)
   // 2) lanes:motor_vehicle=yes|no|yes
-  // 3) access:both_ways=no ::
-  //    access:lanes:backward=yes|no ::
-  //    access:lanes:forward=yes|no ::
   constexpr uint64_t selector_bits =
       GetBitMask(KEY_BIT_ACCESS) | GetBitMask(KEY_BIT_VEHICLE) |
       GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
-  // ":both_ways" is not used here. It means a lane that is allowed for both
-  // directions, not both ":forward" and ":backward" for the read. See
+  // ":both_ways" is not used here. It means a lane that is for both directions,
+  // not both ":forward" and ":backward" for the road. See
   // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
   constexpr uint64_t modifier_bits = GetBitMask(KEY_BIT_FORWARD) |
                                      GetBitMask(KEY_BIT_BACKWARD) |

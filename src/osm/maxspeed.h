@@ -47,8 +47,7 @@ inline void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
                                std::uint16_t* maxspeed_backw) {
   // Special (hard) cases:
   constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
-  // ":both_ways" is not used here. It means a lane that is allowed for both
-  // directions, not both ":forward" and ":backward" for the read. See
+  // ":both_ways" is not used here. It means a lane that is for both directions, not both ":forward" and ":backward" for the road. See
   // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
   constexpr uint64_t modifier_bits =
       GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
@@ -73,8 +72,7 @@ inline void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
           } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
             *maxspeed_backw = maxspeed;
           } else {
-            // forward/backward are missing, either nothing or both_ways is
-            // specified, so set both.
+            // If forward/backward are missing, then set both.
             *maxspeed_forw = maxspeed;
             *maxspeed_backw = maxspeed;
           }

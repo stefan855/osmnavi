@@ -100,6 +100,15 @@ constexpr std::uint32_t INVALID_CLUSTER_ID = (1 << 22) - 1;
 struct GEdge;
 struct GNode {
   std::int64_t node_id : 40;
+  // 1 iff the node is in a large component of the graph.
+  std::uint32_t large_component : 1;
+  // Cluster id number. It is expected (and checked during construction)
+  // that there are less than 2^22 clusters in the planet graph.
+  std::uint32_t cluster_id : 22 = INVALID_CLUSTER_ID;
+  // 1 iff the node connects to different clusters.
+  std::uint32_t cluster_border_node : 1 = 0;
+
+  GEdge* edges;  // Array of length 'num_edges_out + num_edges_inverted'.
   std::uint32_t num_edges_out : 11;
   std::uint32_t num_edges_inverted : 11;  // Is one byte actually enough?
   // This node is in a dead end, i.e. in a small subgraph that is connected
@@ -109,20 +118,11 @@ struct GNode {
   // because subgraphs behind bridges can be ignored unless from/to node are in
   // the dead end.
   std::uint32_t dead_end : 1;
-  // 1 iff the node is in a large component of the graph.
-  std::uint32_t large_component : 1;
-
   // Country associated with lat/lon.
   std::uint16_t ncc : 10 = INVALID_NCC;
-  // Cluster id number. It is expected (and checked during construction)
-  // that there are less than 2^22 clusters in the planet graph.
-  std::uint32_t cluster_id : 22 = INVALID_CLUSTER_ID;
-  // 1 iff the node connects to different clusters.
-  std::uint32_t cluster_border_node : 1 = 0;
 
   std::int32_t lat = 0;
   std::int32_t lon = 0;
-  GEdge* edges;  // Array of length 'num_edges_out + num_edges_inverted'.
 };
 
 inline size_t gnode_total_edges(const GNode& n) {
@@ -130,6 +130,16 @@ inline size_t gnode_total_edges(const GNode& n) {
 }
 
 struct GEdge {
+  enum RESTRICTION : uint8_t {
+    LABEL_UNSET = 0,
+    LABEL_FREE,
+    LABEL_RESTRICTED,
+    LABEL_RESTRICTED_SECONDARY,
+    LABEL_STRANGE,
+    // Only used during initial processing, does not exist in the resulting road
+    // network.
+    LABEL_TEMPORARY,
+  };
   std::uint32_t other_node_idx;
   std::int32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
@@ -163,6 +173,8 @@ struct GEdge {
   // is represented by an inverted edge at the other node.
   // Inverted edges always have false as value.
   std::uint64_t both_directions : 1;
+  // TODO: If the edge is restricted in access (DESTINATION etc). For cars only.
+  RESTRICTION car_label : 3 = LABEL_UNSET;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -275,6 +287,32 @@ struct Graph {
   }
 };
 
+struct alignas(1) GEdgeKey {
+ public:
+  GEdgeKey() = delete;
+  GEdgeKey(uint32_t from_idx, uint8_t offset) {
+    static_assert(sizeof(from_idx) == dim);
+    memcpy(&arr_[0], &from_idx, dim);
+    arr_[dim] = offset;
+  }
+
+  uint32_t GetFromIdx() {
+    uint32_t from_idx;
+    memcpy(&from_idx, &arr_[0], dim);
+    return from_idx;
+  }
+
+  uint8_t GetOffset() { return arr_[dim]; }
+
+  const GEdge& GetEdge(const Graph& g) {
+    return g.nodes.at(GetFromIdx()).edges[GetOffset()];
+  }
+
+ private:
+  static constexpr size_t dim = 4;
+  uint8_t arr_[dim + 1];
+};
+
 inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_idx) {
   return g.way_shared_attrs.at(g.ways.at(way_idx).wsa_id);
 }
@@ -307,6 +345,10 @@ inline RoutingAttrs GetRAFromWSA(const Graph& g, uint32_t way_idx, VEHICLE vt,
   return GetRAFromWSA(GetWSA(g, way_idx), vt, dir);
 }
 
+inline RoutingAttrs GetRAFromWSA(const Graph& g, const GEdge& e, VEHICLE vt) {
+  return GetRAFromWSA(GetWSA(g, e.way_idx), vt, EDGE_DIR(e));
+}
+
 inline RoutingAttrs GetRAFromWSA(const Graph& g, const GWay& way, VEHICLE vt,
                                  DIRECTION dir) {
   return GetRAFromWSA(GetWSA(g, way), vt, dir);
@@ -314,6 +356,21 @@ inline RoutingAttrs GetRAFromWSA(const Graph& g, const GWay& way, VEHICLE vt,
 
 inline bool RoutableAccess(ACCESS acc) {
   return acc >= ACC_CUSTOMERS && acc < ACC_MAX;
+}
+
+inline bool FreeAccess(ACCESS acc) {
+  return acc >= ACC_PERMISSIVE && acc < ACC_MAX;
+}
+
+// Access is allowed but restricted.
+inline bool RestrictedAccess(ACCESS acc) {
+  return acc >= ACC_CUSTOMERS && acc < ACC_PERMISSIVE;
+}
+
+// Access is allowed but restricted.
+inline bool WSARestrictedAccess(const WaySharedAttrs& wsa, VEHICLE vt,
+                                DIRECTION dir) {
+  return RestrictedAccess(GetRAFromWSA(wsa, vt, dir).access);
 }
 
 // Return true if any vehicle is routable in direction 'dir', false if not.
