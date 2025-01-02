@@ -70,10 +70,11 @@ class ComponentAnalyzer {
         GNode& n = g->nodes.at(nodes.front());
         nodes.pop_front();
         */
-        GNode& n = g->nodes.at(nodes.back());
+        const uint32_t node_idx = nodes.back();
         nodes.pop_back();
-        for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
-          GEdge& e = n.edges[edge_pos];
+        for (const GEdge& e : gnode_all_edges(*g, node_idx)) {
+          // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n);
+          // ++edge_pos) { GEdge& e = n.edges[edge_pos];
           if (!e.unique_other) continue;
           GNode& other = g->nodes.at(e.other_node_idx);
           if (other.large_component) continue;
@@ -97,10 +98,13 @@ class ComponentAnalyzer {
       const uint32_t node_idx = queue.back();
       queue.pop_back();
       count++;
-      const GNode& n = g_.nodes.at(node_idx);
-      for (uint32_t pos = 0; pos < gnode_total_edges(n); ++pos) {
-        const uint32_t other_idx = n.edges[pos].other_node_idx;
-        if (n.edges[pos].unique_other && label_.at(other_idx) == INFU32) {
+      // const GNode& n = g_.nodes.at(node_idx);
+      for (const GEdge& e : gnode_all_edges(g_, node_idx)) {
+        // for (uint32_t pos = 0; pos < gnode_total_edges(n); ++pos) {
+        const uint32_t other_idx = e.other_node_idx;
+        // const uint32_t other_idx = n.edges[pos].other_node_idx;
+        if (e.unique_other && label_.at(other_idx) == INFU32) {
+          // if (n.edges[pos].unique_other && label_.at(other_idx) == INFU32) {
           queue.push_back(other_idx);
           label_.at(other_idx) = start_idx;
         }

@@ -61,7 +61,26 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
   while (!queue.empty()) {
     const uint32_t node_idx = queue.back();
     queue.pop_back();
-    GNode& n = g->nodes.at(node_idx);
+    // GNode& n = g->nodes.at(node_idx);
+
+    for (GEdge& e : gnode_all_edges(*g, node_idx)) {
+      if (e.car_label == follow_label) {
+        e.car_label = set_label;
+        queue.push_back(e.other_node_idx);
+        res.count += 1;
+        const HIGHWAY_LABEL hw = g->ways.at(e.way_idx).highway_label;
+        if (hw != HW_TERTIARY && hw != HW_RESIDENTIAL &&
+            hw != HW_UNCLASSIFIED && hw != HW_LIVING_STREET &&
+            hw != HW_SERVICE && hw != HW_TRACK && hw != HW_CYCLEWAY &&
+            hw != HW_FOOTWAY && hw != HW_PEDESTRIAN && hw != HW_PATH &&
+            hw != HW_BRIDLEWAY) {
+          res.only_residential_street_types = false;
+        }
+      } else if (e.car_label == GEdge::LABEL_RESTRICTED) {
+        res.found_restricted = true;
+      }
+    }
+#if 0
     for (uint32_t pos = 0; pos < gnode_total_edges(n); ++pos) {
       GEdge& e = n.edges[pos];
       if (e.car_label == follow_label) {
@@ -81,6 +100,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
         res.found_restricted = true;
       }
     }
+#endif
   }
   return res;
 }

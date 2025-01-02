@@ -108,9 +108,13 @@ struct GNode {
   // 1 iff the node connects to different clusters.
   std::uint32_t cluster_border_node : 1 = 0;
 
-  GEdge* edges;  // Array of length 'num_edges_out + num_edges_inverted'.
+  std::int64_t edges_start_pos : 36;
+  /*
+  // GEdge* edges;  // Array of length 'num_edges_out + num_edges_inverted'.
   std::uint32_t num_edges_out : 11;
   std::uint32_t num_edges_inverted : 11;  // Is one byte actually enough?
+  */
+
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
   // node outside of this dead end have to pass through the bridge edge.
@@ -125,9 +129,11 @@ struct GNode {
   std::int32_t lon = 0;
 };
 
+/*
 inline size_t gnode_total_edges(const GNode& n) {
   return n.num_edges_out + n.num_edges_inverted;
 }
+*/
 
 struct GEdge {
   enum RESTRICTION : uint8_t {
@@ -154,7 +160,7 @@ struct GEdge {
   // to 0 for all nodes.
   // Note: Only bridges connect dead-end with non-dead-end nodes.
   std::uint64_t bridge : 1;
-  // Each node in a dead and has at least one edge that is marked 'to_bridge' or
+  // Each node in a dead-end has at least one edge that is marked 'to_bridge' or
   // 'bridge', i.e. by following edges with 'to_bridge==1' the bridge can be
   // found with a simple iteration instead of some thing more expensive such as
   // a BFS.
@@ -167,6 +173,9 @@ struct GEdge {
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
   std::uint64_t cross_country : 1;
+  // True iff this edge exists in reality only in the other direction. The
+  // inverted edge is added to enable backward search.
+  std::uint64_t inverted : 1;
   // True if the edge represents a way that enables both directions for at least
   // one vehicle. In this case, there are two out edges at both end nodes.
   // If false, then the way only enables one direction, and the other direction
@@ -222,6 +231,7 @@ struct Graph {
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
+  std::vector<GEdge> edges;
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
   std::vector<GCluster> clusters;
@@ -287,6 +297,48 @@ struct Graph {
   }
 };
 
+inline size_t gnode_edge_stop(const Graph& g, uint32_t node_idx) {
+  return node_idx + 1 < g.nodes.size()
+             ? g.nodes.at(node_idx + 1).edges_start_pos
+             : g.edges.size();
+}
+
+inline std::span<GEdge> gnode_all_edges(Graph& g, uint32_t node_idx) {
+  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  return std::span<GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+}
+
+inline std::span<const GEdge> gnode_all_edges(const Graph& g,
+                                              uint32_t node_idx) {
+  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  return std::span<const GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+}
+
+inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
+                                                  uint32_t node_idx) {
+  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  while (e_stop > e_start && g.edges.at(e_stop - 1).inverted) {
+    e_stop--;
+  }
+  return std::span<const GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+}
+
+inline std::span<const GEdge> gnode_inverted_edges(const Graph& g,
+                                                   uint32_t node_idx) {
+  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  while (e_start < e_stop && !g.edges.at(e_start).inverted) {
+    e_start++;
+  }
+  // Use g.edges[], not g.edges.at(), because this could be outside range if the
+  // last node has no inverted edges.
+  return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
+}
+
+#if 0
 struct alignas(1) GEdgeKey {
  public:
   GEdgeKey() = delete;
@@ -312,6 +364,7 @@ struct alignas(1) GEdgeKey {
   static constexpr size_t dim = 4;
   uint8_t arr_[dim + 1];
 };
+#endif
 
 inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_idx) {
   return g.way_shared_attrs.at(g.ways.at(way_idx).wsa_id);

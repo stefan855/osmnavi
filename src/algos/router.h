@@ -220,8 +220,10 @@ class Router {
   void ExpandNeighboursForward(const QueuedNode& qnode, const Context& ctx,
                                const VisitedNode vnode) {
     const GNode& node = g_.nodes.at(vnode.node_idx);
-    for (size_t i = 0; i < node.num_edges_out; ++i) {
-      const GEdge& edge = node.edges[i];
+
+    for (const GEdge& edge : gnode_forward_edges(g_, vnode.node_idx)) {
+      // for (size_t i = 0; i < node.num_edges_out; ++i) {
+      // const GEdge& edge = node.edges[i];
       const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
       if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
@@ -326,10 +328,12 @@ class Router {
   void ExpandNeighboursBackward(const QueuedNode& qnode, const Context& ctx,
                                 const VisitedNode vnode) {
     const GNode& node = g_.nodes.at(vnode.node_idx);
-    for (size_t i = 0; i < gnode_total_edges(node); ++i) {
-      const GEdge& edge = node.edges[i];
+
+    for (const GEdge& edge : gnode_all_edges(g_, vnode.node_idx)) {
+      // for (size_t i = 0; i < gnode_total_edges(node); ++i) {
+      // const GEdge& edge = node.edges[i];
       // Skip edges that are forward only.
-      if (i < node.num_edges_out && !edge.both_directions) {
+      if (!edge.inverted /*i < node.num_edges_out*/ && !edge.both_directions) {
         continue;
       }
 

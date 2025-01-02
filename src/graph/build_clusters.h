@@ -7,9 +7,9 @@
 
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
-#include "algos/router.h"
 #include "algos/compact_dijkstra.h"
 #include "algos/louvain.h"
+#include "algos/router.h"
 #include "base/thread_pool.h"
 #include "graph/graph_def.h"
 #include "logging/loguru.h"
@@ -47,8 +47,10 @@ inline TGVec CreateInitalLouvainGraph(const Graph& graph,
   for (auto [np, louvain_pos] : np_to_louvain_pos) {
     g->AddNode(louvain_pos, np);
     const GNode& n = graph.nodes.at(np);
-    for (size_t ep = 0; ep < gnode_total_edges(n); ++ep) {
-      const GEdge& e = n.edges[ep];
+
+    for (const GEdge& e : gnode_all_edges(graph, np)) {
+      // for (size_t ep = 0; ep < gnode_total_edges(n); ++ep) {
+      // const GEdge& e = n.edges[ep];
       const GNode& other = graph.nodes.at(e.other_node_idx);
 
       if (e.unique_other && e.other_node_idx != np &&
@@ -175,8 +177,9 @@ inline void ExecuteLouvainStages(int n_threads, Graph* graph) {
   for (uint32_t np = 0; np < graph->nodes.size(); ++np) {
     const GNode& n = graph->nodes.at(np);
     if (EligibleNodeForLouvain(n)) {
-      for (size_t ep = 0; ep < gnode_total_edges(n); ++ep) {
-        const GEdge& e = n.edges[ep];
+      for (const GEdge& e : gnode_all_edges(*graph, np)) {
+        // for (size_t ep = 0; ep < gnode_total_edges(n); ++ep) {
+        // const GEdge& e = n.edges[ep];
         // Check if this edge is in the louvain graph.
         if (e.unique_other && e.other_node_idx != np &&
             EligibleNodeForLouvain(graph->nodes.at(e.other_node_idx))) {
@@ -224,8 +227,9 @@ inline void UpdateGraphClusterInformation(Graph* g) {
     GCluster& cluster = g->clusters.at(n.cluster_id);
     cluster.num_nodes++;
 
-    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
-      GEdge& e = n.edges[edge_pos];
+    for (const GEdge& e : gnode_all_edges(*g, node_pos)) {
+      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
+      // { GEdge& e = n.edges[edge_pos];
       GNode& other = g->nodes.at(e.other_node_idx);
 
       // By construction, any connection to an non-clustered node must be

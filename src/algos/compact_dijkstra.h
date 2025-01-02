@@ -69,8 +69,9 @@ inline void CollectEdgesForCompactGraph(
     check_idx++;
 
     // Examine neighbours.
-    for (size_t i = 0; i < node.num_edges_out; ++i) {
-      const GEdge& edge = node.edges[i];
+    for (const GEdge& edge : gnode_forward_edges(g, node_idx)) {
+      // for (size_t i = 0; i < node.num_edges_out; ++i) {
+      // const GEdge& edge = node.edges[i];
       const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
       if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
@@ -98,8 +99,9 @@ inline void CollectEdgesForCompactGraph(
     if (undirected_expand) {
       // Examine neighbours connected by backward edges and add them to the
       // queue if they haven't been seen yet.
-      for (size_t i = node.num_edges_out; i < gnode_total_edges(node); ++i) {
-        const GEdge& edge = node.edges[i];
+      for (const GEdge& edge : gnode_inverted_edges(g, node_idx)) {
+        // for (size_t i = node.num_edges_out; i < gnode_total_edges(node); ++i)
+        // { const GEdge& edge = node.edges[i];
         const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
         if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                               EDGE_INVERSE_DIR(edge))) {

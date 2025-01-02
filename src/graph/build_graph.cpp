@@ -524,43 +524,69 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
 namespace {
 void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
-             const bool out, const bool contra_way, const bool both_directions,
-             const size_t way_idx, const std::uint64_t distance_cm,
-             bool car_restricted) {
+             const bool inverted, const bool contra_way,
+             const bool both_directions, const size_t way_idx,
+             const std::uint64_t distance_cm, bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
-  GEdge* edges = out ? n.edges : n.edges + n.num_edges_out;
-  size_t num_edges = out ? n.num_edges_out : n.num_edges_inverted;
-  for (size_t pos = 0; pos < num_edges; ++pos) {
-    // Unused edges are marked with 'other_node_idx == INFU32'.
-    if (edges[pos].other_node_idx == INFU32) {
-      assert(other_idx != INFU32);
-      edges[pos].other_node_idx = other_idx;
-      edges[pos].way_idx = way_idx;
-      edges[pos].distance_cm = distance_cm;
-      edges[pos].unique_other = 0;
-      edges[pos].bridge = 0;
-      edges[pos].to_bridge = 0;
-      edges[pos].contra_way = contra_way ? 1 : 0;
-      edges[pos].both_directions = both_directions ? 1 : 0;
-      edges[pos].cross_country = n.ncc != other.ncc;
-      edges[pos].car_label =
-          car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
-      return;
+  const int64_t edge_start = n.edges_start_pos;
+  const int64_t edge_stop = gnode_edge_stop(g, start_idx);
+  int64_t ep;
+  if (inverted) {
+    for (ep = edge_stop - 1; ep >= edge_start; --ep) {
+      if (g.edges.at(ep).other_node_idx == INFU32) break;
     }
+    // n.num_edges_inverted++;
+  } else {
+    for (ep = edge_start; ep < edge_stop; ++ep) {
+      if (g.edges.at(ep).other_node_idx == INFU32) break;
+    }
+    // n.num_edges_out++;
   }
+  CHECK_S(ep >= edge_start && ep < edge_stop);
+  CHECK_S(other_idx != INFU32);
+  GEdge& e = g.edges.at(ep);
+  e.other_node_idx = other_idx;
+  e.way_idx = way_idx;
+  e.distance_cm = distance_cm;
+  e.unique_other = 0;
+  e.bridge = 0;
+  e.to_bridge = 0;
+  e.contra_way = contra_way ? 1 : 0;
+  e.inverted = inverted ? 1 : 0;
+  e.both_directions = both_directions ? 1 : 0;
+  e.cross_country = n.ncc != other.ncc;
+  e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
+#if 0
   // Should not happen because we preallocated needed space.
   ABORT_S() << absl::StrFormat(
       "Cannot store edge at node:%lld start_idx:%u num_edges:%u other_idx:%u "
       "out:%d way_idx:%u dist:%llu",
       n.node_id, start_idx, num_edges, other_idx, out, way_idx, distance_cm);
+#endif
 }
 
+#if 0
 void MarkUniqueOther(GNode* n) {
   GEdge* edges = n->edges;
   for (size_t i = 0; i < gnode_total_edges(*n); ++i) {
     size_t k = 0;
     while (k < i) {
+      if (edges[i].other_node_idx == edges[k].other_node_idx) {
+        break;
+      }
+      k++;
+    }
+    edges[i].unique_other = (i == k);
+  }
+}
+#endif
+
+void MarkUniqueOther(std::span<GEdge> edges) {
+  for (size_t i = 0; i < edges.size(); ++i) {
+    size_t k = 0;
+    while (k < i) {
+      // TODO: C++26 allows .at() with bounds checking.
       if (edges[i].other_node_idx == edges[k].other_node_idx) {
         break;
       }
@@ -662,15 +688,19 @@ void AllocateGNodes(GraphMetaData* meta) {
   const NodeBuilder::VNode* node;
   while ((node = iter.Next()) != nullptr) {
     if (meta->way_nodes_needed->GetBit(node->id)) {
-      GNode snode;
-      snode.node_id = node->id;
-      snode.lat = node->lat;
-      snode.lon = node->lon;
-      snode.num_edges_inverted = 0;
-      snode.num_edges_out = 0;
-      snode.dead_end = 0;
-      snode.large_component = 0;
-      meta->graph.nodes.push_back(snode);
+      GNode n;
+      n.node_id = node->id;
+      n.large_component = 0;
+      n.cluster_id = INVALID_CLUSTER_ID;
+      n.cluster_border_node = 0;
+      n.edges_start_pos = 0;
+      // n.num_edges_inverted = 0;
+      // n.num_edges_out = 0;
+      n.dead_end = 0;
+      n.ncc = INVALID_NCC;
+      n.lat = node->lat;
+      n.lon = node->lon;
+      meta->graph.nodes.push_back(n);
     }
   }
 }
@@ -683,6 +713,8 @@ void SetCountryInGNodes(GraphMetaData* meta) {
   }
 }
 
+// Compute for each node how many edges it has. The temporary edge count is
+// stored in n.edges_start_pos.
 void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
                              GraphMetaData* meta, std::mutex& mut) {
   Graph& graph = meta->graph;
@@ -690,6 +722,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
   for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
     const GWay& way = graph.ways.at(way_idx);
     const WaySharedAttrs& wsa = GetWSA(graph, way);
+
     std::vector<size_t> node_idx =
         meta->graph.GetGWayNodeIndexes(*(meta->way_nodes_needed), way);
     {
@@ -698,8 +731,18 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
       int64_t prev_idx = -1;
       for (const size_t idx : node_idx) {
         if (prev_idx >= 0) {
+          // All edges should be routable for at least one vehicle type.
+          CHECK_S(WSAAnyRoutable(wsa, DIR_FORWARD) ||
+                  WSAAnyRoutable(wsa, DIR_BACKWARD))
+              << way.id;
+
+          graph.nodes.at(prev_idx).edges_start_pos++;
+          graph.nodes.at(idx).edges_start_pos++;
+
           // TODO: self edges?
           // CHECK_NE_S(idx1, idx2) << way.id;
+
+#if 0
 
           if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
               WSAAnyRoutable(wsa, DIR_BACKWARD)) {
@@ -713,6 +756,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
             graph.nodes.at(prev_idx).num_edges_inverted++;
             graph.nodes.at(idx).num_edges_out++;
           }
+#endif
         }
         prev_idx = idx;
       }
@@ -739,17 +783,28 @@ void ComputeEdgeCounts(GraphMetaData* meta) {
 
 void AllocateEdgeArrays(GraphMetaData* meta) {
   FUNC_TIMER();
+  size_t edge_start = 0;
   for (GNode& n : meta->graph.nodes) {
-    const std::uint32_t num_edges = gnode_total_edges(n);
-    CHECK_GT_S(num_edges, 0u);
-    if (num_edges > 0) {
-      n.edges = (GEdge*)meta->graph.aligned_pool_.AllocBytes(num_edges *
-                                                             sizeof(GEdge));
-      for (size_t k = 0; k < num_edges; ++k) {
-        n.edges[k].other_node_idx = INFU32;
+    size_t num_edges = n.edges_start_pos;  // Read temporary counter.
+    n.edges_start_pos = edge_start;
+    edge_start += num_edges;
+  }
+  CHECK_S(meta->graph.edges.empty());
+  meta->graph.edges.resize(edge_start, {.other_node_idx = INFU32});
+
+#if 0
+    for (GNode& n : meta->graph.nodes) {
+      const std::uint32_t num_edges = gnode_total_edges(n);
+      CHECK_GT_S(num_edges, 0u);
+      if (num_edges > 0) {
+        n.edges = (GEdge*)meta->graph.aligned_pool_.AllocBytes(num_edges *
+                                                               sizeof(GEdge));
+        for (size_t k = 0; k < num_edges; ++k) {
+          n.edges[k].other_node_idx = INFU32;
+        }
       }
     }
-  }
+#endif
 }
 
 void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
@@ -826,25 +881,31 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
 
             if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
                 WSAAnyRoutable(wsa, DIR_BACKWARD)) {
-              AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
+              AddEdge(graph, idx1, idx2, /*inverted=*/false,
+                      /*contra_way=*/false,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_f);
-              AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
+              AddEdge(graph, idx2, idx1, /*inverted=*/false,
+                      /*contra_way=*/true,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_b);
             } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
-              AddEdge(graph, idx1, idx2, /*out=*/true, /*contra_way=*/false,
+              AddEdge(graph, idx1, idx2, /*inverted=*/false,
+                      /*contra_way=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
-              AddEdge(graph, idx2, idx1, /*out=*/false, /*contra_way=*/true,
+              AddEdge(graph, idx2, idx1, /*inverted=*/true,
+                      /*contra_way=*/true,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
             } else {
               CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
-              AddEdge(graph, idx2, idx1, /*out=*/true, /*contra_way=*/true,
+              AddEdge(graph, idx2, idx1, /*inverted=*/false,
+                      /*contra_way=*/true,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
-              AddEdge(graph, idx1, idx2, /*out=*/false, /*contra_way=*/false,
+              AddEdge(graph, idx1, idx2, /*inverted=*/true,
+                      /*contra_way=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
             }
@@ -875,8 +936,13 @@ void PopulateEdgeArrays(GraphMetaData* meta) {
 
 void MarkUniqueEdges(GraphMetaData* meta) {
   FUNC_TIMER();
+  /*
   for (GNode& n : meta->graph.nodes) {
     MarkUniqueOther(&n);
+  }
+  */
+  for (uint32_t i = 0; i < meta->graph.nodes.size(); ++i) {
+    MarkUniqueOther(gnode_all_edges(meta->graph, i));
   }
 }
 
@@ -950,7 +1016,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
         (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
     if ((FreeAccess(wsa.ra[0].access) && RestrictedAccess(wsa.ra[1].access)) ||
         (RestrictedAccess(wsa.ra[0].access) && FreeAccess(wsa.ra[1].access))) {
-      LOG_S(INFO) << "AA: " << w.id;
+      LOG_S(INFO) << "Way has mixed restrictions: " << w.id;
       stats.num_ways_mixed_restricted_car += 1;
     }
   }
@@ -965,18 +1031,18 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
     }
     stats.num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
 
-    stats.num_edges_inverted += n.num_edges_inverted;
-    stats.num_edges_out += n.num_edges_out;
-    stats.max_edges_inverted =
-        std::max(stats.max_edges_inverted, (int64_t)n.num_edges_inverted);
-    stats.max_edges_out =
-        std::max(stats.max_edges_out, (int64_t)n.num_edges_out);
-    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
-      const GEdge& edge = n.edges[edge_pos];
+    int64_t num_edges_inverted = 0;
+    int64_t num_edges_out = 0;
+    for (const GEdge& edge : gnode_all_edges(g, node_idx)) {
+      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
+      // { const GEdge& edge = n.edges[edge_pos];
       if (!edge.unique_other) {
         stats.num_edges_non_unique++;
       }
-      if (edge_pos < n.num_edges_out && edge.other_node_idx != node_idx) {
+      num_edges_inverted += edge.inverted;
+      num_edges_out += (edge.inverted == 0);
+
+      if (!edge.inverted && edge.other_node_idx != node_idx) {
         stats.sum_edge_length_cm += edge.distance_cm;
         if (edge.distance_cm == 0) {
           LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
@@ -1005,6 +1071,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
       }
       stats.num_cross_country_edges += (edge.contra_way && edge.cross_country);
     }
+    stats.num_edges_inverted += num_edges_inverted;
+    stats.num_edges_out += num_edges_out;
+    stats.max_edges_inverted =
+        std::max(stats.max_edges_inverted, num_edges_inverted);
+    stats.max_edges_out = std::max(stats.max_edges_out, num_edges_out);
   }
 }
 
@@ -1092,13 +1163,13 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.num_nodes_no_country);
 
   std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
-  std::int64_t node_added_bytes = graph.aligned_pool_.MemAllocated();
+  std::int64_t edge_memory = graph.edges.size() * sizeof(GEdge);
   LOG_S(INFO) << absl::StrFormat("  Bytes per node    %12.2f",
                                  (double)node_bytes / graph.nodes.size());
-  LOG_S(INFO) << absl::StrFormat("  Added per node    %12.2f",
-                                 (double)node_added_bytes / graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Edge Mem per node %12.2f",
+                                 (double)edge_memory / graph.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
-                                 node_bytes + node_added_bytes);
+                                 node_bytes + edge_memory);
 
   LOG_S(INFO) << "Edges";
   LOG_S(INFO) << absl::StrFormat("  Num out:          %12lld",
@@ -1146,13 +1217,15 @@ void PrintStats(const GraphMetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("Varnode memory:     %12.2f MB",
                                  meta.node_table->mem_allocated() / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Node graph memory:  %12.2f MB",
-                                 (node_bytes + node_added_bytes) / 1000000.0);
+                                 (node_bytes) / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Edge graph memory:  %12.2f MB",
+                                 (edge_memory) / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Way graph memory:   %12.2f MB",
                                  (way_bytes + way_added_bytes) / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Way shared attrs:   %12.2f MB",
                                  way_shared_attrs_bytes / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Total graph memory: %12.2f MB",
-                                 (node_bytes + node_added_bytes + way_bytes +
+                                 (node_bytes + edge_memory + way_bytes +
                                   way_added_bytes + way_shared_attrs_bytes) /
                                      1000000.0);
 }
@@ -1251,6 +1324,9 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   AllocateEdgeArrays(&meta);
   PopulateEdgeArrays(&meta);
   MarkUniqueEdges(&meta);
+  for (const GEdge& e : meta.graph.edges) {
+    CHECK_S(e.other_node_idx != INFU32);
+  }
 
   // =========================================================================
 

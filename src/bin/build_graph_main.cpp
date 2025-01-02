@@ -35,8 +35,8 @@ void PrintStructSizes() {
                                  sizeof(GNode));
   LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                 %4u",
                                  sizeof(GEdge));
-  LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):              %4u",
-                                 sizeof(GEdgeKey));
+  // LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):              %4u",
+  //                                sizeof(GEdgeKey));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                  %4u",
                                  sizeof(GWay));
   LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):          %4u",
@@ -115,8 +115,11 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
 
   size_t count = 0;
   std::string color;
-  for (const GNode& n : g.nodes) {
-    for (const GEdge& e : std::span(n.edges, n.num_edges_out)) {
+  for (uint32_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
+    const GNode& n = g.nodes.at(node_idx);
+    // for (const GNode& n : g.nodes) {
+    for (const GEdge& e : gnode_forward_edges(g, node_idx)) {
+      // for (const GEdge& e : std::span(n.edges, n.num_edges_out)) {
       if (!e.unique_other) continue;
       const GNode& other = g.nodes.at(e.other_node_idx);
       const GWay& w = g.ways.at(e.way_idx);
@@ -173,8 +176,11 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
 
   size_t count = 0;
   std::string color;
-  for (const GNode& n : g.nodes) {
-    for (const GEdge& e : std::span(n.edges, n.num_edges_out)) {
+  for (uint32_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
+    const GNode& n = g.nodes.at(node_idx);
+    // for (const GNode& n : g.nodes) {
+    for (const GEdge& e : gnode_forward_edges(g, node_idx)) {
+      // for (const GEdge& e : std::span(n.edges, n.num_edges_out)) {
       if (!e.unique_other) continue;
       const GWay& w = g.ways.at(e.way_idx);
       const auto& wsa = GetWSA(g, w);
@@ -253,8 +259,9 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
       continue;
     }
 
-    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos) {
-      const GEdge& e = n0.edges[edge_pos];
+    for (const GEdge& e : gnode_all_edges(g, node_pos)) {
+      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos)
+      // { const GEdge& e = n0.edges[edge_pos];
       if (e.bridge || !e.unique_other) continue;
       const GNode& n1 = g.nodes.at(e.other_node_idx);
       // Ignore half of the edges and nodes that are not in a cluster.

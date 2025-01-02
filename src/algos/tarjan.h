@@ -13,8 +13,9 @@
 inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
   GNode& from = g.nodes.at(from_idx);
   if (from.dead_end) return;
-  for (size_t edge_pos = 0; edge_pos < gnode_total_edges(from); ++edge_pos) {
-    GEdge& e = from.edges[edge_pos];
+  for (GEdge& e : gnode_all_edges(g, from_idx)) {
+    // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(from); ++edge_pos)
+    // { GEdge& e = from.edges[edge_pos];
     if (e.other_node_idx == to_idx) {
       e.bridge = 1;
     }
@@ -41,9 +42,10 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
   size_t pos = 0;
   while (pos < nodes.size()) {
     uint32_t node_pos = nodes.at(pos++);
-    GNode& n = g.nodes.at(node_pos);
-    for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos) {
-      GEdge& e = n.edges[edge_pos];
+    // GNode& n = g.nodes.at(node_pos);
+    for (GEdge& e : gnode_all_edges(g, node_pos)) {
+      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
+      // { GEdge& e = n.edges[edge_pos];
       if (e.bridge || !e.unique_other) continue;
       GNode& other = g.nodes.at(e.other_node_idx);
       if (!other.dead_end) {
@@ -52,8 +54,9 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
         nodes.push_back(e.other_node_idx);
         // Mark to_bridge edges on the other node.
         bool has_to_bridge = false;
-        for (size_t o_pos = 0; o_pos < gnode_total_edges(other); ++o_pos) {
-          GEdge& e = other.edges[o_pos];
+        for (GEdge& e : gnode_all_edges(g, e.other_node_idx)) {
+          // for (size_t o_pos = 0; o_pos < gnode_total_edges(other); ++o_pos) {
+          // GEdge& e = other.edges[o_pos];
           if (e.other_node_idx == node_pos) {
             e.to_bridge = true;
             has_to_bridge = true;
@@ -74,15 +77,16 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
 // As a result, node1_idx is the node on the dead-end side of the bridge and
 // node2_idx on the non-dead-end side of the bridge.
 inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
-                uint32_t* node1_idx, uint32_t* node2_idx) {
+                       uint32_t* node1_idx, uint32_t* node2_idx) {
   // Stop after too many iterations, looks like a program error.
   int32_t count = 10000000;
   uint32_t pos = start_node_idx;
   while (count-- > 0) {
     const GNode& n = g.nodes.at(pos);
     CHECK_S(n.dead_end);
-    for (size_t i = 0; i < gnode_total_edges(n); ++i) {
-      const GEdge& e = n.edges[i];
+    for (const GEdge& e : gnode_all_edges(g, pos)) {
+      // for (size_t i = 0; i < gnode_total_edges(n); ++i) {
+      // const GEdge& e = n.edges[i];
       if (e.to_bridge) {
         pos = e.other_node_idx;
         break;
@@ -172,7 +176,7 @@ class Tarjan {
       }
 
       std::uint32_t child;
-      if (GetNextNeighbour(g_.nodes.at(e.node),
+      if (GetNextNeighbour(e.node,
                            /*edge_pos=*/&e.next_edge_pos,
                            /*neighbour=*/&child)) {
         // HANDLE CHILD.
@@ -235,6 +239,23 @@ class Tarjan {
   // false if no more edges with 'unique_other' exist.
   //
   // This is used to iterate over the undirected neighbours of a node.
+  bool GetNextNeighbour(uint32_t node_idx,
+                        std::uint32_t* edge_pos, std::uint32_t* neighbour) {
+    const GNode& n = g_.nodes.at(node_idx);
+    size_t current = n.edges_start_pos + (*edge_pos);
+    size_t stop = gnode_edge_stop(g_, node_idx);
+
+    while (current < stop) {
+      if (g_.edges.at(current).unique_other) {
+        *neighbour = g_.edges.at(current).other_node_idx;
+        (*edge_pos) = current + 1 - n.edges_start_pos;
+        return true;
+      }
+      current++;
+    }
+    return false;
+  }
+#if 0
   bool GetNextNeighbour(const GNode& n, std::uint32_t* edge_pos,
                         std::uint32_t* neighbour) {
     const uint32_t num_edges = gnode_total_edges(n);
@@ -248,6 +269,7 @@ class Tarjan {
     }
     return false;
   }
+#endif
 
   const Graph& g_;
   std::vector<std::int32_t> tmp_node_list_;

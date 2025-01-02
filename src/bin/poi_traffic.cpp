@@ -62,8 +62,11 @@ const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
                                   uint32_t n2_idx, VEHICLE vt) {
   uint32_t best_maxspeed = 0;
   const GEdge* best_edge = nullptr;
-  for (size_t i = 0; i < n1.num_edges_out; ++i) {
-    const GEdge& edge = n1.edges[i];
+
+  uint32_t n1_idx = &n1 - &g.nodes[0];
+  for (const GEdge& edge : gnode_forward_edges(g, n1_idx)) {
+  // for (size_t i = 0; i < n1.num_edges_out; ++i) {
+    // const GEdge& edge = n1.edges[i];
     if (edge.other_node_idx != n2_idx) {
       continue;
     }

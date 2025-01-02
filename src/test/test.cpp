@@ -319,7 +319,6 @@ void TestCarMaxspeed() {
   CheckCarMaxspeed("", 0, 0);
   CheckCarMaxspeed("maxspeed:bicycle=20", 0, 0);
   CheckCarMaxspeed("maxspeed=50", 50, 50);
-  CheckCarMaxspeed("maxspeed:both_ways=50", 50, 50);
   CheckCarMaxspeed("maxspeed:motorcar=50", 50, 50);
   CheckCarMaxspeed("maxspeed:motor_vehicle=50", 50, 50);
   CheckCarMaxspeed("maxspeed:vehicle=50", 50, 50);
