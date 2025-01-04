@@ -54,7 +54,7 @@ struct OsmWayWrapper {
 };
 
 // Create the osm data structures for a way with key value tags filled from
-// 'tags. Tags are separated by " :: " and hanve the format
+// 'tags. Input tags are separated by " :: " and have the format
 // <tagname>=<tagvalue>. Example: "highway=secondary :: oneway=yes ::
 // maxspeed=80 :: maxspeed:hgv=60"
 OsmWayWrapper FillWayData(std::string_view tags) {
@@ -332,9 +332,9 @@ void TestCarMaxspeed() {
 }
 
 namespace {
-void CheckCarAccess(std::string_view tag_string, ACCESS exp_access_forw,
-                    ACCESS exp_access_backw) {
-  RoutingAttrs forw = {.access = ACC_NO}, backw = {.access = ACC_NO};
+void CheckCarAccess(ACCESS dflt, std::string_view tag_string,
+                    ACCESS exp_access_forw, ACCESS exp_access_backw) {
+  RoutingAttrs forw = {.access = dflt}, backw = {.access = dflt};
   OsmWayWrapper w = FillWayData(tag_string);
   CarAccess(*w.tagh, /*way_id=*/1, w.ptags, &forw, &backw);
   CHECK_EQ_S(forw.access, exp_access_forw) << tag_string;
@@ -345,16 +345,27 @@ void CheckCarAccess(std::string_view tag_string, ACCESS exp_access_forw,
 void TestCarAccess() {
   FUNC_TIMER();
 
-  CheckCarAccess("", ACC_NO, ACC_NO);
-  CheckCarAccess("access:bicycle=yes", ACC_NO, ACC_NO);
-  CheckCarAccess("bicycle=yes", ACC_NO, ACC_NO);
-  CheckCarAccess("access:motorcar=yes", ACC_YES, ACC_YES);
-  CheckCarAccess("motorcar=yes", ACC_YES, ACC_YES);
-  CheckCarAccess("motor_vehicle=yes", ACC_YES, ACC_YES);
-  CheckCarAccess("vehicle=yes", ACC_YES, ACC_YES);
-  CheckCarAccess("vehicle=yes :: motor_vehicle:forward=no", ACC_NO, ACC_YES);
-  CheckCarAccess("vehicle:lanes:forward=no|yes :: access:lanes:backward=no",
+  CheckCarAccess(ACC_NO, "", ACC_NO, ACC_NO);
+
+  // "access=yes" is considered weak, it does not change the default.
+  CheckCarAccess(ACC_NO, "access=yes", ACC_NO, ACC_NO);
+  CheckCarAccess(ACC_YES, "access=yes", ACC_YES, ACC_YES);
+
+  CheckCarAccess(ACC_NO, "access:bicycle=yes", ACC_NO, ACC_NO);
+  CheckCarAccess(ACC_NO, "bicycle=yes", ACC_NO, ACC_NO);
+  CheckCarAccess(ACC_NO, "access:motorcar=yes", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_NO, "motorcar=yes", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_NO, "motor_vehicle=yes", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_NO, "vehicle=yes", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_NO, "vehicle=yes :: motor_vehicle:forward=no", ACC_NO,
+                 ACC_YES);
+  CheckCarAccess(ACC_NO,
+                 "vehicle:lanes:forward=no|yes :: access:lanes:backward=no",
                  ACC_YES, ACC_NO);
+  CheckCarAccess(ACC_YES, "access:lanes:backward=no|", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_YES, "access:lanes:backward=no|no", ACC_YES, ACC_NO);
+  CheckCarAccess(ACC_YES, "agricultural=yes", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_YES, "agricultural=no", ACC_YES, ACC_YES);
 }
 
 namespace {

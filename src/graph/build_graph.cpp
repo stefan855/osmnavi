@@ -557,6 +557,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.both_directions = both_directions ? 1 : 0;
   e.cross_country = n.ncc != other.ncc;
   e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
+  e.car_label_strange = 0;
 #if 0
   // Should not happen because we preallocated needed space.
   ABORT_S() << absl::StrFormat(
@@ -1060,12 +1061,10 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
             (edge.car_label == GEdge::LABEL_RESTRICTED);
         stats.num_edges_out_car_restricted2 +=
             (edge.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
-        stats.num_edges_out_car_strange +=
-            (edge.car_label == GEdge::LABEL_STRANGE);
+        stats.num_edges_out_car_strange += edge.car_label_strange;
+        CHECK_S(edge.car_label_strange == 0 ||
+                edge.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
         CHECK_NE_S(edge.car_label, GEdge::LABEL_TEMPORARY);
-        /*
-            RestrictedAccess(GetRAFromWSA(g, edge, VH_MOTOR_VEHICLE).access);
-            */
         stats.num_edges_out_car_forbidden +=
             !RoutableAccess(GetRAFromWSA(g, edge, VH_MOTOR_VEHICLE).access);
       }

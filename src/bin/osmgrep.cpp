@@ -90,6 +90,7 @@ bool MatchFilters(const OSMTagHelper& tagh, const T& obj,
     match = true;
     std::unique_lock<std::mutex> l(mut);
     stats->matched_keys.Add("id", obj.id());
+    (stats->matched_key_values)["id"].Add(absl::StrCat(obj.id()), obj.id());
   }
   return match;
 }

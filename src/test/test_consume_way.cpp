@@ -126,7 +126,7 @@ void StoreNodes(int num_nodes, DataBlockTable* t) {
   builder.AddBlockToTable(t);
 }
 
-void TestWay() {
+void TestWay1() {
   FUNC_TIMER();
   // Tags of way id=526016665 version=20, retrieved on 20241113.
   const char* WayData = R"(
@@ -175,13 +175,52 @@ void TestWay() {
   CHECK_EQ_S(deduper.num_added(), 1);
 }
 
+void TestWay2() {
+  FUNC_TIMER();
+  // Tags of way id=173455068 version=22, retrieved on 20250103.
+  // Check that access:lanes:backward=no| does not cause backward access=no.
+  const char* WayData = R"(
+<tag k="access:lanes:backward" v="no|"/>
+<tag k="bicycle:lanes:backward" v="designated|yes"/>
+# <tag k="change:lanes:backward" v="no|no"/>
+# <tag k="change:lanes:forward" v="not_left"/>
+<tag k="cycleway:left" v="lane"/>
+<tag k="cycleway:left:traffic_sign" v="DE:237"/>
+<tag k="highway" v="primary"/>
+<tag k="lanes" v="2"/>
+<tag k="lanes:backward" v="1"/>
+<tag k="lanes:forward" v="1"/>
+<tag k="maxspeed" v="20"/>
+# <tag k="name" v="Rheinbrückenstraße"/>
+# <tag k="placement:backward" v="middle_of:1"/>
+# <tag k="surface" v="asphalt"/>
+# <tag k="width:lanes:backward" v="2|4"/>
+# <tag k="width:lanes:forward" v="4"/>
+)";
+  constexpr int num_nodes = 2;  // Our way has two nodes.
+  build_graph::GraphMetaData meta = CreateMeta();
+  meta.opt.vehicle_types = {VH_MOTOR_VEHICLE};
+  StoreNodes(num_nodes, meta.node_table.get());
+  DeDuperWithIds<WaySharedAttrs> deduper;
+  OsmWayWrapper wr = FillWayData(WayData, num_nodes);
+  std::mutex mut;
+
+  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta);
+  CHECK_EQ_S(meta.graph.ways.size(), 1);
+  CHECK_EQ_S(deduper.num_added(), 1);
+  const WaySharedAttrs& wsa = deduper.GetObj(0);
+  CHECK_S(WSAAnyRoutable(wsa, DIR_FORWARD));
+  CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD));
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
     ABORT_S() << absl::StrFormat("usage: %s", argv[0]);
   }
 
-  TestWay();
+  TestWay1();
+  TestWay2();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

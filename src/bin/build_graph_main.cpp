@@ -166,6 +166,32 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
   LOG_S(INFO) << absl::StrFormat("Written %u lines", count);
 }
 
+// Write edges with a specific label to file.
+void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
+                       const std::string& color, const std::string& filename) {
+  FuncTimer timer(
+      absl::StrFormat("Write labeled edges to %s", filename.c_str()), __FILE__,
+      __LINE__);
+  std::ofstream myfile;
+  myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
+
+  size_t count = 0;
+  for (uint32_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
+    const GNode& n = g.nodes.at(node_idx);
+    for (const GEdge& e : gnode_forward_edges(g, node_idx)) {
+      if (label != GEdge::LABEL_UNSET && e.car_label != label) continue;
+      if (e.car_label_strange != strange) continue;
+
+      const GNode& other = g.nodes.at(e.other_node_idx);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
+                                n.lon, other.lat, other.lon);
+      count++;
+    }
+  }
+  myfile.close();
+  LOG_S(INFO) << absl::StrFormat("Written %u lines", count);
+}
+
 void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
                                const std::string& filename) {
   FuncTimer timer(
@@ -189,16 +215,20 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
 
       const bool restricted =
           RestrictedAccess(ra_forw.access) || RestrictedAccess(ra_backw.access);
+      const bool strange = e.car_label_strange;
       const bool service = (w.highway_label == HW_SERVICE);
       const bool residential = (w.highway_label == HW_RESIDENTIAL);
       const bool unclassified = (w.highway_label == HW_UNCLASSIFIED);
 
-      if (!restricted && !service && !residential && !unclassified) {
+      if (!restricted && !strange && !service && !residential &&
+          !unclassified) {
         continue;
       }
 
       if (restricted) {
         color = "green";
+      } else if (strange) {
+        color = "black";
       } else if (service) {
         color = "pink";
       } else if (residential) {
@@ -368,6 +398,12 @@ int main(int argc, char* argv[]) {
   WriteLouvainGraph(g, "/tmp/louvain.csv");
   WriteCrossCountryEdges(meta, "/tmp/cross.csv");
   WriteRestrictedRoadsToCSV(g, VH_MOTOR_VEHICLE, "/tmp/experimental1.csv");
+  WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED, false, "mag",
+                    "/tmp/experimental2.csv");
+  WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED_SECONDARY, false, "red",
+                    "/tmp/experimental3.csv");
+  WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
+                    "/tmp/experimental4.csv");
 
   // TestRoutes(g);
   TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern",

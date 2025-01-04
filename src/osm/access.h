@@ -10,7 +10,7 @@
 namespace {
 
 inline ACCESS ExtendedAccessToEnum(std::string_view val, bool bicycle) {
-  ACCESS acc = AccessToEnum(val);
+  ACCESS acc = AccessToEnum(val);  // Returns ACC_MAX for empty strings.
   if (acc == ACC_MAX && bicycle && val == "use_sidepath") {
     // Special case, bicycle should use separate bicycle path.
     acc = ACC_NO;
@@ -18,20 +18,31 @@ inline ACCESS ExtendedAccessToEnum(std::string_view val, bool bicycle) {
   return acc;
 }
 
-inline ACCESS InterpretAccessValue(std::string_view val, bool lanes,
-                                   bool bicycle) {
+struct InterpretAccessResult {
+  ACCESS acc;
+  bool improve_only;
+};
+
+inline InterpretAccessResult
+InterpretAccessValue(std::string_view val, bool lanes, bool bicycle) {
   if (!lanes) {
-    return ExtendedAccessToEnum(val, bicycle);
+    return {.acc = ExtendedAccessToEnum(val, bicycle),
+            .improve_only = val.empty()};
   }
+  // When there are lanes, we have to be careful to distinguish between empty
+  // and unknown values. Empty values mean: leave unchanged, unknown values
+  // should be interpreted as "no".
   ACCESS acc = ACC_MAX;
+  bool has_empty = false;
   for (std::string_view sub : absl::StrSplit(val, '|')) {
+    has_empty |= sub.empty();
     ACCESS sub_acc = ExtendedAccessToEnum(sub, bicycle);
     // Only replace if value is "better".
     if (sub_acc != ACC_MAX && (acc == ACC_MAX || sub_acc > acc)) {
       acc = sub_acc;
     }
   }
-  return acc;
+  return {.acc = acc, .improve_only = has_empty};
 }
 
 // Set access in forward and backward direction based on tags.
@@ -40,14 +51,14 @@ inline ACCESS InterpretAccessValue(std::string_view val, bool lanes,
 // not be set permissive for cars.
 inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
                       RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
-  ACCESS acc =
+  InterpretAccessResult res =
       InterpretAccessValue(value, BitIsContained(KEY_BIT_LANES_INNER, pt.bits),
                            pt.first == KEY_BIT_BICYCLE);
-  if (acc == ACC_MAX) {
+  if (res.acc == ACC_MAX) {
     // In general, if we don't know the access value, then it has to be
     // interpreted as a 'no'.
     // For instance, 'agricultural' or 'forestry' will go here.
-    acc = ACC_NO;
+    res.acc = ACC_NO;
   }
 
   const bool forward = BitIsContained(KEY_BIT_FORWARD, pt.bits);
@@ -55,12 +66,16 @@ inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
   // If forward/backward are missing, then set both.
   if (forward || !backward) {
     if (!weak || ra_forw->access != ACC_NO) {
-      ra_forw->access = acc;
+      if (!res.improve_only || res.acc > ra_forw->access) {
+        ra_forw->access = res.acc;
+      }
     }
   }
   if (backward || !forward) {
     if (!weak || ra_backw->access != ACC_NO) {
-      ra_backw->access = acc;
+      if (!res.improve_only || res.acc > ra_backw->access) {
+        ra_backw->access = res.acc;
+      }
     }
   }
 }

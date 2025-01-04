@@ -129,25 +129,21 @@ struct GNode {
   std::int32_t lon = 0;
 };
 
-/*
-inline size_t gnode_total_edges(const GNode& n) {
-  return n.num_edges_out + n.num_edges_inverted;
-}
-*/
-
 struct GEdge {
   enum RESTRICTION : uint8_t {
     LABEL_UNSET = 0,
     LABEL_FREE,
+    // Edge has access ACC_CUSTOMERS, ACC_DELIVERY or ACC_DESTINATION.
     LABEL_RESTRICTED,
+    // Edge is not restricted, but can only be reached by going through
+    // restricted edges.
     LABEL_RESTRICTED_SECONDARY,
-    LABEL_STRANGE,
     // Only used during initial processing, does not exist in the resulting road
     // network.
     LABEL_TEMPORARY,
   };
   std::uint32_t other_node_idx;
-  std::int32_t way_idx;
+  std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
   std::uint64_t distance_cm : 40;
   // True iff this is the first time 'other_node_idx' has this value in the list
@@ -183,7 +179,11 @@ struct GEdge {
   // Inverted edges always have false as value.
   std::uint64_t both_directions : 1;
   // TODO: If the edge is restricted in access (DESTINATION etc). For cars only.
-  RESTRICTION car_label : 3 = LABEL_UNSET;
+  RESTRICTION car_label : 3;
+  // If there was some issue when setting the car label, such as a
+  // restricted-secondary road that is a highway.
+  // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
+  std::uint64_t car_label_strange : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -235,7 +235,7 @@ struct Graph {
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
   std::vector<GCluster> clusters;
-  SimpleMemPool aligned_pool_;
+  // SimpleMemPool aligned_pool_;
   SimpleMemPool unaligned_pool_;
 
   std::size_t FindWayIndex(std::int64_t way_id) const {
@@ -314,6 +314,15 @@ inline std::span<const GEdge> gnode_all_edges(const Graph& g,
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
   return std::span<const GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+}
+
+inline std::span<GEdge> gnode_forward_edges(Graph& g, uint32_t node_idx) {
+  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  while (e_stop > e_start && g.edges.at(e_stop - 1).inverted) {
+    e_stop--;
+  }
+  return std::span<GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
 }
 
 inline std::span<const GEdge> gnode_forward_edges(const Graph& g,

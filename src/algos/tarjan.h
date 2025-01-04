@@ -156,7 +156,8 @@ class Tarjan {
     struct StackEntry {
       std::int32_t parent;
       std::int32_t node;
-      std::uint32_t next_edge_pos;
+      // Offset of the edge within node, i.e. starting with 0.
+      std::uint32_t next_edge_offset;
       // Number of nodes in the spanning tree below 'node'.
       std::uint32_t tree_size;
     };
@@ -164,20 +165,20 @@ class Tarjan {
 
     std::vector<StackEntry> stack;
     stack.emplace_back(/*parent=*/-1, /*node=*/comp.start_node,
-                       /*next_edge_pos=*/0);
+                       /*next_edge_offset=*/0);
 
     while (!stack.empty()) {
       StackEntry& e = stack.back();
 
       // === INIT
-      if (e.next_edge_pos == 0) {
+      if (e.next_edge_offset == 0) {
         visno->at(e.node) = time;
         low->at(e.node) = time;
       }
 
       std::uint32_t child;
       if (GetNextNeighbour(e.node,
-                           /*edge_pos=*/&e.next_edge_pos,
+                           /*edge_offset=*/&e.next_edge_offset,
                            /*neighbour=*/&child)) {
         // HANDLE CHILD.
         if (visno->at(child) == -1) {
@@ -185,7 +186,7 @@ class Tarjan {
           time++;
           e.tree_size++;
           stack.emplace_back(/*parent=*/e.node, /*node=*/child,
-                             /*next_edge_pos=*/0);
+                             /*next_edge_offset=*/0);
         } else if ((uint32_t)e.parent != child) {
           // NODE ALREADY VISITED.
           low->at(e.node) = std::min(low->at(e.node), visno->at(child));
@@ -234,21 +235,21 @@ class Tarjan {
   }
 
  private:
-  // Beginning with n.edge[*edge_pos], find the first edge that has
+  // Beginning with n.edge[*edge_offset], find the first edge that has
   // 'unique_other' set and return the connected node in 'neighbour'. Returns
   // false if no more edges with 'unique_other' exist.
   //
   // This is used to iterate over the undirected neighbours of a node.
-  bool GetNextNeighbour(uint32_t node_idx,
-                        std::uint32_t* edge_pos, std::uint32_t* neighbour) {
+  bool GetNextNeighbour(uint32_t node_idx, std::uint32_t* edge_offset,
+                        std::uint32_t* neighbour) {
     const GNode& n = g_.nodes.at(node_idx);
-    size_t current = n.edges_start_pos + (*edge_pos);
+    size_t current = n.edges_start_pos + (*edge_offset);
     size_t stop = gnode_edge_stop(g_, node_idx);
 
     while (current < stop) {
       if (g_.edges.at(current).unique_other) {
         *neighbour = g_.edges.at(current).other_node_idx;
-        (*edge_pos) = current + 1 - n.edges_start_pos;
+        (*edge_offset) = current + 1 - n.edges_start_pos;
         return true;
       }
       current++;
