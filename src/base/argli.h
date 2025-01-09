@@ -90,7 +90,7 @@ class Argli {
       msg << " (" << arg.def.type << ", default:\"" << arg.def.dflt << "\")"
           << std::endl;
       for (std::string_view text = arg.def.desc; !text.empty();) {
-        msg << "     " << GetWrappedLine(&text, 75) << std::endl;
+        msg << "     " << WrapLine(&text, 75) << std::endl;
       }
       // TODO: bool has special syntax
     }
@@ -262,7 +262,7 @@ class Argli {
 
   // Returns a line of at most 'width' characters from text. Wraps at <space>
   // or hard cuts text if no <space> is found.
-  static std::string_view GetWrappedLine(std::string_view* text, size_t width) {
+  static std::string_view WrapLine(std::string_view* text, size_t width) {
     if (text->size() <= width) {
       auto line = *text;
       *text = "";

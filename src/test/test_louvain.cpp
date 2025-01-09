@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "algos/louvain.h"
+#include "algos/louvain_precluster.h"
 #include "base/argli.h"
 #include "base/util.h"
 #include "logging/loguru.h"
@@ -249,7 +250,7 @@ void TestNodeLineRemover() {
 
   CHECK_S(NodeLineRemover::GetLineOfNodes(g, 1, &nl));
   CHECK_S(!nl.connected_circle);
-  CHECK_S(!nl.disconnected_circle);
+  CHECK_S(!nl.isolated_circle);
   CHECK_EQ_S(nl.vnodes.size(), 4u);
   CHECK_EQ_S(nl.vnodes.at(0), 0u);
   CHECK_EQ_S(nl.vnodes.at(1), 1u);
@@ -258,7 +259,7 @@ void TestNodeLineRemover() {
 
   CHECK_S(NodeLineRemover::GetLineOfNodes(g, 2, &nl));
   CHECK_S(!nl.connected_circle);
-  CHECK_S(!nl.disconnected_circle);
+  CHECK_S(!nl.isolated_circle);
   CHECK_EQ_S(nl.vnodes.size(), 4u);
   CHECK_EQ_S(nl.vnodes.at(0), 0u);
   CHECK_EQ_S(nl.vnodes.at(1), 1u);
@@ -267,7 +268,7 @@ void TestNodeLineRemover() {
 
   CHECK_S(NodeLineRemover::GetLineOfNodes(g, 4, &nl));
   CHECK_S(nl.connected_circle);
-  CHECK_S(!nl.disconnected_circle);
+  CHECK_S(!nl.isolated_circle);
   CHECK_EQ_S(nl.vnodes.size(), 4u);
   CHECK_EQ_S(nl.vnodes.at(0), 3u);
   CHECK_EQ_S(nl.vnodes.at(1), 4u);
@@ -276,7 +277,7 @@ void TestNodeLineRemover() {
 
   CHECK_S(NodeLineRemover::GetLineOfNodes(g, 5, &nl));
   CHECK_S(nl.connected_circle);
-  CHECK_S(!nl.disconnected_circle);
+  CHECK_S(!nl.isolated_circle);
   CHECK_EQ_S(nl.vnodes.size(), 4u);
   CHECK_EQ_S(nl.vnodes.at(0), 3u);
   CHECK_EQ_S(nl.vnodes.at(1), 4u);
@@ -298,7 +299,7 @@ void TestNodeLineRemoverDisconnectedCircle() {
   CHECK_S(NodeLineRemover::GetLineOfNodes(g, 0, &nl));
   CHECK_EQ_S(nl.vnodes.size(), 5u);
   CHECK_S(!nl.connected_circle);
-  CHECK_S(nl.disconnected_circle);
+  CHECK_S(nl.isolated_circle);
   CHECK_EQ_S(nl.vnodes.at(0), 0u);
   CHECK_EQ_S(nl.vnodes.at(1), 4u);
   CHECK_EQ_S(nl.vnodes.at(2), 3u);

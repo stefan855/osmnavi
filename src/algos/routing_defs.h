@@ -10,7 +10,7 @@
 inline uint32_t FindClusterOfNode(const Graph& g, std::uint32_t node_idx) {
   const GNode& n = g.nodes.at(node_idx);
   if (!n.dead_end) {
-    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
+    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID) << n.node_id;
     return n.cluster_id;
   }
   std::uint32_t cluster_node_idx;

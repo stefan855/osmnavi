@@ -40,6 +40,14 @@ class HugeBitset {
     return retval;
   }
 
+  bool AddBit(std::uint64_t bit_no) {
+    return SetBit(bit_no, true);
+  }
+
+  bool RemoveBit(std::uint64_t bit_no) {
+    return SetBit(bit_no, false);
+  }
+
   bool GetBit(std::uint64_t bit_no) const {
     if (bit_no >= allocated_bits_) {
       return false;
@@ -95,11 +103,19 @@ class HugeBitset {
   // Count the bits that are '1'.
   std::uint64_t CountBits() const {
     std::uint64_t cnt = 0;
-    for (std::uint64_t i = NextBit(0); i < NumAllocatedBits();
-         i = NextBit(i + 1ull)) {
+    for (std::uint64_t bit = NextBit(0); bit < NumAllocatedBits();
+         bit = NextBit(bit + 1ull)) {
       cnt++;
     }
     return cnt;
+  }
+
+  // Add all bits from another set.
+  void AddFrom(const HugeBitset& other) {
+    for (std::uint64_t bit = other.NextBit(0); bit < other.NumAllocatedBits();
+         bit = other.NextBit(bit + 1ull)) {
+      SetBit(bit, true);
+    }
   }
 
   std::uint64_t NumAllocatedBits() const { return allocated_bits_; }

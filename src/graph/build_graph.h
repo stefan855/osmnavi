@@ -30,12 +30,14 @@ struct BuildGraphOptions {
   // File pattern for admin files (country polygons).
   std::string admin_filepattern = "../../data/admin/??_*.csv";
   std::string routing_config = "../config/routing.cfg";
+  // Align clusters as much as possible with country borders.
+  bool align_clusters_to_ncc = false;
   // Clusters are aligned to country border. This sometimes causes small
   // clusters containing little disconnected road segments, for instance when a
   // street meanders around the border. Setting this to true merge these tiny
   // clusters across the border, such that some clusters at the border contain a
   // few nodes across the border.
-  bool merge_tiny_clusters = true;
+  bool merge_tiny_clusters = false;
 
   // Max number of threads to use for parallel processing.
   int n_threads = 8;
@@ -78,6 +80,10 @@ struct BuildGraphStats {
   int64_t num_ways_mixed_restricted_car = 0;
 
   int64_t num_cross_country_edges = 0;
+  int64_t num_cross_country_restricted = 0;
+  int64_t num_cross_cluster_edges = 0;
+  int64_t num_cross_cluster_restricted = 0;
+  // int64_t num_cross_cluster_restricted_dead_end = 0;
 
   int64_t num_nodes_in_cluster = 0;
   int64_t num_nodes_in_small_component = 0;

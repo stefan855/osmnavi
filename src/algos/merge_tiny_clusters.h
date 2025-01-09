@@ -12,8 +12,7 @@
  *
  * Besides increasing the number of clusters enormously, these tiny clusters
  * also significantly increase the number of border nodes. Both things cause
- * significant overhead when computing shortest routes within clusters and
- * across clusters.
+ * overhead when computing shortest routes within clusters and across clusters.
  *
  * This file implements an algorithm that merges the tiny clusters with
  * the best large clusters they are connected to. This will cause some clusters
@@ -56,7 +55,7 @@ struct CrossEdge {
 
 struct ClusterData {
   // True iff the cluster is "tiny". This means it has less than
-  // kTinyClusterThreshold nodes and all external edges from border nodes have
+  // kTinyClusterThreshold nodes and all external edges at border nodes have
   // edge.cross_country set to true.
   bool tiny = false;
   // When a tiny cluster is merged, then 'deleted' is set to true and the new
@@ -112,8 +111,6 @@ void CheckCrossEdges(const WorkData& wd, std::uint32_t cluster_id) {
     const GNode& n = wd.g.nodes.at(node_idx);
     uint32_t r_cluster_id = GetRedirectedClusterId(wd, n);
     for (const GEdge& e : gnode_all_edges(wd.g, node_idx)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { const GEdge& e = n.edges[edge_pos];
       if (!e.unique_other || e.bridge) {
         continue;
       }
@@ -180,8 +177,6 @@ void AddClusterBorderEdges(const GCluster& c, WorkData* wd) {
   for (uint32_t node_idx : c.border_nodes) {
     const GNode& n = wd->g.nodes.at(node_idx);
     for (const GEdge& e : gnode_all_edges(wd->g, node_idx)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { const GEdge& e = n.edges[edge_pos];
       MayAddEdgeToWorkQueue(e, n, wd->g.nodes.at(e.other_node_idx), wd);
     }
   }
@@ -218,8 +213,6 @@ void MayMergeCluster(const CrossEdge& ce, WorkData* wd) {
 
     // Iterate edges and add eligible ones to work queue.
     for (const GEdge& e : gnode_all_edges(wd->g, node_idx)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { const GEdge& e = n.edges[edge_pos];
       if (!e.unique_other || e.bridge) {
         continue;
       }

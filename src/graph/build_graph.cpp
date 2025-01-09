@@ -965,14 +965,17 @@ void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
   }
 }
 
-void ExecuteLouvain(const bool merge_tiny_clusters, GraphMetaData* meta) {
+void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   FUNC_TIMER();
-  build_clusters::ExecuteLouvainStages(meta->opt.n_threads, &meta->graph);
-  build_clusters::UpdateGraphClusterInformation(&meta->graph);
+  build_clusters::ExecuteLouvain(opt.n_threads, opt.align_clusters_to_ncc,
+                                 &meta->graph);
+  build_clusters::UpdateGraphClusterInformation(opt.align_clusters_to_ncc,
+                                                &meta->graph);
 
-  if (merge_tiny_clusters) {
+  if (opt.align_clusters_to_ncc && opt.merge_tiny_clusters) {
     build_clusters::MergeTinyClusters(&(meta->graph));
-    build_clusters::UpdateGraphClusterInformation(&meta->graph);
+    build_clusters::UpdateGraphClusterInformation(opt.align_clusters_to_ncc,
+                                                  &meta->graph);
   }
 
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
@@ -1034,41 +1037,59 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
 
     int64_t num_edges_inverted = 0;
     int64_t num_edges_out = 0;
-    for (const GEdge& edge : gnode_all_edges(g, node_idx)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { const GEdge& edge = n.edges[edge_pos];
-      if (!edge.unique_other) {
+    for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+      const GNode& other = g.nodes.at(e.other_node_idx);
+      // const bool edge_dead_end = n.dead_end || other.dead_end;
+      if (!e.unique_other) {
         stats.num_edges_non_unique++;
       }
-      num_edges_inverted += edge.inverted;
-      num_edges_out += (edge.inverted == 0);
+      num_edges_inverted += e.inverted;
+      num_edges_out += (e.inverted == 0);
 
-      if (!edge.inverted && edge.other_node_idx != node_idx) {
-        stats.sum_edge_length_cm += edge.distance_cm;
-        if (edge.distance_cm == 0) {
+      if (!e.inverted && e.other_node_idx != node_idx) {
+        stats.sum_edge_length_cm += e.distance_cm;
+        if (e.distance_cm == 0) {
           LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
-                      << g.nodes.at(edge.other_node_idx).node_id;
+                      << other.node_id;
         }
         stats.min_edge_length_cm =
-            std::min(stats.min_edge_length_cm, (int64_t)edge.distance_cm);
+            std::min(stats.min_edge_length_cm, (int64_t)e.distance_cm);
         stats.max_edge_length_cm =
-            std::max(stats.max_edge_length_cm, (int64_t)edge.distance_cm);
+            std::max(stats.max_edge_length_cm, (int64_t)e.distance_cm);
         stats.num_edges_out_car_restr_unset +=
-            (edge.car_label == GEdge::LABEL_UNSET);
+            (e.car_label == GEdge::LABEL_UNSET);
         stats.num_edges_out_car_restr_free +=
-            (edge.car_label == GEdge::LABEL_FREE);
+            (e.car_label == GEdge::LABEL_FREE);
         stats.num_edges_out_car_restricted +=
-            (edge.car_label == GEdge::LABEL_RESTRICTED);
+            (e.car_label == GEdge::LABEL_RESTRICTED);
         stats.num_edges_out_car_restricted2 +=
-            (edge.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
-        stats.num_edges_out_car_strange += edge.car_label_strange;
-        CHECK_S(edge.car_label_strange == 0 ||
-                edge.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
-        CHECK_NE_S(edge.car_label, GEdge::LABEL_TEMPORARY);
+            (e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
+        stats.num_edges_out_car_strange += e.car_label_strange;
+        CHECK_S(e.car_label_strange == 0 ||
+                e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
+        CHECK_NE_S(e.car_label, GEdge::LABEL_TEMPORARY);
         stats.num_edges_out_car_forbidden +=
-            !RoutableAccess(GetRAFromWSA(g, edge, VH_MOTOR_VEHICLE).access);
+            !RoutableAccess(GetRAFromWSA(g, e, VH_MOTOR_VEHICLE).access);
       }
-      stats.num_cross_country_edges += (edge.contra_way && edge.cross_country);
+      stats.num_cross_country_edges += (e.contra_way && e.cross_country);
+      stats.num_cross_country_restricted +=
+          (e.contra_way && e.cross_country && e.car_label != GEdge::LABEL_FREE);
+      if (n.cluster_id != other.cluster_id &&
+          n.cluster_id != INVALID_CLUSTER_ID &&
+          other.cluster_id != INVALID_CLUSTER_ID) {
+        stats.num_cross_cluster_edges += 1;
+        stats.num_cross_cluster_restricted +=
+            (e.car_label != GEdge::LABEL_FREE);
+        if (e.car_label != GEdge::LABEL_FREE) {
+          LOG_S(INFO) << absl::StrFormat(
+              "Cross cluster restricted edge %lld to %lld", n.node_id,
+              other.node_id);
+        }
+        // By construction, this is 0, because dead-ends are omitted from
+        // clusters.
+        // stats.num_cross_cluster_restricted_dead_end +=
+        //     (e.car_label != GEdge::LABEL_FREE && edge_dead_end);
+      }
     }
     stats.num_edges_inverted += num_edges_inverted;
     stats.num_edges_out += num_edges_out;
@@ -1205,8 +1226,18 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.max_edges_out);
   LOG_S(INFO) << absl::StrFormat("  Max edges inverted: %10lld",
                                  stats.max_edges_inverted);
+
   LOG_S(INFO) << absl::StrFormat("  Cross country edges:%10lld",
                                  stats.num_cross_country_edges);
+  LOG_S(INFO) << absl::StrFormat("  Cross country restr:%10lld",
+                                 stats.num_cross_country_restricted);
+
+  LOG_S(INFO) << absl::StrFormat("  Cross cluster edges:%10lld",
+                                 stats.num_cross_cluster_edges);
+  LOG_S(INFO) << absl::StrFormat("  Cross cluster restr:%10lld",
+                                 stats.num_cross_cluster_restricted);
+  // LOG_S(INFO) << absl::StrFormat("  Cross clust restr+de:%9lld",
+  //                                stats.num_cross_cluster_restricted_dead_end);
 
   LOG_S(INFO) << "========= Memory Stats ===========";
   LOG_S(INFO) << absl::StrFormat("Bitset memory:      %12.2f MB",
@@ -1342,7 +1373,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   ApplyTarjan(meta.graph, &meta);
   LabelAllCarEdges(&meta.graph);
 
-  ExecuteLouvain(meta.opt.merge_tiny_clusters, &meta);
+  ClusterGraph(meta.opt, &meta);
 
   // Output.
   if (meta.opt.log_way_tag_stats) {

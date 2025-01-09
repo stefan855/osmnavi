@@ -20,6 +20,7 @@
 #include "base/huge_bitset.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
+#include "geometry/closest_node.h"
 #include "graph/build_graph.h"
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
@@ -92,6 +93,12 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
     return;
   }
 
+  if (!g.nodes.at(start_idx).large_component ||
+      !g.nodes.at(target_idx).large_component) {
+    LOG_S(INFO) << "Start- or endpoint is not in large component. Can't route.";
+    return;
+  }
+
   DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
              /*backward=*/false, /*hybrid=*/false, csv_prefix);
   DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
@@ -105,6 +112,30 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
              /*backward=*/true, /*hybrid=*/false, csv_prefix);
   DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
              /*backward=*/false, /*hybrid=*/true, csv_prefix);
+}
+
+void TestRouteLatLong(const Graph& g, double start_lat, double start_lon,
+                      double target_lat, double target_lon,
+                      std::string_view csv_prefix = "") {
+  ClosestNodeResult start =
+      FindClosestNodeSlow(g, std::llround(TEN_POW_7 * start_lat),
+                          std::llround(TEN_POW_7 * start_lon));
+  ClosestNodeResult target =
+      FindClosestNodeSlow(g, std::llround(TEN_POW_7 * target_lat),
+                          std::llround(TEN_POW_7 * target_lon));
+
+  if (start.dist > 500 * 100 || target.dist > 500 * 100) {
+    LOG_S(INFO) << absl::StrFormat(
+        "Start-node %lld: %.2fm and/or end-node: %lld: %.2fm too far away",
+        g.nodes.at(start.node_pos).node_id, start.dist / 100.0,
+        g.nodes.at(target.node_pos).node_id, target.dist / 100.0);
+    return;
+  }
+
+  const GNode& sn = g.nodes.at(start.node_pos);
+  const GNode& tn = g.nodes.at(target.node_pos);
+
+  TestRoute(g, sn.node_id, tn.node_id, "start=", "target=", csv_prefix);
 }
 
 void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
@@ -345,6 +376,12 @@ int main(int argc, char* argv[]) {
            .dflt = opt.routing_config,
            .desc = "Location of routing config file."},
 
+          {.name = "align_clusters_to_ncc",
+           .type = "bool",
+           .dflt = opt.align_clusters_to_ncc ? "true" : "false",
+           .desc = "Align cluster borders and country border. If set to false "
+                   "then merge_tiny_clusters is set to false too."},
+
           {.name = "merge_tiny_clusters",
            .type = "bool",
            .dflt = opt.merge_tiny_clusters ? "true" : "false",
@@ -380,7 +417,9 @@ int main(int argc, char* argv[]) {
   opt.pbf = argli.GetString("pbf");
   opt.admin_filepattern = argli.GetString("admin_filepattern");
   opt.routing_config = argli.GetString("routing_config");
-  opt.merge_tiny_clusters = argli.GetBool("merge_tiny_clusters");
+  opt.align_clusters_to_ncc = argli.GetBool("align_clusters_to_ncc");
+  opt.merge_tiny_clusters =
+      opt.align_clusters_to_ncc && argli.GetBool("merge_tiny_clusters");
   opt.n_threads = argli.GetInt("n_threads");
   opt.log_turn_restrictions = argli.GetBool("log_turn_restrictions");
   opt.log_way_tag_stats = argli.GetBool("log_way_tag_stats");
@@ -425,6 +464,9 @@ int main(int argc, char* argv[]) {
             /*csv_prefix=*/"ln");
   TestRoute(g, 899297768, 1131001345, "Nordkapp-Norwegen", "Lissabon",
             /*csv_prefix=*/"");
+
+  // TestRouteLatLong(g, 47.36275428, 8.07097094, 47.38663149, 8.13231129,
+  // "tmp");
 
   LOG_S(INFO) << "Finished.";
   return 0;
