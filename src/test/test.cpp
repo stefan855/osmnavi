@@ -1279,6 +1279,48 @@ void TestClosestPoint() {
   }
 }
 
+void TestGEdgeKey() {
+  FUNC_TIMER();
+  Graph g;
+  g.nodes.push_back({.node_id = 100, .edges_start_pos = 0});
+  g.nodes.push_back({.node_id = 101, .edges_start_pos = 2});
+  g.nodes.push_back({.node_id = 102, .edges_start_pos = 4});
+  g.nodes.push_back({.node_id = 103, .edges_start_pos = 4});
+
+  // Dummy edges of node 100.
+  g.edges.push_back({});
+  g.edges.push_back({});
+  // Edges of node 101.
+  g.edges.push_back({.other_node_idx = 2});
+  g.edges.push_back({.other_node_idx = 3});
+
+  GEdgeKey a = GEdgeKey::Create(g, 1, g.edges.at(2));
+  GEdgeKey b = GEdgeKey::Create(g, 1, g.edges.at(3));
+  CHECK_EQ_S(a.GetFromIdx(), 1);
+  CHECK_EQ_S(b.GetFromIdx(), 1);
+  CHECK_EQ_S(a.GetOffset(), 0);
+  CHECK_EQ_S(b.GetOffset(), 1);
+
+  CHECK_EQ_S(a.GetEdge(g).other_node_idx, 2);
+  CHECK_EQ_S(b.GetEdge(g).other_node_idx, 3);
+
+  CHECK_EQ_S(a.FromNode(g).node_id, 101);
+  CHECK_EQ_S(b.FromNode(g).node_id, 101);
+
+  CHECK_EQ_S(a.ToNode(g).node_id, 102);
+  CHECK_EQ_S(b.ToNode(g).node_id, 103);
+
+  CHECK_S(a != b);
+  GEdgeKey c = GEdgeKey::Create(g, 1, g.edges.at(2));
+  CHECK_S(a == c);
+
+  // Test that hash function is probably ok. Note that these tests could fail
+  // even if the hash function is correct, but it is very unlikely.
+  CHECK_NE_S(std::hash<GEdgeKey>{}(a), 0);
+  CHECK_NE_S(std::hash<GEdgeKey>{}(a), std::hash<GEdgeKey>{}(b));
+  CHECK_EQ_S(std::hash<GEdgeKey>{}(a), std::hash<GEdgeKey>{}(c));
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1309,6 +1351,7 @@ int main(int argc, char* argv[]) {
   TestCarMaxspeed();
   TestCarAccess();
   TestCarRoadDirection();
+  TestGEdgeKey();
 
   TestDeDuperWithIdsInt();
   TestDeDuperWithIdsString();

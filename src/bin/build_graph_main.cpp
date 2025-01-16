@@ -15,6 +15,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "algos/compact_dijkstra.h"
+#include "algos/edge_router.h"
 #include "algos/router.h"
 #include "base/argli.h"
 #include "base/huge_bitset.h"
@@ -36,8 +37,8 @@ void PrintStructSizes() {
                                  sizeof(GNode));
   LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                 %4u",
                                  sizeof(GEdge));
-  // LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):              %4u",
-  //                                sizeof(GEdgeKey));
+  LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):              %4u",
+                                 sizeof(GEdgeKey));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                  %4u",
                                  sizeof(GWay));
   LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):          %4u",
@@ -48,6 +49,7 @@ void PrintStructSizes() {
                                  sizeof(std::pair<int32_t, int32_t>));
 }
 
+template <typename RouterT>
 void DoOneRoute(const Graph& g, std::uint32_t start_idx,
                 std::uint32_t target_idx, bool astar,
                 const RoutingMetric& metric, bool backward, bool hybrid,
@@ -65,7 +67,7 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
   }
 
   const absl::Time start = absl::Now();
-  Router router(g, 0);
+  RouterT router(g, 0);
   auto res = router.Route(start_idx, target_idx, metric, opt);
   const double elapsed = ToDoubleSeconds(absl::Now() - start);
 
@@ -99,19 +101,31 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
     return;
   }
 
-  DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
-             /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
-             /*backward=*/true, /*hybrid=*/false, csv_prefix);
-  DoOneRoute(g, start_idx, target_idx, /*astar=*/false, RoutingMetricTime(),
-             /*backward=*/false, /*hybrid=*/true, csv_prefix);
+  DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
+                     RoutingMetricTime(),
+                     /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
+                         RoutingMetricTime(),
+                         /*backward=*/false, /*hybrid=*/false, csv_prefix );
+  DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
+                     RoutingMetricTime(),
+                     /*backward=*/true, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
+                     RoutingMetricTime(),
+                     /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
-  DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
-             /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
-             /*backward=*/true, /*hybrid=*/false, csv_prefix);
-  DoOneRoute(g, start_idx, target_idx, /*astar=*/true, RoutingMetricTime(),
-             /*backward=*/false, /*hybrid=*/true, csv_prefix);
+  DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
+                     RoutingMetricTime(),
+                     /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/true,
+                     RoutingMetricTime(),
+                     /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
+                     RoutingMetricTime(),
+                     /*backward=*/true, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
+                     RoutingMetricTime(),
+                     /*backward=*/false, /*hybrid=*/true, csv_prefix);
 }
 
 void TestRouteLatLong(const Graph& g, double start_lat, double start_lon,
@@ -444,7 +458,6 @@ int main(int argc, char* argv[]) {
   WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
                     "/tmp/experimental4.csv");
 
-  // TestRoutes(g);
   TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern",
             /*csv_prefix=*/"pb");
   TestRoute(g, 805904068, 49973500, "Bern", "Pfäffikon ZH",
@@ -467,6 +480,11 @@ int main(int argc, char* argv[]) {
 
   // TestRouteLatLong(g, 47.36275428, 8.07097094, 47.38663149, 8.13231129,
   // "tmp");
+
+  TestRoute(g, 654083753, 3582774151, "Ulisbach SG", "Ricken SG",
+            /*csv_prefix=*/"ur");
+  TestRoute(g, 32511837, 3582774151, "Ulisbach restricted SG", "Ricken SG",
+            /*csv_prefix=*/"ur2");
 
   LOG_S(INFO) << "Finished.";
   return 0;

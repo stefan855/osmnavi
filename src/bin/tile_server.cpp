@@ -234,7 +234,7 @@ void LoadFiles(const std::string& wildcard, LayerData* data) {
   for (const std::filesystem::path path : GetFilesWithWildcard(wildcard)) {
     LoadSegments(path, data);
   }
-  std::sort(
+  std::stable_sort(
       data->small.begin(), data->small.end(),
       [](const LineSegment& a, const LineSegment& b) { return a.x0 < b.x0; });
   LOG_S(INFO) << "finished sorting " << data->small.size() << " small segments";

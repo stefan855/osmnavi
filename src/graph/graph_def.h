@@ -344,10 +344,14 @@ inline std::span<const GEdge> gnode_inverted_edges(const Graph& g,
   }
   // Use g.edges[], not g.edges.at(), because this could be outside range if the
   // last node has no inverted edges.
+  //
   return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
-#if 0
+// GEdgeKey uniquely identifies an edge in a graph data structure. It
+// encapsulates the index of the from-node (4 bytes) and the edge-offset (1
+// byte) within the list of edges of the node. The data is stored in a way that
+// it can be freely aligned at every byte position.
 struct alignas(1) GEdgeKey {
  public:
   GEdgeKey() = delete;
@@ -357,23 +361,61 @@ struct alignas(1) GEdgeKey {
     arr_[dim] = offset;
   }
 
-  uint32_t GetFromIdx() {
+  uint32_t GetFromIdx() const {
     uint32_t from_idx;
     memcpy(&from_idx, &arr_[0], dim);
     return from_idx;
   }
 
-  uint8_t GetOffset() { return arr_[dim]; }
+  uint8_t GetOffset() const { return arr_[dim]; }
 
-  const GEdge& GetEdge(const Graph& g) {
-    return g.nodes.at(GetFromIdx()).edges[GetOffset()];
+  const GEdge& GetEdge(const Graph& g) const {
+    const GNode& n = g.nodes.at(GetFromIdx());
+    return g.edges.at(n.edges_start_pos + GetOffset());
+  }
+
+  const GNode& FromNode(const Graph& g) const {
+    return g.nodes.at(GetFromIdx());
+  }
+
+  const GNode& ToNode(const Graph& g) const {
+    return g.nodes.at(GetEdge(g).other_node_idx);
+  }
+
+  static GEdgeKey Create(const Graph& g, uint32_t from_idx, const GEdge& e) {
+    auto offset =
+        (&e - &g.edges.front()) - g.nodes.at(from_idx).edges_start_pos;
+    // LOG_S(INFO) << "Edgekey from_idx:" << from_idx;
+    // LOG_S(INFO) << "Edgekey offset:" << offset;
+    CHECK_GE_S(offset, 0);
+    CHECK_LE_S(offset, 255);
+    CHECK_EQ_S(e.other_node_idx,
+               g.edges.at(g.nodes.at(from_idx).edges_start_pos + offset)
+                   .other_node_idx)
+        << offset;
+    return GEdgeKey(from_idx, offset);
+  }
+
+  bool operator==(const GEdgeKey& other) const {
+    return memcmp(arr_, other.arr_, dim+1) == 0;
   }
 
  private:
+  friend std::hash<GEdgeKey>;
   static constexpr size_t dim = 4;
   uint8_t arr_[dim + 1];
 };
-#endif
+
+namespace std {
+template <>
+struct hash<GEdgeKey> {
+  size_t operator()(const GEdgeKey& key) const {
+    // Use already defined std::string_view hashes.
+    return std::hash<std::string_view>{}(
+        std::string_view((char*)key.arr_, GEdgeKey::dim + 1));
+  }
+};
+}  // namespace std
 
 inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_idx) {
   return g.way_shared_attrs.at(g.ways.at(way_idx).wsa_id);
@@ -384,9 +426,9 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
 }
 
 // Returns the position of routing attrs for vehicle type 'vt' and direction
-// 'dir'. The allowed values for 'vt' are VH_MOTOR_VEHICLE, VH_BICYCLE, VH_FOOT,
-// for 'dir' they are DIR_FORWARD, DIR_BACKWARD. Check-fails if an attribute is
-// not valid.
+// 'dir'. The allowed values for 'vt' are VH_MOTOR_VEHICLE, VH_BICYCLE,
+// VH_FOOT, for 'dir' they are DIR_FORWARD, DIR_BACKWARD. Check-fails if an
+// attribute is not valid.
 inline uint32_t RAinWSAIndex(VEHICLE vt, DIRECTION dir) {
   const uint32_t pos = vt * 2 + dir;
   CHECK_LT_S(dir, 2);

@@ -60,7 +60,7 @@ class Router {
                       const RoutingMetric& metric, const RoutingOptions& opt) {
     if (verbosity_ > 0) {
       LOG_S(INFO) << absl::StrFormat("Start routing from %u to %u (%s)",
-                                     start_idx, target_idx, Name(metric, opt));
+                                     g_.nodes.at(start_idx).node_id, g_.nodes.at(target_idx).node_id, Name(metric, opt));
     }
     Clear();
 
@@ -85,7 +85,7 @@ class Router {
         continue;  // "old" entry in priority queue.
       }
       vnode.done = 1;
-      if (verbosity_ > 1) {
+      if (verbosity_ >= 3) {
         LOG_S(INFO) << absl::StrFormat("POP node:%u(m:%d) done:0->1",
                                        g_.nodes.at(vnode.node_idx).node_id,
                                        qnode.metric);
@@ -99,13 +99,14 @@ class Router {
         auto current_idx = target_visited_node_index_;
         while (current_idx != INFU32) {
           result.num_shortest_route_nodes++;
-          visited_nodes_.at(current_idx).shortest_route = 1;
+          VisitedNode& vcurr = visited_nodes_.at(current_idx);
+          vcurr.shortest_route = 1;
           current_idx = visited_nodes_.at(current_idx).from_v_idx;
-          if (verbosity_ > 1) {
-            const GNode& n = g_.nodes.at(vnode.node_idx);
+          if (verbosity_ >= 2) {
+            const GNode& n = g_.nodes.at(vcurr.node_idx);
             LOG_S(INFO) << absl::StrFormat(
                 "Shortest route: metric:%12u node:%u cluster:%u",
-                vnode.min_metric, n.node_id, n.cluster_id);
+                vcurr.min_metric, n.node_id, n.cluster_id);
           }
         }
         result.found = true;
@@ -240,7 +241,7 @@ class Router {
       std::uint32_t new_metric =
           vnode.min_metric +
           ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge);
-      if (verbosity_ > 1) {
+      if (verbosity_ >= 3) {
         LOG_S(INFO) << absl::StrFormat(
             "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
             "old-metric:%d",
@@ -296,7 +297,7 @@ class Router {
         VisitedNode& vother = visited_nodes_.at(v_other_idx);
         std::uint32_t new_metric = vnode.min_metric + dist;
 
-        if (verbosity_ > 1) {
+        if (verbosity_ >= 3) {
           LOG_S(INFO) << absl::StrFormat(
               "CLUSTER %5u from:%u(m:%d) to:%u done:%d new-metric:%d "
               "old-metric:%d",

@@ -737,6 +737,8 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
                   WSAAnyRoutable(wsa, DIR_BACKWARD))
               << way.id;
 
+          // We "abuse" edges_start_pos as edge-counter while building the
+          // graph.
           graph.nodes.at(prev_idx).edges_start_pos++;
           graph.nodes.at(idx).edges_start_pos++;
 
@@ -1091,11 +1093,13 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
         //     (e.car_label != GEdge::LABEL_FREE && edge_dead_end);
       }
     }
-    stats.num_edges_inverted += num_edges_inverted;
+    stats.max_edges =
+        std::max(stats.max_edges, num_edges_out + num_edges_inverted);
     stats.num_edges_out += num_edges_out;
+    stats.num_edges_inverted += num_edges_inverted;
+    stats.max_edges_out = std::max(stats.max_edges_out, num_edges_out);
     stats.max_edges_inverted =
         std::max(stats.max_edges_inverted, num_edges_inverted);
-    stats.max_edges_out = std::max(stats.max_edges_out, num_edges_out);
   }
 }
 
@@ -1222,6 +1226,7 @@ void PrintStats(const GraphMetaData& meta) {
       "  Num edges/node:   %12.2f",
       static_cast<double>(stats.num_edges_inverted + stats.num_edges_out) /
           graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("  Max edges:        %12lld", stats.max_edges);
   LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld",
                                  stats.max_edges_out);
   LOG_S(INFO) << absl::StrFormat("  Max edges inverted: %10lld",
@@ -1349,7 +1354,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   SetCountryInGNodes(&meta);
 
   // Now we know exactly which ways we have and which nodes are needed.
-  // Creade edges.
+  // Create edges.
   ComputeEdgeCounts(&meta);
   AllocateEdgeArrays(&meta);
   PopulateEdgeArrays(&meta);

@@ -41,6 +41,7 @@
 #include <queue>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "base/util.h"
 #include "graph/graph_def.h"
 
@@ -95,7 +96,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
 }
 }  // namespace
 
-void inline LabelAllCarEdges(Graph* g) {
+inline void LabelAllCarEdges(Graph* g) {
   constexpr bool strange = true;
   constexpr bool no_strange = false;
   FUNC_TIMER();
@@ -150,4 +151,37 @@ void inline LabelAllCarEdges(Graph* g) {
       CHECK_EQ_S(res.count, res2.count);
     }
   }
+}
+
+// Return all nodes in the restricted subnet at 'start_idx' that are both
+// connected to free and also to restricted edges. These are the nodes where a
+// transition from free to restricted (and vice versa) can happen.
+inline absl::flat_hash_set<uint32_t> GetRestrictedTransitionNodes(
+    const Graph& g, std::uint32_t start_idx) {
+  absl::flat_hash_set<uint32_t> done;
+  absl::flat_hash_set<uint32_t> transition_nodes;
+  std::vector<std::uint32_t> queue;
+  queue.push_back(start_idx);
+  done.insert(start_idx);
+  while (!queue.empty()) {
+    const uint32_t node_idx = queue.back();
+    queue.pop_back();
+    bool has_free = false;
+    bool has_restricted = false;
+    for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+      if (e.car_label == GEdge::LABEL_FREE) {
+        has_free = true;
+      } else {
+        has_restricted = true;
+        if (!done.contains(e.other_node_idx)) {
+          queue.push_back(e.other_node_idx);
+          done.insert(e.other_node_idx);
+        }
+      }
+    }
+    if (has_free && has_restricted) {
+      transition_nodes.insert(node_idx);
+    }
+  }
+  return transition_nodes;
 }

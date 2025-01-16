@@ -97,8 +97,9 @@ struct BuildGraphStats {
   int64_t num_edges_out_car_strange = 0;
   int64_t num_edges_out_car_forbidden = 0;
   int64_t num_edges_non_unique = 0;
-  int64_t max_edges_inverted = 0;
+  int64_t max_edges = 0;
   int64_t max_edges_out = 0;
+  int64_t max_edges_inverted = 0;
   int64_t min_edge_length_cm = INF64;
   int64_t max_edge_length_cm = 0;
   int64_t sum_edge_length_cm = 0;

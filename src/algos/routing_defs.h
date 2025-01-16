@@ -1,7 +1,10 @@
 #pragma once
 
+#include "absl/container/flat_hash_set.h"
+#include "algos/restricted_edges.h"
 #include "algos/tarjan.h"
 #include "base/util.h"
+#include "geometry/geometry.h"
 #include "graph/graph_def.h"
 
 // Return the cluster of a node. If the nodes is in a dead end, then the bridge
@@ -73,6 +76,28 @@ struct RoutingOptions {
   }
 
  private:
+};
+
+// Helper data for routers that want to protect a restricted area
+// ("access=destination" etc.) from being used wrongly during routing.
+struct RestrictedArea {
+  bool active = false;
+  Rectangle<int32_t> bounding_rect = {0, 0, 0, 0};
+  absl::flat_hash_set<uint32_t> transition_nodes;
+
+  void InitialiseTransitionNodes(const Graph& g, std::uint32_t target_idx) {
+    transition_nodes = GetRestrictedTransitionNodes(g, target_idx);
+    active = transition_nodes.size() > 0;
+    if (active) {
+      // Compute bounding rectangle of all transition nodes.
+      const GNode& n1 = g.nodes.at(target_idx);
+      bounding_rect.Set({n1.lat, n1.lon});
+      for (uint32_t idx : transition_nodes) {
+        const GNode& n2 = g.nodes.at(idx);
+        bounding_rect.ExtendBound({n2.lat, n2.lon});
+      }
+    }
+  }
 };
 
 struct RoutingResult {

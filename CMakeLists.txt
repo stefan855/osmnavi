@@ -62,6 +62,10 @@ add_executable(test_louvain src/test/test_louvain.cpp)
 target_include_directories(test_louvain SYSTEM PRIVATE)
 target_link_libraries(test_louvain PRIVATE absl::strings absl::str_format loguru_lib absl::time)
 
+add_executable(test_routing src/test/test_routing.cpp)
+target_include_directories(test_routing SYSTEM PRIVATE)
+target_link_libraries(test_routing PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
+
 add_executable(tile_server src/bin/tile_server.cpp)
 target_include_directories(tile_server SYSTEM PRIVATE)
 target_link_libraries(tile_server PRIVATE libgd.a libpng.a ZLIB::ZLIB freetype fontconfig absl::strings absl::str_format loguru_lib absl::time)
