@@ -1,7 +1,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
-#include "algos/restricted_edges.h"
+#include "algos/destination_edges.h"
 #include "algos/tarjan.h"
 #include "base/util.h"
 #include "geometry/geometry.h"
@@ -80,14 +80,25 @@ struct RoutingOptions {
 
 // Helper data for routers that want to protect a restricted area
 // ("access=destination" etc.) from being used wrongly during routing.
-struct RestrictedArea {
+struct DestinationArea {
   bool active = false;
+  // This is true iff both start and target node are in a non-empty destination
+  // area and the two areas are the same. In this case, a special handling for
+  // edge keys is needed in Dijkstra.
+  bool start_equal_target = false;
   Rectangle<int32_t> bounding_rect = {0, 0, 0, 0};
   absl::flat_hash_set<uint32_t> transition_nodes;
 
-  void InitialiseTransitionNodes(const Graph& g, std::uint32_t target_idx) {
-    transition_nodes = GetRestrictedTransitionNodes(g, target_idx);
+  void InitialiseTransitionNodes(const Graph& g, uint32_t start_idx,
+                                 uint32_t target_idx) {
+    transition_nodes = GetDestinationTransitionNodes(g, target_idx);
     active = transition_nodes.size() > 0;
+    start_equal_target = false;
+    if (active) {
+      auto start_trans = GetDestinationTransitionNodes(g, start_idx);
+      start_equal_target = (start_trans.size() == transition_nodes.size() &&
+                            transition_nodes.contains(*start_trans.begin()));
+    }
     if (active) {
       // Compute bounding rectangle of all transition nodes.
       const GNode& n1 = g.nodes.at(target_idx);

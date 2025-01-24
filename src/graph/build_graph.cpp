@@ -4,7 +4,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
-#include "algos/restricted_edges.h"
+#include "algos/destination_edges.h"
 #include "base/huge_bitset.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"

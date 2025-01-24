@@ -14,12 +14,12 @@ class CompactDirectedGraph {
   struct FullEdge {
     uint32_t from_idx;
     uint32_t to_idx;
-    int32_t weight;
+    uint32_t weight;
   };
 
   struct PartialEdge {
     uint32_t to_idx;
-    int32_t weight;
+    uint32_t weight;
   };
 
   // Create a graph with the given number of nodes and edges in 'full_edges'.
@@ -60,8 +60,8 @@ class CompactDirectedGraph {
 
   // Log stats about the graph.
   void LogStats() const {
-    int32_t min_weight = std::numeric_limits<int32_t>::max();
-    int32_t max_weight = 0;
+    uint32_t min_weight = std::numeric_limits<uint32_t>::max();
+    uint32_t max_weight = 0;
     for (const PartialEdge& e : edges_) {
       if (e.weight < min_weight) min_weight = e.weight;
       if (e.weight > max_weight) max_weight = e.weight;

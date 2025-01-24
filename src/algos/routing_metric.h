@@ -6,16 +6,16 @@
 
 class RoutingMetric {
  public:
-  virtual int32_t Compute(const WaySharedAttrs& wsa, VEHICLE vt,
-                          const DIRECTION dir, const GEdge& edge) const = 0;
+  virtual uint32_t Compute(const WaySharedAttrs& wsa, VEHICLE vt,
+                           const DIRECTION dir, const GEdge& edge) const = 0;
   virtual std::string_view Name() const = 0;
 };
 
 class RoutingMetricDistance : public RoutingMetric {
  public:
-  inline int32_t Compute(const WaySharedAttrs& wsa, VEHICLE vt,
-                         const DIRECTION dir,
-                         const GEdge& edge) const override final {
+  inline uint32_t Compute(const WaySharedAttrs& wsa, VEHICLE vt,
+                          const DIRECTION dir,
+                          const GEdge& edge) const override final {
     return edge.distance_cm;
   }
 
@@ -24,9 +24,9 @@ class RoutingMetricDistance : public RoutingMetric {
 
 class RoutingMetricTime : public RoutingMetric {
  public:
-  inline int32_t Compute(const WaySharedAttrs& wsa, VEHICLE vt,
-                         const DIRECTION dir,
-                         const GEdge& edge) const override final {
+  inline uint32_t Compute(const WaySharedAttrs& wsa, VEHICLE vt,
+                          const DIRECTION dir,
+                          const GEdge& edge) const override final {
     uint32_t km_per_hour = GetRAFromWSA(wsa, vt, dir).maxspeed;
     CHECK_GT_S(km_per_hour, 0)
         << RoutingAttrsDebugString(GetRAFromWSA(wsa, vt, dir));

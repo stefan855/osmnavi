@@ -94,7 +94,7 @@ void WriteCSV(const Graph& g, const CompactDirectedGraph cg,
       export_file.empty() ? "/tmp/traffic.csv" : std::string(export_file);
   myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
   if (!export_file.empty()) {
-    myfile << "way_id,start_lon,start_lat,end_lon,end_lat,visits,deadend\n";
+    myfile << "way_id,start_lat,start_lon,end_lat,end_lon,visits,deadend\n";
   }
 
   for (size_t from_node = 0; from_node < cg.num_nodes(); ++from_node) {
@@ -255,7 +255,7 @@ int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   FUNC_TIMER();
 
-  Argli argli(
+  const Argli argli(
       argc, argv,
       {
           {.name = "pbf",

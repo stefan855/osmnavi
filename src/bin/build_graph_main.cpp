@@ -106,7 +106,7 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
                      /*backward=*/false, /*hybrid=*/false, csv_prefix);
   DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
                          RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/false, csv_prefix );
+                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
                      RoutingMetricTime(),
                      /*backward=*/true, /*hybrid=*/false, csv_prefix);
@@ -114,18 +114,26 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
+  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
+                         RoutingMetricTime(),
+                         /*backward=*/false, /*hybrid=*/true, csv_prefix);
+
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/false, csv_prefix);
   DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/true,
-                     RoutingMetricTime(),
-                     /*backward=*/false, /*hybrid=*/false, csv_prefix);
+                         RoutingMetricTime(),
+                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
                      /*backward=*/true, /*hybrid=*/false, csv_prefix);
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/true, csv_prefix);
+
+  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/true,
+                         RoutingMetricTime(),
+                         /*backward=*/false, /*hybrid=*/true, csv_prefix);
 }
 
 void TestRouteLatLong(const Graph& g, double start_lat, double start_lon,

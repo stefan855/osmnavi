@@ -1,12 +1,12 @@
 #pragma once
 
 /*
- * We want to label the areas of the road network that have restricted access.
- * When these areas are properly labeled, then we can use this during shortest
- * route search to disallow traveling restricted edges except for the start and
- * the end of the route. We also make sure that all restricted areas end up in
- * the same cluster during clustering, so we never need to handle restricted
- * edges when travelling across clusters.
+ * We want to label the areas of the road network that have destination or
+ * otherwise restricted access. When these areas are properly labeled, then we
+ * can use this during shortest route search to disallow traveling restricted
+ * edges except for the start and the end of the route. We also make sure that
+ * all destination areas end up in the same cluster during clustering, so we
+ * never need to handle restricted edges when travelling across clusters.
  *
  * Problems to solve:
  * 1) Nodes can't be labeled 'restricted' or 'free', but edges can.
@@ -153,16 +153,16 @@ inline void LabelAllCarEdges(Graph* g) {
   }
 }
 
-// Return all nodes in the restricted subnet at 'start_idx' that are both
+// Return all nodes in the destination area at 'node_idx' that are both
 // connected to free and also to restricted edges. These are the nodes where a
-// transition from free to restricted (and vice versa) can happen.
-inline absl::flat_hash_set<uint32_t> GetRestrictedTransitionNodes(
-    const Graph& g, std::uint32_t start_idx) {
+// transition from free to the destination area (and vice versa) can happen.
+inline absl::flat_hash_set<uint32_t> GetDestinationTransitionNodes(
+    const Graph& g, std::uint32_t node_idx) {
   absl::flat_hash_set<uint32_t> done;
   absl::flat_hash_set<uint32_t> transition_nodes;
   std::vector<std::uint32_t> queue;
-  queue.push_back(start_idx);
-  done.insert(start_idx);
+  queue.push_back(node_idx);
+  done.insert(node_idx);
   while (!queue.empty()) {
     const uint32_t node_idx = queue.back();
     queue.pop_back();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <limits>
+#include <cstdint>
 
 constexpr int32_t INF32 = std::numeric_limits<int32_t>::max();
 constexpr int64_t INF64 = std::numeric_limits<int64_t>::max();
