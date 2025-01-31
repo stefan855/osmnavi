@@ -56,8 +56,6 @@ void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
   pool.WaitAllFinished();
 }
 
-namespace {
-
 const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
                                   uint32_t n2_idx, VEHICLE vt) {
   uint32_t best_maxspeed = 0;
@@ -65,7 +63,7 @@ const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
 
   uint32_t n1_idx = &n1 - &g.nodes[0];
   for (const GEdge& edge : gnode_forward_edges(g, n1_idx)) {
-  // for (size_t i = 0; i < n1.num_edges_out; ++i) {
+    // for (size_t i = 0; i < n1.num_edges_out; ++i) {
     // const GEdge& edge = n1.edges[i];
     if (edge.other_node_idx != n2_idx) {
       continue;
@@ -105,7 +103,7 @@ void WriteCSV(const Graph& g, const CompactDirectedGraph cg,
       }
       count++;
       const GNode& n1 = g.nodes.at(graph_node_refs.at(from_node));
-      uint32_t n2_idx = graph_node_refs.at(edges.at(i).to_idx);
+      uint32_t n2_idx = graph_node_refs.at(edges.at(i).to_c_idx);
       const GEdge* edge = FindEdgeBetweenNodes(g, n1, n2_idx, VH_MOTOR_VEHICLE);
       const GNode& n2 = g.nodes.at(n2_idx);
       CHECK_NE_S(edge, nullptr);
@@ -129,7 +127,7 @@ void WriteCSV(const Graph& g, const CompactDirectedGraph cg,
 
 // Runs single source Dijkstra for every POI and adds up the traffic for every
 // edge in the spanning tree.
-void SingleSourceDijkstraWorker(const Graph& g, const CompactDirectedGraph& cg,
+void SingleSourceDijkstraWorker(const CompactDirectedGraph& cg,
                                 uint32_t poi_compact_idx,
                                 std::vector<int64_t>* edge_traffic) {
   std::vector<uint32_t> spanning_tree_nodes;
@@ -157,6 +155,57 @@ void SingleSourceDijkstraWorker(const Graph& g, const CompactDirectedGraph& cg,
   }
 }
 
+// Runs single source Dijkstra for every POI and adds up the traffic for every
+// edge in the spanning tree.
+void SingleSourceEdgeDijkstraWorker(const CompactDirectedGraph& cg,
+                                    uint32_t poi_compact_idx,
+                                    std::vector<int64_t>* thread_edge_traffic) {
+  std::vector<uint32_t> spanning_tree_edges;
+  std::vector<compact_dijkstra::VisitedEdge> vis =
+      compact_dijkstra::SingleSourceEdgeDijkstra(cg, poi_compact_idx,
+                                                 &spanning_tree_edges);
+  std::vector<uint32_t> min_edges = GetMinEdgesAtNodes(cg, vis);
+  std::vector<int64_t> edge_traffic(cg.edges().size(), 0);
+
+  CHECK_EQ_S(edge_traffic.size(), vis.size());
+
+  // min_edges contains - for every node - the index of the edge that arrives at
+  // this node with the minimum metric, i.e. this is the last edge (or leaf
+  // edge) on the shortest way to this node. Therefore, the traffic on this edge
+  // is initialised as '1'.
+  for (uint32_t e_idx : min_edges) {
+    if (e_idx != INFU32) {
+      edge_traffic.at(e_idx) = 1;
+    }
+  }
+
+  // Now we iterate in backward direction over the edges as they were marked
+  // done, which is in backward direction of *all* shortest ways. We propagate
+  // und sum traffic to predecessor edges.
+  for (int64_t i = spanning_tree_edges.size() - 1; i >= 0; --i) {
+    CHECK_LT_S(i, spanning_tree_edges.size());
+    uint32_t e_idx = spanning_tree_edges.at(i);
+    CHECK_LT_S(e_idx, edge_traffic.size());
+    CHECK_LT_S(e_idx, vis.size());
+    if (edge_traffic.at(e_idx) > 0 && vis.at(e_idx).from_idx != INFU31) {
+      uint32_t prev_e_idx = vis.at(e_idx).from_idx;
+      CHECK_LT_S(prev_e_idx, edge_traffic.size());
+      // Add the traffic accumulated at the current edge to its predecessor
+      // edge.
+      edge_traffic.at(prev_e_idx) += edge_traffic.at(e_idx);
+    }
+  }
+
+  // Now all edges have the accumulated traffic going through them fort this run
+  // of SSD. Add the traffic to the traffic collected per thread.
+  CHECK_EQ_S(edge_traffic.size(), thread_edge_traffic->size());
+  // TODO: Check if the compiler uses SIMD instructions for that. If not, do it
+  // manually.
+  for (size_t i = 0; i < edge_traffic.size(); ++i) {
+    (*thread_edge_traffic)[i] += edge_traffic[i];
+  }
+}
+
 // Sum up the edge traffic that was collected in parallel in multiple threads.
 // Return a vector with one number for each edge.
 std::vector<int64_t> SumUpEdgeTraffic(
@@ -176,7 +225,8 @@ std::vector<int64_t> SumUpEdgeTraffic(
 std::vector<int64_t> RunCompactGraphRandomTraffic(
     const Graph& g, const CompactDirectedGraph& cg,
     const absl::flat_hash_map<uint32_t, uint32_t>& compact_nodemap,
-    const pois::CollectedData& data, int n_threads) {
+    const pois::CollectedData& data, int n_threads, bool use_edge_dijkstra) {
+  // n_threads = 1;
   ThreadPool pool;
   // Contains for each thread a vector with cg.edges().size() traffic counts,
   // one for every edge in the compact graph.
@@ -194,11 +244,17 @@ std::vector<int64_t> RunCompactGraphRandomTraffic(
 
       pool.AddWork([&g, &cg, poi_compact_idx = iter->second, i,
                     total = data.pois.size(),
-                    &threaded_edge_traffic](int thread_idx) {
+                    &threaded_edge_traffic, use_edge_dijkstra](int thread_idx) {
         LOG_S(INFO) << absl::StrFormat(
-            "SingleSourceDijkstra for POI %u (%u total)", i, total);
-        SingleSourceDijkstraWorker(g, cg, poi_compact_idx,
-                                   &threaded_edge_traffic.at(thread_idx));
+            "SingleSource%sDijkstra for POI %u (%u total)",
+            use_edge_dijkstra ? "Edge" : "", i, total);
+        if (use_edge_dijkstra) {
+          SingleSourceEdgeDijkstraWorker(cg, poi_compact_idx,
+                                         &threaded_edge_traffic.at(thread_idx));
+        } else {
+          SingleSourceDijkstraWorker(cg, poi_compact_idx,
+                                     &threaded_edge_traffic.at(thread_idx));
+        }
       });
     }
   }
@@ -212,10 +268,9 @@ std::vector<int64_t> RunCompactGraphRandomTraffic(
   return SumUpEdgeTraffic(threaded_edge_traffic);
 }
 
-}  // namespace
-
 void CollectRandomTraffic(const Graph& g, int n_threads,
                           const pois::CollectedData& data,
+                          bool use_edge_dijkstra,
                           std::string_view export_file) {
   FUNC_TIMER();
   const RoutingMetricTime metric;
@@ -238,13 +293,14 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
       },
       start_nodes, /*undirected_expand=*/true, &num_nodes, &full_edges,
       &compact_nodemap);
+
   graph_node_refs = compact_dijkstra::NodeMapToGraphNodeRefs(compact_nodemap);
   compact_dijkstra::SortAndCleanupEdges(&full_edges);
   const CompactDirectedGraph cg(num_nodes, full_edges);
   cg.LogStats();
 
-  const std::vector<int64_t> edge_traffic =
-      RunCompactGraphRandomTraffic(g, cg, compact_nodemap, data, n_threads);
+  const std::vector<int64_t> edge_traffic = RunCompactGraphRandomTraffic(
+      g, cg, compact_nodemap, data, n_threads, use_edge_dijkstra);
 
   WriteCSV(g, cg, graph_node_refs, edge_traffic, export_file);
 }
@@ -271,6 +327,9 @@ int main(int argc, char* argv[]) {
            .type = "int",
            .dflt = "10",
            .desc = "Number of threads to use"},
+          {.name = "use_edge_dijkstra",
+           .type = "bool",
+           .desc = "Use normal (false) or edge based (true) Dijkstra."},
           {.name = "check_slow",
            .type = "bool",
            .desc = "Check ClosestPoint algorithm against slow variant."},
@@ -282,15 +341,16 @@ int main(int argc, char* argv[]) {
   const std::string pbf = argli.GetString("pbf");
   const int64_t max_pois = argli.GetInt("max_pois");
   const int n_threads = argli.GetInt("n_threads");
-  const int check_slow = argli.GetBool("check_slow");
+  const bool use_edge_dijkstra = argli.GetBool("use_edge_dijkstra");
+  const bool check_slow = argli.GetBool("check_slow");
   const std::string export_file = argli.GetString("export_file");
   CHECK_GT_S(max_pois, 0);
 
   // Read POIs.
-  pois::CollectedData data;
-  pois::ReadPBF(pbf, n_threads, &data);
+  pois::CollectedData poi_data;
+  pois::ReadPBF(pbf, n_threads, &poi_data);
 
-  int64_t pois_size = data.pois.size();
+  int64_t pois_size = poi_data.pois.size();
   if (max_pois < pois_size) {
     // Pseudo random number generator with a constant seed, to be reproducible.
     std::mt19937 myrandom(1);
@@ -298,8 +358,8 @@ int main(int argc, char* argv[]) {
     // introducing a bias.
     LOG_S(INFO) << "Randomizing+shrinking " << pois_size << " POIs to "
                 << max_pois;
-    std::shuffle(data.pois.begin(), data.pois.end(), myrandom);
-    data.pois.resize(max_pois);
+    std::shuffle(poi_data.pois.begin(), poi_data.pois.end(), myrandom);
+    poi_data.pois.resize(max_pois);
   }
 
   // Read Road Network.
@@ -307,10 +367,10 @@ int main(int argc, char* argv[]) {
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
 
-  MatchPOIsToRoads(g, n_threads, check_slow, &data);
+  MatchPOIsToRoads(g, n_threads, check_slow, &poi_data);
 
   // Execute random queries and collect traffic.
-  CollectRandomTraffic(g, n_threads, data, export_file);
+  CollectRandomTraffic(g, n_threads, poi_data, use_edge_dijkstra, export_file);
 
   LOG_S(INFO) << absl::StrFormat("Collected traffic for %llu of %lld POIs",
                                  std::min(max_pois, pois_size), pois_size);

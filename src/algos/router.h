@@ -111,7 +111,7 @@ class Router {
         }
         result.found = true;
         result.found_distance = vnode.min_metric;
-        result.num_visited_nodes = visited_nodes_.size();
+        result.num_visited = visited_nodes_.size();
         if (verbosity_ > 0) {
           LOG_S(INFO) << absl::StrFormat(
               "Route found, visited nodes:%u metric:%u", visited_nodes_.size(),

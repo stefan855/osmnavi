@@ -16,8 +16,11 @@ class alignas(2) GEdgeKey {
  public:
   GEdgeKey() = delete;
   GEdgeKey(uint32_t from_idx, uint8_t offset, bool is_cluster_edge, bool bit) {
+    SetFromIdx(from_idx);
+    /*
     from_idx_low_ = from_idx & ((1ul << 16) - 1);
     from_idx_high_ = from_idx >> 16;
+    */
     offset_ = offset;
     is_cluster_edge_ = is_cluster_edge;
     bit_ = bit;
@@ -85,6 +88,12 @@ class alignas(2) GEdgeKey {
 
  private:
   friend std::hash<GEdgeKey>;
+
+  void SetFromIdx(uint32_t from_idx) {
+    from_idx_low_ = from_idx & ((1ul << 16) - 1);
+    from_idx_high_ = from_idx >> 16;
+  }
+
   uint16_t from_idx_low_;
   uint16_t from_idx_high_;
   uint16_t offset_ : 14;

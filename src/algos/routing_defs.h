@@ -29,6 +29,7 @@ struct RoutingOptions {
   // direction (from dead-end over a bridge) is always allowed. This way, the
   // start node can be in a dead end.
   bool avoid_dead_end = true;
+  bool avoid_restricted_edges = false;
   bool restrict_to_cluster = false;
   // Search the shortest way forward (false) or backward (true) mode.
   bool backward_search = false;
@@ -115,8 +116,9 @@ struct RoutingResult {
   bool found = false;
   // If a route was found, the distance from start to target node.
   uint32_t found_distance = 0;
-  uint32_t num_visited_nodes = 0;
+  uint32_t num_visited = 0;  // edges or nodes, depending on router type.
   uint32_t num_shortest_route_nodes = 0;
+  std::vector<uint32_t> route_v_idx;  // Filled iff found == true.
 };
 
 // Check if the routing options 'opt' make us reject to follow 'edge'.
@@ -128,6 +130,11 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
       node_idx != opt.allow_bridge_node_idx) {
     // Node is in the non-dead-end side of the bridge, so ignore edge and
     // do not enter the dead end.
+    return true;
+  }
+
+  if (opt.avoid_restricted_edges && opt.vt == VH_MOTOR_VEHICLE &&
+      edge.car_label != GEdge::LABEL_FREE) {
     return true;
   }
 

@@ -80,7 +80,7 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
   LOG_S(INFO) << absl::StrFormat(
       "Metric:%u %s secs:%6.3f #nodes:%5u visits:%10u %s", res.found_distance,
       res.found ? "SUC" : "ERR", elapsed, res.num_shortest_route_nodes,
-      res.num_visited_nodes, router.Name(metric, opt));
+      res.num_visited, router.Name(metric, opt));
 }
 
 void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,

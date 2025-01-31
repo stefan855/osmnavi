@@ -12,18 +12,24 @@
 class CompactDirectedGraph {
  public:
   struct FullEdge {
-    uint32_t from_idx;
-    uint32_t to_idx;
+    uint32_t from_c_idx;
+    uint32_t to_c_idx;
     uint32_t weight;
+    // Edge has restricted car_label (LABEL_RESTRICTED or
+    // LABEL_RESTRICTED_SECONDARY) set.
+    uint8_t restricted : 1;
   };
 
   struct PartialEdge {
-    uint32_t to_idx;
+    uint32_t to_c_idx;
     uint32_t weight;
+    // Edge has restricted car_label (LABEL_RESTRICTED or
+    // LABEL_RESTRICTED_SECONDARY) set.
+    uint8_t restricted : 1;
   };
 
   // Create a graph with the given number of nodes and edges in 'full_edges'.
-  // 'full_edges' must be sorted non-decreasing by (from_idx, to_idx).
+  // 'full_edges' must be sorted non-decreasing by (from_c_idx, to_c_idx).
   //
   // Note: this file implements operator "<" for full edges, i.e. you can sort
   // the edges with std::sort(full_edges.begin(), full_edges.end());
@@ -51,7 +57,7 @@ class CompactDirectedGraph {
   const int64_t FindEdge(uint32_t from_node, uint32_t to_node) const {
     for (size_t i = edges_start_.at(from_node);
          i < edges_start_.at(from_node + 1); ++i) {
-      if (edges_.at(i).to_idx == to_node) {
+      if (edges_.at(i).to_c_idx == to_node) {
         return i;
       }
     }
@@ -80,33 +86,36 @@ class CompactDirectedGraph {
   // In the end we add one more element with value full_edges.size(), to allow
   // easy iteration.
   void BuildGraph(const std::vector<FullEdge>& full_edges) {
+    CHECK_S(edges_start_.empty());
+    edges_start_.reserve(num_nodes_ + 1);
     size_t current_start = 0;
-    for (size_t mini_idx = 0; mini_idx < num_nodes_; ++mini_idx) {
+    for (size_t c_idx = 0; c_idx < num_nodes_; ++c_idx) {
       edges_start_.push_back(current_start);
       // LOG_S(INFO) << absl::StrFormat("Cluster:%u node:%u edge_start:%u",
-      //                                cluster.cluster_id, mini_idx,
+      //                                cluster.cluster_id, c_idx,
       //                                current_start);
       while (current_start < full_edges.size() &&
-             full_edges.at(current_start).from_idx == mini_idx) {
+             full_edges.at(current_start).from_c_idx == c_idx) {
         current_start++;
       }
     }
     CHECK_EQ_S(current_start, full_edges.size());
-    edges_start_.push_back(full_edges.size());
+    edges_start_.push_back(full_edges.size());  // Sentinel.
 
     edges_.reserve(full_edges.size());
     for (const FullEdge& e : full_edges) {
       // LOG_S(INFO) << absl::StrFormat("Cluster:%u pos:%u from:%u to:%u w:%d",
       //                                cluster.cluster_id, edges_.size(),
-      //                                e.from_idx, e.to_idx,
+      //                                e.from_c_idx, e.to_c_idx,
       //                                e.weight);
-      edges_.push_back({e.to_idx, e.weight});
+      edges_.push_back({e.to_c_idx, e.weight, e.restricted});
     }
     CHECK_EQ_S(num_nodes_ + 1, edges_start_.size());
   }
 
   // Number of nodes in the graph.
-  // The border nodes of the cluster have ids 0..cluster.border_nodes.size()-1.
+  // The border nodes of the cluster are located at the beginning and have ids
+  // 0..cluster.border_nodes.size()-1.
   const uint32_t num_nodes_;
   // Start position of the edges of edge node. Has num_nodes_+1 elements, the
   // last element is a sentinel. The edges of node i are in the range
@@ -117,6 +126,6 @@ class CompactDirectedGraph {
 
 inline bool operator<(const CompactDirectedGraph::FullEdge& a,
                       const CompactDirectedGraph::FullEdge& b) {
-  return std::tie(a.from_idx, a.to_idx, a.weight) <
-         std::tie(b.from_idx, b.to_idx, b.weight);
+  return std::tie(a.from_c_idx, a.to_c_idx, a.restricted, a.weight) <
+         std::tie(b.from_c_idx, b.to_c_idx, b.restricted, b.weight);
 }
