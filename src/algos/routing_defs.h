@@ -1,7 +1,7 @@
 #pragma once
 
 #include "absl/container/flat_hash_set.h"
-#include "algos/destination_edges.h"
+#include "algos/restricted_access_edges.h"
 #include "algos/tarjan.h"
 #include "base/util.h"
 #include "geometry/geometry.h"
@@ -29,7 +29,7 @@ struct RoutingOptions {
   // direction (from dead-end over a bridge) is always allowed. This way, the
   // start node can be in a dead end.
   bool avoid_dead_end = true;
-  bool avoid_restricted_edges = false;
+  bool avoid_restricted_access_edges = false;
   bool restrict_to_cluster = false;
   // Search the shortest way forward (false) or backward (true) mode.
   bool backward_search = false;
@@ -79,9 +79,9 @@ struct RoutingOptions {
  private:
 };
 
-// Helper data for routers that want to protect a restricted area
+// Helper data for routers that want to protect a restricted-access area
 // ("access=destination" etc.) from being used wrongly during routing.
-struct DestinationArea {
+struct RestrictedAccessArea {
   bool active = false;
   // This is true iff both start and target node are in a non-empty destination
   // area and the two areas are the same. In this case, a special handling for
@@ -92,11 +92,11 @@ struct DestinationArea {
 
   void InitialiseTransitionNodes(const Graph& g, uint32_t start_idx,
                                  uint32_t target_idx) {
-    transition_nodes = GetDestinationTransitionNodes(g, target_idx);
+    transition_nodes = GetRestrictedAccessTransitionNodes(g, target_idx);
     active = transition_nodes.size() > 0;
     start_equal_target = false;
     if (active) {
-      auto start_trans = GetDestinationTransitionNodes(g, start_idx);
+      auto start_trans = GetRestrictedAccessTransitionNodes(g, start_idx);
       start_equal_target = (start_trans.size() == transition_nodes.size() &&
                             transition_nodes.contains(*start_trans.begin()));
     }
@@ -133,7 +133,7 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
     return true;
   }
 
-  if (opt.avoid_restricted_edges && opt.vt == VH_MOTOR_VEHICLE &&
+  if (opt.avoid_restricted_access_edges && opt.vt == VH_MOTOR_VEHICLE &&
       edge.car_label != GEdge::LABEL_FREE) {
     return true;
   }

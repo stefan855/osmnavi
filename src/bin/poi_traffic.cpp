@@ -1,9 +1,7 @@
 #include <osmpbf/osmpbf.h>
 
-#include <algorithm>
 #include <filesystem>
 #include <map>
-#include <random>
 
 #include "absl/strings/str_format.h"
 #include "algos/compact_dijkstra.h"
@@ -20,19 +18,19 @@
 namespace {
 // For each POI, find the closest node in the road network.
 void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
-                      pois::CollectedData* data) {
+                      std::vector<pois::POI>* pois) {
   FUNC_TIMER();
   const size_t StepSize = check_slow ? 500 : 5000;
   const auto idx = SortNodeIndexesByLon(g);
   ThreadPool pool;
-  for (size_t start = 0; start < data->pois.size(); start += StepSize) {
-    size_t len = std::min(StepSize, data->pois.size() - start);
-    pool.AddWork([&g, &idx, check_slow, data, start, len](int thread_idx) {
+  for (size_t start = 0; start < pois->size(); start += StepSize) {
+    size_t len = std::min(StepSize, pois->size() - start);
+    pool.AddWork([&g, &idx, check_slow, pois, start, len](int thread_idx) {
       LOG_S(INFO) << absl::StrFormat(
           "Locate navigation nodes for POIs [%u..%u) of total %u", start,
-          start + len, data->pois.size());
+          start + len, pois->size());
       for (size_t i = start; i < start + len; ++i) {
-        pois::POI& poi = data->pois.at(i);
+        pois::POI& poi = pois->at(i);
         auto res = FindClosestNodeFast(g, idx, poi.lat, poi.lon);
         poi.routing_node_idx = res.node_pos;
         poi.routing_node_dist = res.dist;
@@ -225,7 +223,7 @@ std::vector<int64_t> SumUpEdgeTraffic(
 std::vector<int64_t> RunCompactGraphRandomTraffic(
     const Graph& g, const CompactDirectedGraph& cg,
     const absl::flat_hash_map<uint32_t, uint32_t>& compact_nodemap,
-    const pois::CollectedData& data, int n_threads, bool use_edge_dijkstra) {
+    const std::vector<pois::POI>& pois, int n_threads, bool use_edge_dijkstra) {
   // n_threads = 1;
   ThreadPool pool;
   // Contains for each thread a vector with cg.edges().size() traffic counts,
@@ -235,16 +233,16 @@ std::vector<int64_t> RunCompactGraphRandomTraffic(
     edge_traffic.assign(cg.edges().size(), 0);
   }
   uint32_t count = 0;
-  for (size_t i = 0; i < data.pois.size(); ++i) {
-    const pois::POI& p = data.pois.at(i);
+  for (size_t i = 0; i < pois.size(); ++i) {
+    const pois::POI& p = pois.at(i);
     if (p.routing_node_dist < 10000) {  // < 100m.
       const auto iter = compact_nodemap.find(p.routing_node_idx);
       if (iter == compact_nodemap.end()) continue;
       count++;
 
       pool.AddWork([&g, &cg, poi_compact_idx = iter->second, i,
-                    total = data.pois.size(),
-                    &threaded_edge_traffic, use_edge_dijkstra](int thread_idx) {
+                    total = pois.size(), &threaded_edge_traffic,
+                    use_edge_dijkstra](int thread_idx) {
         LOG_S(INFO) << absl::StrFormat(
             "SingleSource%sDijkstra for POI %u (%u total)",
             use_edge_dijkstra ? "Edge" : "", i, total);
@@ -263,13 +261,13 @@ std::vector<int64_t> RunCompactGraphRandomTraffic(
 
   LOG_S(INFO) << absl::StrFormat(
       "Executed SingleSourceDijkstra for %u of total %u POIS", count,
-      data.pois.size());
+      pois.size());
 
   return SumUpEdgeTraffic(threaded_edge_traffic);
 }
 
 void CollectRandomTraffic(const Graph& g, int n_threads,
-                          const pois::CollectedData& data,
+                          const std::vector<pois::POI>& pois,
                           bool use_edge_dijkstra,
                           std::string_view export_file) {
   FUNC_TIMER();
@@ -300,7 +298,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   cg.LogStats();
 
   const std::vector<int64_t> edge_traffic = RunCompactGraphRandomTraffic(
-      g, cg, compact_nodemap, data, n_threads, use_edge_dijkstra);
+      g, cg, compact_nodemap, pois, n_threads, use_edge_dijkstra);
 
   WriteCSV(g, cg, graph_node_refs, edge_traffic, export_file);
 }
@@ -339,7 +337,7 @@ int main(int argc, char* argv[]) {
       });
 
   const std::string pbf = argli.GetString("pbf");
-  const int64_t max_pois = argli.GetInt("max_pois");
+  const uint64_t max_pois = argli.GetInt("max_pois");
   const int n_threads = argli.GetInt("n_threads");
   const bool use_edge_dijkstra = argli.GetBool("use_edge_dijkstra");
   const bool check_slow = argli.GetBool("check_slow");
@@ -347,19 +345,11 @@ int main(int argc, char* argv[]) {
   CHECK_GT_S(max_pois, 0);
 
   // Read POIs.
-  pois::CollectedData poi_data;
-  pois::ReadPBF(pbf, n_threads, &poi_data);
-
-  int64_t pois_size = poi_data.pois.size();
-  if (max_pois < pois_size) {
-    // Pseudo random number generator with a constant seed, to be reproducible.
-    std::mt19937 myrandom(1);
-    // Shuffle the POIs so we can run over a subset of size max_pois without
-    // introducing a bias.
-    LOG_S(INFO) << "Randomizing+shrinking " << pois_size << " POIs to "
-                << max_pois;
-    std::shuffle(poi_data.pois.begin(), poi_data.pois.end(), myrandom);
-    poi_data.pois.resize(max_pois);
+  std::vector<pois::POI> pois = pois::ReadPBF(pbf, n_threads);
+  const size_t orig_poi_size = pois.size();
+  LOG_S(INFO) << absl::StrFormat("Use %u of %u pois", max_pois, pois.size());
+  if (max_pois < pois.size()) {
+    pois.resize(max_pois);
   }
 
   // Read Road Network.
@@ -367,13 +357,14 @@ int main(int argc, char* argv[]) {
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
 
-  MatchPOIsToRoads(g, n_threads, check_slow, &poi_data);
+  MatchPOIsToRoads(g, n_threads, check_slow, &pois);
 
   // Execute random queries and collect traffic.
-  CollectRandomTraffic(g, n_threads, poi_data, use_edge_dijkstra, export_file);
+  CollectRandomTraffic(g, n_threads, pois, use_edge_dijkstra, export_file);
 
   LOG_S(INFO) << absl::StrFormat("Collected traffic for %llu of %lld POIs",
-                                 std::min(max_pois, pois_size), pois_size);
+                                 std::min(max_pois, orig_poi_size),
+                                 orig_poi_size);
   LOG_S(INFO) << "Finished.";
   return 0;
 }

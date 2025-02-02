@@ -78,13 +78,14 @@ class EdgeRouter {
                    .metric = metric,
                    .target_lat = g_.nodes.at(target_idx).lat,
                    .target_lon = g_.nodes.at(target_idx).lon};
-    ctx.target_restricted.InitialiseTransitionNodes(g_, start_idx, target_idx);
-    if (ctx.target_restricted.transition_nodes.contains(start_idx)) {
+    ctx.target_restricted_access.InitialiseTransitionNodes(g_, start_idx,
+                                                           target_idx);
+    if (ctx.target_restricted_access.transition_nodes.contains(start_idx)) {
       // Special case, start and target area are the same.
     }
 
     if (verbosity_ > 0) {
-      const auto& tr = ctx.target_restricted;
+      const auto& tr = ctx.target_restricted_access;
       LOG_S(INFO) << absl::StrFormat(
           "Restricted target area: active:%d trans-nodes:%d rect min:(%d,%d) "
           "max:(%d,%d)",
@@ -182,7 +183,7 @@ class EdgeRouter {
     const RoutingMetric& metric;
     int32_t target_lat;
     int32_t target_lon;
-    DestinationArea target_restricted;
+    RestrictedAccessArea target_restricted_access;
   };
 
   //
@@ -467,7 +468,7 @@ class EdgeRouter {
                            const GEdge& curr_ge, bool* curr_in_target_area) {
     *curr_in_target_area = prev.in_target_area;
     const bool curr_restricted = curr_ge.car_label != GEdge::LABEL_FREE;
-    const DestinationArea& d_area = ctx.target_restricted;
+    const RestrictedAccessArea& d_area = ctx.target_restricted_access;
 
     if (!d_area.start_equal_target) {
       // Normal case, the start and target areas *not* the same.

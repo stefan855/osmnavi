@@ -2,6 +2,8 @@
 
 #include <map>
 #include <vector>
+#include <random>
+#include <algorithm>
 
 #include "base/util.h"
 #include "graph/graph_def.h"
@@ -144,19 +146,33 @@ void ComputeAverages(CollectedData* data) {
 }
 }  // namespace
 
-void ReadPBF(const std::string& filename, int n_threads,
-             pois::CollectedData* data) {
+std::vector<POI> ReadPBF(const std::string& filename, int n_threads) {
+  pois::CollectedData data;
+
   OsmPbfReader reader(filename, n_threads);
   reader.ReadFileStructure();
 
   reader.ReadWays(
-      [data](const OSMTagHelper& tagh, const OSMPBF::Way& way,
-             std::mutex& mut) { pois::ConsumeWayPOI(tagh, way, mut, data); });
+      [&data](const OSMTagHelper& tagh, const OSMPBF::Way& way,
+              std::mutex& mut) { pois::ConsumeWayPOI(tagh, way, mut, &data); });
 
-  reader.ReadNodes(
-      [data](const OSMTagHelper& tagh, const OsmPbfReader::NodeWithTags& node,
-             std::mutex& mut) { pois::ConsumeNodePOI(tagh, node, mut, data); });
-  ComputeAverages(data);
+  reader.ReadNodes([&data](const OSMTagHelper& tagh,
+                           const OsmPbfReader::NodeWithTags& node,
+                           std::mutex& mut) {
+    pois::ConsumeNodePOI(tagh, node, mut, &data);
+  });
+  ComputeAverages(&data);
+
+  // Now sort and then shuffle the pois, to get a stable, randomized list.
+  std::sort(data.pois.begin(), data.pois.end(),
+            [](const auto& a, const auto& b) {
+              if (a.id == b.id) return a.obj_type < b.obj_type;
+              return a.id < b.id;
+            });
+  // Pseudo random number generator with a constant seed, to be reproducible.
+  std::mt19937 myrandom(1);
+  std::shuffle(data.pois.begin(), data.pois.end(), myrandom);
+  return data.pois;
 }
 
 }  // namespace pois

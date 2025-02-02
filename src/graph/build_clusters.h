@@ -339,7 +339,7 @@ inline void ComputeShortestClusterPaths(const Graph& g,
   compact_dijkstra::CollectEdgesForCompactGraph(
       g, metric,
       {.vt = vt,
-       .avoid_restricted_edges = true,
+       .avoid_restricted_access_edges = true,
        .restrict_to_cluster = true,
        .restrict_cluster_id = cluster->cluster_id},
       cluster->border_nodes,

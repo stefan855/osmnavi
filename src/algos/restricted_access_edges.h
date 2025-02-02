@@ -1,12 +1,12 @@
 #pragma once
 
 /*
- * We want to label the areas of the road network that have destination or
+ * We want to label the areas of the road network that have destination-only or
  * otherwise restricted access. When these areas are properly labeled, then we
  * can use this during shortest route search to disallow traveling restricted
  * edges except for the start and the end of the route. We also make sure that
- * all destination areas end up in the same cluster during clustering, so we
- * never need to handle restricted edges when travelling across clusters.
+ * all restricted access areas end up in the same cluster during clustering, so
+ * we never need to handle restricted edges when travelling across clusters.
  *
  * Problems to solve:
  * 1) Nodes can't be labeled 'restricted' or 'free', but edges can.
@@ -35,7 +35,8 @@
  * small, contains only service-type roads and connects to restricted edges,
  * then relabel it as LABEL_RESTRICTED_SECONDARY, otherwise as LABEL_FREE. In a
  * few cases the subnetwork looks strange, e.g. it is small and contains some
- * non-service type roads. In this case the edge flag car_label_strange is set.
+ * non-service type roads. In this case the edge flag car_label_strange is set
+ * in addition to labelling it also as LABEL_RESTRICTED_SECONDARY.
  */
 
 #include <queue>
@@ -96,44 +97,47 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
 }
 }  // namespace
 
+// Labels all car edges in the graph that have GEdge::LABEL_UNSET, i.e. all
+// edges that were not labelled ACC_CUSTOMERS, ACC_DELIVERY, ACC_DESTINATION
+// during creation.
 inline void LabelAllCarEdges(Graph* g) {
-  constexpr bool strange = true;
-  constexpr bool no_strange = false;
+  constexpr bool strange_no = false;
+  constexpr bool strange_yes = true;
   FUNC_TIMER();
   for (uint32_t i = 0; i < g->nodes.size(); ++i) {
     // Label all edges reachable through unset edges as temporary. Then decide
     // what to do with these edges.
-    const auto res = LabelCarEdges(i, GEdge::LABEL_UNSET,
-                                   GEdge::LABEL_TEMPORARY, no_strange, g);
+    const LabelEdgesResult res = LabelCarEdges(
+        i, GEdge::LABEL_UNSET, GEdge::LABEL_TEMPORARY, strange_no, g);
 
     if (res.count == 0) {
-      // Start node is already done or completely restricted, looks good.
+      // Start node is already done or completely restricted, nothing to do.
     } else if (res.count < 500 && res.found_restricted &&
                res.only_residential_street_types) {
       LOG_S(INFO) << "Mark secondary:" << res.count
                   << " node_id:" << g->nodes.at(i).node_id;
       const auto res2 =
           LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
-                        GEdge::LABEL_RESTRICTED_SECONDARY, no_strange, g);
+                        GEdge::LABEL_RESTRICTED_SECONDARY, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else if (!res.found_restricted) {
-      // This is a network without any restricted roads, looks fine.
+      // This is a network without any restricted roads, label as free.
       const auto res2 = LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
-                                      GEdge::LABEL_FREE, no_strange, g);
+                                      GEdge::LABEL_FREE, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else if (res.count > 10000) {
       LOG_S(INFO) << "Mark large:" << res.count
                   << " node_id:" << g->nodes.at(i).node_id;
-      // This is a large network, looks fine.
+      // This is a large network, label as free.
       const auto res2 = LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
-                                      GEdge::LABEL_FREE, no_strange, g);
+                                      GEdge::LABEL_FREE, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else if (g->nodes.at(i).large_component == 0) {
       LOG_S(INFO) << "Mark small comp:" << res.count
                   << " node_id:" << g->nodes.at(i).node_id;
-      // Small component, and it didn't fit 'secondary', mark as free.
+      // Small component, and it didn't fit 'secondary', label as free.
       const auto res2 = LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
-                                      GEdge::LABEL_FREE, no_strange, g);
+                                      GEdge::LABEL_FREE, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else {
       CHECK_S(res.found_restricted);
@@ -144,19 +148,21 @@ inline void LabelAllCarEdges(Graph* g) {
                   << " only residential:" << res.only_residential_street_types
                   << " large_comp:" << g->nodes.at(i).large_component;
 
-      // Something is not understood right now.
+      // Something is not well understood right now. Label as restricted but
+      // also mark as strange for debugging.
       const auto res2 =
           LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
-                        GEdge::LABEL_RESTRICTED_SECONDARY, strange, g);
+                        GEdge::LABEL_RESTRICTED_SECONDARY, strange_yes, g);
       CHECK_EQ_S(res.count, res2.count);
     }
   }
 }
 
-// Return all nodes in the destination area at 'node_idx' that are both
+// Return all nodes in the restricted access area at 'node_idx' that are both
 // connected to free and also to restricted edges. These are the nodes where a
-// transition from free to the destination area (and vice versa) can happen.
-inline absl::flat_hash_set<uint32_t> GetDestinationTransitionNodes(
+// transition from free to the restricted-access area (and vice versa) can
+// happen.
+inline absl::flat_hash_set<uint32_t> GetRestrictedAccessTransitionNodes(
     const Graph& g, std::uint32_t node_idx) {
   absl::flat_hash_set<uint32_t> done;
   absl::flat_hash_set<uint32_t> transition_nodes;

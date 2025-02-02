@@ -557,10 +557,14 @@ void CompareShortestPaths(const Graph& g) {
 
     CHECK_EQ_S(w1.size(), w2.size());
     for (uint32_t i = 0; i < cg.num_nodes(); ++i) {
-      LOG_S(INFO) << absl::StrFormat("Route %c to %c", 65+start, 65+i);
+      LOG_S(INFO) << absl::StrFormat("Route %c to %c", 65 + start, 65 + i);
       CHECK_EQ_S(w1.at(i), w2.at(i)) << i;
       CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "")) << i;
       CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "hybrid")) << i;
+
+      // TODO: There are mismatches caused by edge router correctly handling
+      // restricted access areas.
+      //
       // CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "edge")) << i;
       // CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "edge,hybrid")) << i;
     }
