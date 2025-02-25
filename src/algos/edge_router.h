@@ -78,6 +78,7 @@ class EdgeRouter {
                    .metric = metric,
                    .target_lat = g_.nodes.at(target_idx).lat,
                    .target_lon = g_.nodes.at(target_idx).lon};
+#if 0
     ctx.target_restricted_access.InitialiseTransitionNodes(g_, start_idx,
                                                            target_idx);
     if (ctx.target_restricted_access.transition_nodes.contains(start_idx)) {
@@ -93,6 +94,7 @@ class EdgeRouter {
           tr.bounding_rect.minp.y, tr.bounding_rect.maxp.x,
           tr.bounding_rect.maxp.y);
     }
+#endif
 
     // Add all outgoing edges of the start node to the queue.
     ExpandNeighboursForward(ctx, {.other_idx = start_idx,
@@ -183,7 +185,7 @@ class EdgeRouter {
     const RoutingMetric& metric;
     int32_t target_lat;
     int32_t target_lon;
-    RestrictedAccessArea target_restricted_access;
+    // RestrictedAccessArea target_restricted_access;
   };
 
   //
@@ -247,7 +249,7 @@ class EdgeRouter {
   std::uint32_t FindOrAddVisitedEdge(GEdgeKey key, bool use_astar_heuristic) {
     // Prevent doing two lookups by following
     // https://stackoverflow.com/questions/1409454.
-    const auto iter = edgekey_to_vedge_idx_.insert(
+    const auto iter = edgekey_to_v_idx_.insert(
         EdgeIdMap::value_type(key.HashKey(g_), visited_edges_.size()));
     if (iter.second) {
       // Key didn't exist and was inserted, so add it to visited_edges_ too.
@@ -297,10 +299,25 @@ class EdgeRouter {
         prev.v_idx == INFU32 ? INFU32
                              : visited_edges_.at(prev.v_idx).key.GetFromIdx();
 
+#if 0
+    if (expansion_node.simple_turn_restriction_via_node) {
+    }
+#endif
+
     for (const GEdge& curr_ge : gnode_forward_edges(g_, prev.other_idx)) {
       if (curr_ge.other_node_idx == uturn_node_idx) {
+        // TODO: allow u-turn iff this is the only way out, the node has only
+        // this one outgoing edge.
         continue;
       }
+
+#if 0
+      if (curr_ge.simple_turn_restriction_exit) {
+        // This edge is an exit edge in some simple turn restriction(s). 
+        // Find the restrictions and check if we're allowed to travel the edge.
+
+      }
+#endif
 
       const WaySharedAttrs& wsa = GetWSA(g_, curr_ge.way_idx);
       if (RoutingRejectEdge(g_, ctx.opt, expansion_node, prev.other_idx,
@@ -308,15 +325,25 @@ class EdgeRouter {
         continue;
       }
 
-      bool curr_in_target_area = prev.in_target_area;
+#if 0
+      bool next_in_target_area;
+      if (!CheckRestrictedAccessTransition(ctx, prev, curr_ge,
+                                           &next_in_target_area)) {
+        continue;
+      }
+#endif
+#if 1
+      bool next_in_target_area = prev.in_target_area;
       if (prev.restricted != (curr_ge.car_label != GEdge::LABEL_FREE)) {
-        if (!CheckAreaTransition(ctx, prev, curr_ge, &curr_in_target_area)) {
+        if (!CheckRestrictedAccessTransition(ctx, prev, curr_ge,
+                                             &next_in_target_area)) {
           continue;
         }
       }
+#endif
 
       std::uint32_t v_idx = FindOrAddVisitedEdge(
-          GEdgeKey::Create(g_, prev.other_idx, curr_ge, curr_in_target_area),
+          GEdgeKey::Create(g_, prev.other_idx, curr_ge, next_in_target_area),
           ctx.opt.use_astar_heuristic);
       VisitedEdge& ve = visited_edges_.at(v_idx);
       if (verbosity_ >= 3) {
@@ -335,7 +362,7 @@ class EdgeRouter {
         ve.prev_v_idx = prev.v_idx;
         ve.restricted = (curr_ge.car_label != GEdge::LABEL_FREE);
 
-        // Compute heuristic distance from new node to target.
+        // In A* mode, compute heuristic distance from new node to target.
         if (ve.heuristic_to_target == INFU30) {
           ve.heuristic_to_target = ComputeHeuristicToTarget(
               g_.nodes.at(curr_ge.other_node_idx), ctx);
@@ -456,17 +483,33 @@ class EdgeRouter {
   }
 #endif
 
-  // Checks if a transition of area is happening, such as when driving into
-  // roads with access=destination. Allowed transitions are
+  // Checks if a transition of restricted access is happening, such as when
+  // driving into roads with access=destination. Allowed transitions are
   // "start-restricted"->"free" and "free"->"destination restricted". Returns
   // false if a transition is happening that is not allowed, and true in all
   // other cases (i.e. no transition and allowed transitions). Sets
-  // curr_in_target_area to true if the corresponding bit in the edge key should
-  // be set. This only happens in the (rare) special case when
-  // "start-restricted" and "target-restricted" are identical.
-  bool CheckAreaTransition(const Context& ctx, const PrevEdgeData& prev,
-                           const GEdge& curr_ge, bool* curr_in_target_area) {
-    *curr_in_target_area = prev.in_target_area;
+  // next_in_target_area to true if the corresponding bit in the edge key should
+  // be set. This happens when entering a restricted-access area from free.
+  inline bool CheckRestrictedAccessTransition(const Context& ctx,
+                                              const PrevEdgeData& prev,
+                                              const GEdge& curr_ge,
+                                              bool* next_in_target_area) {
+    *next_in_target_area = prev.in_target_area;
+    if (curr_ge.car_label == GEdge::LABEL_FREE) {
+      // New edge is free, which is ok if we are not in target area.
+      return !prev.in_target_area;
+    }
+    // curr edge is restricted.
+    if (!prev.restricted) {
+      // We're entering restricted.
+      CHECK_S(!prev.in_target_area);  // We can't be in restricted because we're
+                                      // entering it.
+      *next_in_target_area = true;
+    }
+    return true;
+  }
+
+#if 0
     const bool curr_restricted = curr_ge.car_label != GEdge::LABEL_FREE;
     const RestrictedAccessArea& d_area = ctx.target_restricted_access;
 
@@ -522,11 +565,11 @@ class EdgeRouter {
       }
     }
     return true;
-  }
+#endif
 
   void Clear() {
     visited_edges_.clear();
-    edgekey_to_vedge_idx_.clear();
+    edgekey_to_v_idx_.clear();
     CHECK_S(pq_.empty());  // No clear() method, should be empty anyways.
     target_visited_index_ = INFU32;
   }
@@ -535,7 +578,7 @@ class EdgeRouter {
   std::vector<VisitedEdge> visited_edges_;
 
   typedef absl::flat_hash_map<uint64_t, uint32_t> EdgeIdMap;
-  EdgeIdMap edgekey_to_vedge_idx_;
+  EdgeIdMap edgekey_to_v_idx_;
 
   std::priority_queue<QueuedEdge, std::vector<QueuedEdge>, decltype(&MetricCmp)>
       pq_;

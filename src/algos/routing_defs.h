@@ -79,6 +79,7 @@ struct RoutingOptions {
  private:
 };
 
+#if 0
 // Helper data for routers that want to protect a restricted-access area
 // ("access=destination" etc.) from being used wrongly during routing.
 struct RestrictedAccessArea {
@@ -111,6 +112,7 @@ struct RestrictedAccessArea {
     }
   }
 };
+#endif
 
 struct RoutingResult {
   bool found = false;

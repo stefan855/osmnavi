@@ -3,6 +3,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "base/constants.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
@@ -10,29 +11,40 @@
 #include "base/varbyte.h"
 #include "graph/routing_attrs.h"
 
-enum class TurnMode : std::uint8_t {
-  OnlyThis = 0,
-  NotThis = 1,
+struct CondensedTurnRestrictionKey {
+  uint32_t from_node_idx;
+  uint32_t from_way_idx;
+  uint32_t via_node_idx;
+  bool operator==(const CondensedTurnRestrictionKey& other) const {
+    return from_node_idx == other.from_node_idx &&
+           from_way_idx == other.from_way_idx &&
+           via_node_idx == other.via_node_idx;
+  }
 };
 
-enum class TurnDirection : std::uint8_t {
-  LeftTurn = 0,
-  RightTurn = 1,
-  StraightOn = 2,
-  UTurn = 3,
+namespace std {
+template <>
+struct hash<CondensedTurnRestrictionKey> {
+  size_t operator()(const CondensedTurnRestrictionKey& key) const {
+    // Use already defined std::string_view hash function.
+    // Note: this only works as long as there are no filler bytes in the struct!
+    return std::hash<std::string_view>{}(
+        std::string_view((char*)&key, sizeof(key)));
+  }
+};
+}  // namespace std
+
+struct CondensedTurnRestrictionData {
+  // 32 bits that select the allowed outgoing edges at the via node.
+  uint32_t allowed_edge_bits;
+  // True if a u-turn at via node is allowed.
+  uint32_t uturn_allowed : 1;
+  int64_t osm_relation_id;
 };
 
-enum class Surface : std::uint8_t { Paved = 0, Max };
-
-struct TurnRestriction {
-  std::int64_t relation_id;
-  std::int64_t from_way_id;
-  std::int64_t to_way_id;
-  std::vector<std::int64_t> via_ids;
-  bool via_is_node : 1;  // via is a node (true) or a way (false).
-  TurnMode mode : 1;
-  TurnDirection direction : 2;
-};
+using CondensedTurnRestrictionMap =
+    absl::flat_hash_map<CondensedTurnRestrictionKey,
+                        CondensedTurnRestrictionData>;
 
 // WaySharedAttrs (=WSA) contains many of the way attributes in a
 // data structure that is shared between ways. The shared data is stored in
@@ -123,6 +135,9 @@ struct GNode {
   // Country associated with lat/lon.
   std::uint16_t ncc : 10 = INVALID_NCC;
 
+  // True iff the node is a via node in a simple turn restriction.
+  std::uint32_t simple_turn_restriction_via_node : 1;
+
   std::int32_t lat = 0;
   std::int32_t lon = 0;
 };
@@ -182,6 +197,8 @@ struct GEdge {
   // restricted-secondary road that is a highway.
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
   std::uint64_t car_label_strange : 1;
+  // True iff the edge is an exit edge in a simple turn restriction.
+  std::uint64_t simple_turn_restriction_exit : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -232,7 +249,9 @@ struct Graph {
   std::vector<GEdge> edges;
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
+  CondensedTurnRestrictionMap condensed_turn_restriction_map;
   std::vector<GCluster> clusters;
+
   // SimpleMemPool aligned_pool_;
   SimpleMemPool unaligned_pool_;
 
@@ -294,6 +313,13 @@ struct Graph {
     return node_idx;
   }
 };
+
+inline int64_t GetGNodeIdSafe(const Graph& g, uint32_t node_idx) {
+  if (node_idx < g.nodes.size()) {
+    return g.nodes.at(node_idx).node_id;
+  }
+  return -1;
+}
 
 inline size_t gnode_edge_stop(const Graph& g, uint32_t node_idx) {
   return node_idx + 1 < g.nodes.size()

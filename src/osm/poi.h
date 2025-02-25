@@ -1,9 +1,9 @@
 #pragma once
 
-#include <map>
-#include <vector>
-#include <random>
 #include <algorithm>
+#include <map>
+#include <random>
+#include <vector>
 
 #include "base/util.h"
 #include "graph/graph_def.h"
@@ -153,12 +153,12 @@ std::vector<POI> ReadPBF(const std::string& filename, int n_threads) {
   reader.ReadFileStructure();
 
   reader.ReadWays(
-      [&data](const OSMTagHelper& tagh, const OSMPBF::Way& way,
+      [&data](const OSMTagHelper& tagh, const OSMPBF::Way& way, int thread_idx,
               std::mutex& mut) { pois::ConsumeWayPOI(tagh, way, mut, &data); });
 
   reader.ReadNodes([&data](const OSMTagHelper& tagh,
                            const OsmPbfReader::NodeWithTags& node,
-                           std::mutex& mut) {
+                           int thread_idx, std::mutex& mut) {
     pois::ConsumeNodePOI(tagh, node, mut, &data);
   });
   ComputeAverages(&data);

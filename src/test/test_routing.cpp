@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "test/test_utils.h"
 #include "algos/compact_dijkstra.h"
 #include "algos/edge_key.h"
 #include "algos/edge_router.h"
@@ -19,10 +20,11 @@ CompactDirectedGraph CreateCompactGraph(const Graph& g) {
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
   for (uint32_t from_idx = 0; from_idx < g.nodes.size(); ++from_idx) {
     for (const GEdge& e : gnode_forward_edges(g, from_idx)) {
-      full_edges.push_back({.from_c_idx = from_idx,
-                            .to_c_idx = e.other_node_idx,
-                            .weight = (uint32_t)e.distance_cm,
-                            .restricted = (e.car_label != GEdge::LABEL_FREE)});
+      full_edges.push_back(
+          {.from_c_idx = from_idx,
+           .to_c_idx = e.other_node_idx,
+           .weight = (uint32_t)e.distance_cm,
+           .restricted_access = (e.car_label != GEdge::LABEL_FREE)});
     }
   }
   compact_dijkstra::SortAndCleanupEdges(&full_edges);
@@ -41,20 +43,6 @@ uint32_t ExecuteSingleSourceDijkstra(const CompactDirectedGraph& cg,
                                  start_c_idx, target_c_idx,
                                  vis.at(target_c_idx).min_weight);
   return vis.at(target_c_idx).min_weight;
-}
-
-uint32_t ExecuteSingleSourceEdgeDijkstra(const CompactDirectedGraph& cg,
-                                         uint32_t start_c_idx,
-                                         uint32_t target_c_idx) {
-  std::vector<compact_dijkstra::VisitedEdge> vis =
-      compact_dijkstra::SingleSourceEdgeDijkstra(cg, start_c_idx);
-  /*
-  LOG_S(INFO) << absl::StrFormat("CompactGraph route from %u to %u metric %u",
-                                 start_c_idx, target_c_idx,
-                                 vis.at(target_c_idx).min_weight);
-  return vis.at(target_c_idx).min_weight;
-  */
-  return 0;
 }
 
 void TestGEdgeKey() {
@@ -108,6 +96,7 @@ void TestGEdgeKey() {
   CHECK_S(a.HashKey(g) == c.HashKey(g));
 }
 
+#if 0
 void AddCluster(Graph& g, uint32_t cluster_id, GCluster c) {
   CHECK_EQ_S(cluster_id, g.clusters.size());
   g.clusters.push_back(c);
@@ -166,6 +155,84 @@ void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     curr_pos += count;
   }
 }
+#endif
+
+/*
+ * A typical graph with restricted areas. The restricted edge [a][b] should be
+ * bypassed through [e] because this it is shorter.
+ * This should be handled correctly by all routers, because the shortest way
+ * when ignoring restricted-access is the correct way also when considering
+ * restricted-access.
+ *
+ *          [e]                [f]
+ *         /   \               /  \
+ *        /     \             /    \
+ *       / 1   1 \           / 1  1 \
+ *      /         \         /        \
+ *     [a] ----- [b] ----- [c] ----- [d]
+ *           4r        1         1r
+ */
+Graph CreateGraphWithRestrictedSimple(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node names.
+  Graph g;
+  const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
+  g.way_shared_attrs.push_back({.ra = ra_entry});
+  g.ways.push_back({.highway_label = HW_TERTIARY,
+                    .uniform_country = 1,
+                    .ncc = NCC_CH,
+                    .wsa_id = 0});
+  AddNode(g, A);
+  AddNode(g, B);
+  AddNode(g, C);
+  AddNode(g, D);
+  AddNode(g, E);
+  AddNode(g, F);
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 4000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
+  AddEdge(A, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
+  AddEdge(C, F, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(F, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+  return g;
+}
+
+void TestRouteRestrictedSimple() {
+  enum : uint32_t { A = 0, B, C, D, E, F, G, H, X };  // Node names.
+  const Graph g = CreateGraphWithRestrictedSimple(/*both_dirs=*/true);
+  {
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 4000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+  }
+  {
+    EdgeRouter router(g, 3);
+    auto res = router.Route(D, A, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 4000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+  }
+  {
+    Router router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 4000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+  }
+  {
+    Router router(g, 3);
+    auto res = router.Route(D, A, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 4000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+  }
+}
 
 /*
  * A graph with restricted areas. Edge labels denote the length, 'r' means that
@@ -176,11 +243,11 @@ void StoreEdges(std::vector<TEdge> edges, Graph* g) {
  *        /     \   /     \
  *       / 1   1 \ / 5   5 \
  *      /         V         \
- *     [a] ----- [b] ----- [c] ----- [d] ----- [e] ----- [f] ----- [x]
+ *     [a] ----- [b] ----- [c] ----- [d] ----- [e] ----- [f] ----- [i]
  *           5r        1r        1         1         1r        1
  */
 Graph CreateGraphWithRestricted(bool both_dirs) {
-  enum : uint32_t { A = 0, B, C, D, E, F, G, H, X };  // Node names.
+  enum : uint32_t { A = 0, B, C, D, E, F, G, H, I };  // Node names.
   Graph g;
   const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
   g.way_shared_attrs.push_back({.ra = ra_entry});
@@ -196,7 +263,7 @@ Graph CreateGraphWithRestricted(bool both_dirs) {
   AddNode(g, F);
   AddNode(g, G);
   AddNode(g, H);
-  AddNode(g, X);
+  AddNode(g, I);
 
   std::vector<TEdge> edges;
   AddEdge(A, G, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
@@ -208,7 +275,7 @@ Graph CreateGraphWithRestricted(bool both_dirs) {
   AddEdge(E, F, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
   AddEdge(G, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
   AddEdge(H, C, 5000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(F, X, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(F, I, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -500,12 +567,6 @@ void TestClusterRouteDoubleEdge() {
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
   }
   {
-    CompactDirectedGraph cg = CreateCompactGraph(g);
-    uint32_t m = ExecuteSingleSourceDijkstra(cg, A, D);
-    CHECK_EQ_S(m, 4000);
-    ExecuteSingleSourceEdgeDijkstra(cg, A, D);
-  }
-  {
     EdgeRouter router(g, 3);
     RoutingOptions opt;
     opt.SetHybridOptions(g, A, D);
@@ -539,10 +600,18 @@ void TestClusterRouteDoubleEdge() {
   }
 }
 
-// Compare different shortest path algorithms against each other, using all
-// the networks defined in this file.
-void CompareShortestPaths(const Graph& g) {
+// Compare different shortest path algorithms against each other.
+void CompareShortestPaths(const Graph& g, bool test_compact_edge) {
   const CompactDirectedGraph cg = CreateCompactGraph(g);
+
+  // The mapping of graph to compact indexes is the identity. So just create
+  // them in a simple loop..
+  absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
+  std::vector<std::uint32_t> compact_to_graph_nodemap;
+  for (uint32_t i = 0; i < cg.num_nodes(); ++i) {
+    graph_to_compact_nodemap[i] = i;
+    compact_to_graph_nodemap.push_back(i);
+  }
 
   for (uint32_t start = 0; start < cg.num_nodes(); ++start) {
     std::vector<compact_dijkstra::VisitedNode> vis_nssd =
@@ -550,48 +619,73 @@ void CompareShortestPaths(const Graph& g) {
     std::vector<uint32_t> w1 =
         compact_dijkstra::GetNodeWeightsFromVisitedNodes(vis_nssd);
 
-    std::vector<compact_dijkstra::VisitedEdge> vis_essd =
-        compact_dijkstra::SingleSourceEdgeDijkstra(cg, start);
+    SingleSourceEdgeDijkstra edge_router;
+    edge_router.Route(
+        cg, start,
+        {.store_spanning_tree_edges = false,
+         .handle_restricted_access = true,
+         /*.restricted_access_nodes = edge_router.ComputeRestrictedAccessNodes(
+             g, graph_to_compact_nodemap, compact_to_graph_nodemap, start)*/});
     std::vector<uint32_t> w2 =
-        compact_dijkstra::GetNodeWeightsFromVisitedEdges(cg, start, vis_essd);
+        edge_router.GetNodeWeightsFromVisitedEdges(cg, start);
 
+    // w1: SingleSourceDijkstra based on nodes, no restricted access handling.
+    // w2: SingleSourceDijkstra based on edges, with restricted access handling.
     CHECK_EQ_S(w1.size(), w2.size());
     for (uint32_t i = 0; i < cg.num_nodes(); ++i) {
-      LOG_S(INFO) << absl::StrFormat("Route %c to %c", 65 + start, 65 + i);
-      CHECK_EQ_S(w1.at(i), w2.at(i)) << i;
-      CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "")) << i;
-      CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "hybrid")) << i;
-
-      // TODO: There are mismatches caused by edge router correctly handling
-      // restricted access areas.
-      //
-      // CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "edge")) << i;
-      // CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "edge,hybrid")) << i;
+      LOG_S(INFO) << absl::StrFormat("Route %c to %c SSD-w1:%u E-SSD:w2:%u",
+                                     65 + start, 65 + i, w1.at(i), w2.at(i));
+      CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, ""));
+      CHECK_EQ_S(w1.at(i), ExecuteRouter(g, start, i, "hybrid"));
+      if (test_compact_edge) {
+        // CompactDijkstra has simplified restricted-access handling, so it may
+        // yield different results.
+        CHECK_EQ_S(w2.at(i), ExecuteRouter(g, start, i, "edge"));
+        CHECK_EQ_S(w2.at(i), ExecuteRouter(g, start, i, "edge,hybrid"));
+      }
     }
   }
 }
 
 void TestCompareShortestPaths() {
   {
+    LOG_S(INFO) << "Test CreateGraphWithRestrictedSimple()";
+    const Graph g = CreateGraphWithRestrictedSimple(/*both_dirs=*/true);
+    CompareShortestPaths(g, /*test_compact_edge=*/true);
+  }
+  {
     LOG_S(INFO) << "Test CreateGraphWithRestricted()";
     const Graph g = CreateGraphWithRestricted(/*both_dirs=*/true);
-    CompareShortestPaths(g);
+    CompareShortestPaths(g, /*test_compact_edge=*/false);
   }
   {
     LOG_S(INFO) << "Test CreateRestrictedGraphHard()";
     const Graph g = CreateRestrictedGraphHard(/*both_dirs=*/true);
-    CompareShortestPaths(g);
+    CompareShortestPaths(g, /*test_compact_edge=*/false);
   }
   {
     LOG_S(INFO) << "Test CreateClusterGraph()";
     const Graph g = CreateClusterGraph(/*both_dirs=*/true);
-    CompareShortestPaths(g);
+    CompareShortestPaths(g, /*test_compact_edge=*/true);
   }
   {
     LOG_S(INFO) << "Test CreateClusterGraphDoubleEdge()";
     const Graph g = CreateClusterGraphDoubleEdge(/*both_dirs=*/true);
-    CompareShortestPaths(g);
+    CompareShortestPaths(g, /*test_compact_edge=*/true);
   }
+}
+
+void TestBitFunctions() {
+  CHECK_EQ_S(sizeof(int), 4);
+  CHECK_EQ_S(sizeof(long), 8);
+  CHECK_EQ_S(sizeof(long long), 8);
+  // __builtin_ctz(0) is undefined.
+  // CHECK_EQ_S(__builtin_ctz(0), 32);
+  CHECK_EQ_S(__builtin_ctz(1u<<0), 0);
+  CHECK_EQ_S(__builtin_ctz(1u<<30), 30);
+  CHECK_EQ_S(__builtin_ctz(1u<<31), 31);
+  CHECK_EQ_S(__builtin_ctzll(1llu<<60), 60);
+  CHECK_EQ_S(__builtin_ctzll(1llu<<63), 63);
 }
 
 int main(int argc, char* argv[]) {
@@ -601,11 +695,13 @@ int main(int argc, char* argv[]) {
   }
 
   TestGEdgeKey();
+  TestRouteRestrictedSimple();
   TestRouteRestricted();
   TestRouteRestrictedHard();
   TestClusterRoute();
   TestClusterRouteDoubleEdge();
   TestCompareShortestPaths();
+  TestBitFunctions();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

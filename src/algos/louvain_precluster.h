@@ -150,8 +150,9 @@ struct NodeLineRemover {
     return true;
   }
 
-  // Collect all line nodes that should be clustered in 'precluster_nodes'.
-  // Cluster_nodes stores the node positions in lg.nodes.
+  // Collect all line nodes that should be clustered and store the corresponding
+  // bit in 'precluster_nodes'. Cluster_nodes stores the node positions in
+  // lg.nodes.
   static void CollectLineNodes(const LouvainGraph& lg,
                                HugeBitset* precluster_nodes) {
     uint32_t count_line_nodes = 0;

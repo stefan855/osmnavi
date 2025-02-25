@@ -58,6 +58,10 @@ add_executable(test_consume_way src/test/test_consume_way.cpp)
 target_include_directories(test_consume_way SYSTEM PRIVATE)
 target_link_libraries(test_consume_way PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::flat_hash_map  absl::str_format loguru_lib absl::time build_graph_lib)
 
+add_executable(test_osm_data src/test/test_osm_data.cpp)
+target_include_directories(test_osm_data SYSTEM PRIVATE)
+target_link_libraries(test_osm_data PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::flat_hash_map  absl::str_format loguru_lib absl::time build_graph_lib)
+
 add_executable(test_louvain src/test/test_louvain.cpp)
 target_include_directories(test_louvain SYSTEM PRIVATE)
 target_link_libraries(test_louvain PRIVATE absl::strings absl::str_format loguru_lib absl::time)

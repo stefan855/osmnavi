@@ -19,8 +19,9 @@
 
 class IdChain {
  public:
-  // Represents a way or a node. For ways, id1 is the first node_id in the way
-  // and id2 is the last node_id in the way, for nodes both ids are identical.
+  // IdPair Represents a way or a node. For ways, node_idx1 is the first node_id
+  // in the way and node_idx2 is the last node_id in the way, for nodes both ids
+  // are identical.
   struct IdPair {
     // 'free' means that an element in a chain can be reversed if needed. Note
     // that the first element in a chain is initially added as 'free'. This is a
@@ -28,25 +29,34 @@ class IdChain {
     // second element. All elements after the first element are added as needed
     // in state 'Normal' or 'Reversed', unless there is an error.
     enum Code { Free, Normal, Reversed, Error };
-    int64_t id1;
-    int64_t id2;
+    // Only set if created from a way.
+    uint32_t way_idx = INFU32;
+    uint32_t node_idx1 = INFU32;
+    uint32_t node_idx2 = INFU32;
     Code code = Free;
+
+    // Set new code. Check fails if the current code is not 'free'. Swaps node
+    // ids if the new code is 'Reversed'.
     void SetCode(Code new_code) {
       CHECK_NE_S(new_code, Free);
       code = new_code;
       if (new_code == Reversed) {
-        std::swap(id1, id2);
+        std::swap(node_idx1, node_idx2);
       }
     }
   };
-  IdChain() : success_(true) {}
+  IdChain(int64_t relation_id) : relation_id_(relation_id), success_(true) {}
 
   // Create an IdPair from a way. Returns true on success, or false if the way
-  // doesn't exist.
-  static bool CreateIdPair(const Graph& g, int64_t way_id, IdPair* pair) {
-    const GWay* way = g.FindWay(way_id);
-    if (way == nullptr) return false;
-    GetFrontAndBackNodeId(*way, &pair->id1, &pair->id2);
+  // wasn't found.
+  static bool CreateIdPairFromWay(const Graph& g, int64_t way_id,
+                                  IdPair* pair) {
+    pair->way_idx = g.FindWayIndex(way_id);
+    // LOG_S(INFO) << "BB0 way_idx:" << pair->way_idx << " way_id:" << way_id;
+    if (pair->way_idx >= g.ways.size()) return false;
+    GetFrontAndBackNodeId(g, g.ways.at(pair->way_idx), &pair->node_idx1,
+                          &pair->node_idx2);
+   //  LOG_S(INFO) << "BB1";
     return true;
   }
 
@@ -57,11 +67,11 @@ class IdChain {
       chain_.push_back(p);  // Leave in state 'Free'.
       return true;
     }
-    IdPair::Code code = TryAddIdPair(chain_.back().id2, p);
+    IdPair::Code code = TryAddIdPair(chain_.back().node_idx2, p);
     if (chain_.back().code == IdPair::Free) {
       chain_.back().SetCode(IdPair::Normal);
       if (code == IdPair::Error) {
-        code = TryAddIdPair(chain_.back().id1, p);
+        code = TryAddIdPair(chain_.back().node_idx1, p);
         if (code != IdPair::Error) {
           chain_.back().SetCode(IdPair::Reversed);
         }
@@ -84,29 +94,37 @@ class IdChain {
     return res;
   }
 
-  const std::vector<IdPair>& get_chain() { return chain_; }
-  const bool success() { return success_; }
+  const std::vector<IdPair>& get_chain() const { return chain_; }
+  int64_t relation_id() const { return relation_id_; }
+  bool success() const { return success_; }
 
  private:
   std::vector<IdPair> chain_;
+  int64_t relation_id_;
   bool success_;
 
-  static void GetFrontAndBackNodeId(const GWay& w, int64_t* front_id,
-                                    int64_t* back_id) {
+  static void GetFrontAndBackNodeId(const Graph& g, const GWay& w,
+                                    uint32_t* front_idx, uint32_t* back_idx) {
     std::vector<uint64_t> ids = Graph::GetGWayNodeIds(w);
     CHECK_GE_S(ids.size(), 2);
-    *front_id = ids.front();
-    *back_id = ids.back();
+    *front_idx = g.FindNodeIndex(ids.front());
+    *back_idx = g.FindNodeIndex(ids.back());
+    CHECK_S(*front_idx < g.nodes.size()) << absl::StrFormat(
+        "Front node %lld of way %lld not found in graph!", ids.front(), w.id);
+    CHECK_S(*back_idx < g.nodes.size()) << absl::StrFormat(
+        "Back node %lld of way %lld not found in graph!", ids.back(), w.id);
   }
 
   // Find out if pair can be chained to predecessor_id.
   // Return IdPair::Normal or IdPair::Reversed if pair can be connected, or
   // IdPair::Error if it can't be connected.
-  static IdPair::Code TryAddIdPair(int64_t predecessor_id, const IdPair& pair) {
+  static IdPair::Code TryAddIdPair(uint32_t predecessor_idx,
+                                   const IdPair& pair) {
+    CHECK_S(predecessor_idx != INFU32);
     CHECK_EQ_S(pair.code, IdPair::Free);
-    if (pair.id1 == predecessor_id) {
+    if (pair.node_idx1 == predecessor_idx) {
       return IdPair::Normal;
-    } else if (pair.id2 == predecessor_id) {
+    } else if (pair.node_idx2 == predecessor_idx) {
       return IdPair::Reversed;
     }
     return IdPair::Error;

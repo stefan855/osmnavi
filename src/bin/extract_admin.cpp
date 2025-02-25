@@ -75,7 +75,7 @@ void WritePolygon(const AdminInfo& info,
 }
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
-                     std::mutex& mut, AdminInfo* admin_info) {
+                     int thread_idx, std::mutex& mut, AdminInfo* admin_info) {
   AdminRelation rel;
   if (ExtractAdminRelation(tagh, osm_rel, &rel)) {
     std::unique_lock<std::mutex> l(mut);
@@ -84,7 +84,7 @@ void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
 }
 
 void ConsumeWay(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                std::mutex& mut, AdminInfo* admin_info) {
+                int thread_idx, std::mutex& mut, AdminInfo* admin_info) {
   if (admin_info->ref_ways.contains(osm_way.id())) {
     std::unique_lock<std::mutex> l(mut);
     WayData& way_data = admin_info->way_map[osm_way.id()];
@@ -99,8 +99,8 @@ void ConsumeWay(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   }
 }
 
-void ConsumeNode(const OsmPbfReader::NodeWithTags& node, std::mutex& mut,
-                 AdminInfo* admin_info) {
+void ConsumeNode(const OsmPbfReader::NodeWithTags& node, int thread_idx,
+                 std::mutex& mut, AdminInfo* admin_info) {
   if (admin_info->ref_nodes.contains(node.id())) {
     std::unique_lock<std::mutex> l(mut);
     admin_info->nodes[node.id()] = {
@@ -114,20 +114,22 @@ void ReadData(const std::string& filename, int n_threads,
   reader.ReadFileStructure();
   reader.ReadRelations([&admin_info](const OSMTagHelper& tagh,
                                      const OSMPBF::Relation& osm_rel,
-                                     std::mutex& mut) {
-    ConsumeRelation(tagh, osm_rel, mut, &admin_info);
+                                     int thread_idx, std::mutex& mut) {
+    ConsumeRelation(tagh, osm_rel, thread_idx, mut, &admin_info);
   });
   StoreAdminWayRefs(&admin_info);
 
   reader.ReadWays([&admin_info](const OSMTagHelper& tagh,
-                                const OSMPBF::Way& way, std::mutex& mut) {
-    ConsumeWay(tagh, way, mut, &admin_info);
+                                const OSMPBF::Way& way, int thread_idx,
+                                std::mutex& mut) {
+    ConsumeWay(tagh, way, thread_idx, mut, &admin_info);
   });
 
-  reader.ReadNodes(
-      [&admin_info](const OSMTagHelper& tagh,
-                    const OsmPbfReader::NodeWithTags& node,
-                    std::mutex& mut) { ConsumeNode(node, mut, &admin_info); });
+  reader.ReadNodes([&admin_info](const OSMTagHelper& tagh,
+                                 const OsmPbfReader::NodeWithTags& node,
+                                 int thread_idx, std::mutex& mut) {
+    ConsumeNode(node, thread_idx, mut, &admin_info);
+  });
 }
 
 }  // namespace

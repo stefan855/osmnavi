@@ -9,6 +9,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
+#include "base/thread_pool.h"
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
 #include "gd.h"
@@ -83,6 +84,9 @@ enum Color {
   LBROWN,
   PINK,
   DPINK,
+  RED25,
+  RED50,
+  RED75,
   NUM_COLORS
 };
 
@@ -99,6 +103,7 @@ struct LineSegment {
 // roughly 4km in world coordinates on equator.
 constexpr double MaxXSmall = 256.0 / 10000;
 struct LayerData {
+  std::string filename;
   std::vector<LineSegment> small;
   std::vector<LineSegment> large;
   std::vector<LineSegment> self_edges;
@@ -204,6 +209,12 @@ void LoadSegments(const std::string& filename, LayerData* data) {
       seg.color = PINK;
     } else if (row.at(1) == "dpink") {
       seg.color = DPINK;
+    } else if (row.at(1) == "red25") {
+      seg.color = RED25;
+    } else if (row.at(1) == "red50") {
+      seg.color = RED50;
+    } else if (row.at(1) == "red75") {
+      seg.color = RED75;
     } else {
       LOG_S(FATAL) << "unknow color " << row.at(1);
     }
@@ -231,6 +242,7 @@ void LoadSegments(const std::string& filename, LayerData* data) {
 }
 
 void LoadFiles(const std::string& wildcard, LayerData* data) {
+  LOG_S(INFO) << "Load files from " << wildcard;
   for (const std::filesystem::path path : GetFilesWithWildcard(wildcard)) {
     LoadSegments(path, data);
   }
@@ -272,6 +284,9 @@ std::string CreatePNG(const LayerData& layer_data, int zoom, int tile_x,
   colors[LBROWN] = gdImageColorAllocate(im, 181, 101, 29);
   colors[PINK] = gdImageColorAllocate(im, 255, 167, 182);
   colors[DPINK] = gdImageColorAllocate(im, 255, 20, 147);
+  colors[RED25] = gdImageColorAllocate(im, 255, 196, 196);
+  colors[RED50] = gdImageColorAllocate(im, 255, 137, 137);
+  colors[RED75] = gdImageColorAllocate(im, 225, 78, 78);
 
   gdImageSetThickness(im, 0);
   gdImageRectangle(im, 0, 0, 255, 255,
@@ -333,6 +348,23 @@ std::string CreatePNG(const LayerData& layer_data, int zoom, int tile_x,
   return buff;
 }
 
+void AddLayer(std::string key, std::string filename,
+              std::map<std::string, LayerData>* layers) {
+  (*layers)[key] = {.filename = filename};
+}
+
+void LoadLayers(std::map<std::string, LayerData>* layers) {
+  FUNC_TIMER();
+  ThreadPool pool;
+  for (const auto& [key, _] : *layers) {
+    LayerData& data = (*layers)[key];
+    CHECK_S(!data.filename.empty());
+    pool.AddWork([&](int) { LoadFiles(data.filename, &data); });
+  }
+  pool.Start(22);
+  pool.WaitAllFinished();
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -352,6 +384,57 @@ int main(int argc, char* argv[]) {
   LOG_S(INFO) << "sizeof(LineSegment):" << sizeof(LineSegment);
 
   std::map<std::string, LayerData> layers;
+  AddLayer("graph_motor_vehicle", root + "/graph_motor_vehicle.csv", &layers);
+  AddLayer("graph_bicycle", root + "/graph_bicycle.csv", &layers);
+
+  AddLayer("pb_dijks_forward", root + "/pb_dijks_forward.csv", &layers);
+  AddLayer("pb_dijks_backward", root + "/pb_dijks_backward.csv", &layers);
+  AddLayer("pb_dijks_forward_hybrid", root + "/pb_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("pb_astar_forward", root + "/pb_astar_forward.csv", &layers);
+  AddLayer("pb_astar_backward", root + "/pb_astar_backward.csv", &layers);
+  AddLayer("pb_astar_forward_hybrid", root + "/pb_astar_forward_hybrid.csv",
+           &layers);
+
+  AddLayer("uw_dijks_forward_hybrid", root + "/uw_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("uw_astar_forward_hybrid", root + "/uw_astar_forward_hybrid.csv",
+           &layers);
+  AddLayer("as_dijks_forward_hybrid", root + "/as_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("as_astar_forward_hybrid", root + "/as_astar_forward_hybrid.csv",
+           &layers);
+  AddLayer("ln_dijks_forward_hybrid", root + "/ln_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("ln_astar_forward_hybrid", root + "/ln_astar_forward_hybrid.csv",
+           &layers);
+
+  AddLayer("ALL", admin_root + "/admin/??_*.csv", &layers);
+  AddLayer("CH", admin_root + "/admin/CH_756_*.csv", &layers);
+  AddLayer("DE", admin_root + "/admin/DE_276_*.csv", &layers);
+
+  AddLayer("IL", admin_root + "/admin/IL_376_*.csv", &layers);
+  AddLayer("JO", admin_root + "/admin/JO_400_*.csv", &layers);
+  AddLayer("UA", admin_root + "/admin/UA_804_*.csv", &layers);
+  AddLayer("RU", admin_root + "/admin/RU_643_*.csv", &layers);
+
+  AddLayer("louvain", root + "/louvain.csv", &layers);
+  AddLayer("cross", root + "/cross.csv", &layers);
+
+  AddLayer("traffic", root + "/traffic.csv", &layers);
+  AddLayer("experimental1", root + "/experimental1.csv", &layers);
+  AddLayer("experimental2", root + "/experimental2.csv", &layers);
+  AddLayer("experimental3", root + "/experimental3.csv", &layers);
+  AddLayer("experimental4", root + "/experimental4.csv", &layers);
+  AddLayer("experimental5", root + "/experimental5.csv", &layers);
+  AddLayer("experimental6", root + "/experimental6.csv", &layers);
+  AddLayer("experimental7", root + "/experimental7.csv", &layers);
+  AddLayer("experimental8", root + "/experimental8.csv", &layers);
+  AddLayer("experimental9", root + "/experimental9.csv", &layers);
+
+  LoadLayers(&layers);
+
+#if 0
   LoadFiles(root + "/graph_motor_vehicle.csv", &layers["graph_motor_vehicle"]);
   LoadFiles(root + "/graph_bicycle.csv", &layers["graph_bicycle"]);
 
@@ -399,6 +482,7 @@ int main(int argc, char* argv[]) {
   LoadFiles(root + "/experimental7.csv", &layers["experimental7"]);
   LoadFiles(root + "/experimental8.csv", &layers["experimental8"]);
   LoadFiles(root + "/experimental9.csv", &layers["experimental9"]);
+#endif
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");

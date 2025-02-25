@@ -65,7 +65,10 @@ struct BuildGraphStats {
   int64_t num_ways_missing_nodes = 0;
 
   // Graph building
-  int64_t num_turn_restriction_errors = 0;
+  int64_t num_turn_restriction_success = 0;
+  int64_t max_turn_restriction_via_ways = 0;
+  int64_t num_turn_restriction_error = 0;
+  int64_t num_turn_restriction_error_connection = 0;
 
   // Graph
   int64_t num_ways_closed = 0;
@@ -132,9 +135,10 @@ struct GraphMetaData {
   // Resulting graph data structure used for routing.
   Graph graph;
 
-  // Turn restriction found in relations.
-  // Currently not used.
-  std::vector<TurnRestriction> turn_restrictions;
+  // Simple turn restrictions with a single via node.
+  std::vector<TurnRestriction> simple_turn_restrictions;
+  // TODO: Handle complex turn restrictions with one or more via ways.
+  std::vector<TurnRestriction> complex_turn_restrictions;
 
   BuildGraphStats stats;
 };

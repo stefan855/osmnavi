@@ -104,20 +104,23 @@ class OsmPbfReader {
 
   // The mutex 'mut' passed to the functions below can be used to isolate
   // one thread from the wwork of the other threads.
-  using RelationWorkerFunc = std::function<void(
-      const OSMTagHelper& tagh, const OSMPBF::Relation& rel, std::mutex& mut)>;
-  using WayWorkerFunc = std::function<void(
-      const OSMTagHelper& tagh, const OSMPBF::Way& way, std::mutex& mut)>;
+  using RelationWorkerFunc =
+      std::function<void(const OSMTagHelper& tagh, const OSMPBF::Relation& rel,
+                         int thread_idx, std::mutex& mut)>;
+  using WayWorkerFunc =
+      std::function<void(const OSMTagHelper& tagh, const OSMPBF::Way& way,
+                         int thread_idx, std::mutex& mut)>;
   // Currently, tags are not available for nodes.
-  using NodeWorkerFunc = std::function<void(
-      const OSMTagHelper& tagh, const NodeWithTags& node, std::mutex& mut)>;
+  using NodeWorkerFunc =
+      std::function<void(const OSMTagHelper& tagh, const NodeWithTags& node,
+                         int thread_idx, std::mutex& mut)>;
   // Works on whole blobs. This is sometimes useful, for instance, when the
   // worker wants to use the sort order of the items in the blob.
   // Note that a blob contains only one type of items, i.e. nodes, ways or
   // relations.
   using BlobWorkerFunc = std::function<void(
       const OSMTagHelper& tagh, const OSMPBF::PrimitiveBlock& prim_block,
-      std::mutex& mut)>;
+      int thread_idx, std::mutex& mut)>;
 
   OsmPbfReader(std::string_view filename, int n_threads, bool verbose = false)
       : filename_(filename), n_threads_(n_threads), verbose_(verbose) {
@@ -278,6 +281,8 @@ class OsmPbfReader {
         return "ContentUnknown";
     }
   };
+
+  int n_threads() const { return n_threads_; }
 
  private:
   struct BlobMeta {
@@ -482,7 +487,7 @@ class OsmPbfReader {
                     << " relations";
       }
       for (const OSMPBF::Relation& rel : pg.relations()) {
-        worker_func(tagh, rel, mut);
+        worker_func(tagh, rel, thread_idx, mut);
       }
     }
   }
@@ -501,7 +506,7 @@ class OsmPbfReader {
                     << " ways";
       }
       for (const OSMPBF::Way& way : pg.ways()) {
-        worker_func(tagh, way, mut);
+        worker_func(tagh, way, thread_idx, mut);
       }
     }
   }
@@ -551,7 +556,7 @@ class OsmPbfReader {
           }
           // kv_start points to 0-element terminating kvs for this node.
         }
-        worker_func(tagh, node, mut);
+        worker_func(tagh, node, thread_idx, mut);
       }
     }
   }
@@ -561,7 +566,7 @@ class OsmPbfReader {
     OSMPBF::PrimitiveBlock primblock;
     ReadBlob(file_handles_.at(thread_idx), meta, &primblock);
     OSMTagHelper tagh(primblock.stringtable());
-    worker_func(tagh, primblock, mut);
+    worker_func(tagh, primblock, thread_idx, mut);
   }
 
   const std::string filename_;

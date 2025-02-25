@@ -17,7 +17,7 @@ class CompactDirectedGraph {
     uint32_t weight;
     // Edge has restricted car_label (LABEL_RESTRICTED or
     // LABEL_RESTRICTED_SECONDARY) set.
-    uint8_t restricted : 1;
+    uint8_t restricted_access : 1;
   };
 
   struct PartialEdge {
@@ -25,7 +25,7 @@ class CompactDirectedGraph {
     uint32_t weight;
     // Edge has restricted car_label (LABEL_RESTRICTED or
     // LABEL_RESTRICTED_SECONDARY) set.
-    uint8_t restricted : 1;
+    uint8_t restricted_access : 1;
   };
 
   // Create a graph with the given number of nodes and edges in 'full_edges'.
@@ -68,13 +68,15 @@ class CompactDirectedGraph {
   void LogStats() const {
     uint32_t min_weight = std::numeric_limits<uint32_t>::max();
     uint32_t max_weight = 0;
+    uint32_t restricted_access = 0;
     for (const PartialEdge& e : edges_) {
       if (e.weight < min_weight) min_weight = e.weight;
       if (e.weight > max_weight) max_weight = e.weight;
+      restricted_access += e.restricted_access;
     }
     LOG_S(INFO) << absl::StrFormat(
-        "CompactGraph #nodes:%u #edges:%u mem:%u weight=[%u,%u]",
-        edges_start_.size() - 1, edges_.size(),
+        "CompactGraph #nodes:%u #edges:%u restricted:%u mem:%u weight=[%u,%u]",
+        edges_start_.size() - 1, edges_.size(), restricted_access,
         edges_start_.size() * sizeof(uint32_t) +
             edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
         min_weight, max_weight);
@@ -103,12 +105,16 @@ class CompactDirectedGraph {
     edges_start_.push_back(full_edges.size());  // Sentinel.
 
     edges_.reserve(full_edges.size());
+    uint32_t full_restricted = 0;
+    uint32_t partial_restricted = 0;
     for (const FullEdge& e : full_edges) {
       // LOG_S(INFO) << absl::StrFormat("Cluster:%u pos:%u from:%u to:%u w:%d",
       //                                cluster.cluster_id, edges_.size(),
       //                                e.from_c_idx, e.to_c_idx,
       //                                e.weight);
-      edges_.push_back({e.to_c_idx, e.weight, e.restricted});
+      edges_.push_back({e.to_c_idx, e.weight, e.restricted_access});
+      full_restricted += e.restricted_access;
+      partial_restricted += edges_.back().restricted_access;
     }
     CHECK_EQ_S(num_nodes_ + 1, edges_start_.size());
   }
@@ -126,6 +132,6 @@ class CompactDirectedGraph {
 
 inline bool operator<(const CompactDirectedGraph::FullEdge& a,
                       const CompactDirectedGraph::FullEdge& b) {
-  return std::tie(a.from_c_idx, a.to_c_idx, a.restricted, a.weight) <
-         std::tie(b.from_c_idx, b.to_c_idx, b.restricted, b.weight);
+  return std::tie(a.from_c_idx, a.to_c_idx, a.restricted_access, a.weight) <
+         std::tie(b.from_c_idx, b.to_c_idx, b.restricted_access, b.weight);
 }

@@ -204,17 +204,17 @@ int main(int argc, char* argv[]) {
 
   if (!way_filter.empty()) {
     FreqStats stats = {.n_values = n_values};
-    reader.ReadWays(
-        [&way_filter, &num_ways, print_raw, print_one_line, &stats](
-            const OSMTagHelper& tagh, const OSMPBF::Way& way, std::mutex& mut) {
-          if (MatchFilters(tagh, way, way_filter, mut, &stats)) {
-            num_ways++;
-            if (print_raw) {
-              RAW_LOG_F(INFO, "Way:\n%s\n",
-                        tagh.GetLoggingStr(way, print_one_line).c_str());
-            }
-          }
-        });
+    reader.ReadWays([&way_filter, &num_ways, print_raw, print_one_line, &stats](
+                        const OSMTagHelper& tagh, const OSMPBF::Way& way,
+                        int thread_idx, std::mutex& mut) {
+      if (MatchFilters(tagh, way, way_filter, mut, &stats)) {
+        num_ways++;
+        if (print_raw) {
+          RAW_LOG_F(INFO, "Way:\n%s\n",
+                    tagh.GetLoggingStr(way, print_one_line).c_str());
+        }
+      }
+    });
     if (print_stats) {
       PrintStats("Ways", stats);
     }
@@ -222,18 +222,18 @@ int main(int argc, char* argv[]) {
 
   if (!relation_filter.empty()) {
     FreqStats stats = {.n_values = n_values};
-    reader.ReadRelations([&relation_filter, &num_relations, print_raw,
-                          print_one_line, &stats](const OSMTagHelper& tagh,
-                                                  const OSMPBF::Relation& rel,
-                                                  std::mutex& mut) {
-      if (MatchFilters(tagh, rel, relation_filter, mut, &stats)) {
-        num_relations++;
-        if (print_raw) {
-          RAW_LOG_F(INFO, "Relation:\n%s\n",
-                    tagh.GetLoggingStr(rel, print_one_line).c_str());
-        }
-      }
-    });
+    reader.ReadRelations(
+        [&relation_filter, &num_relations, print_raw, print_one_line, &stats](
+            const OSMTagHelper& tagh, const OSMPBF::Relation& rel,
+            int thread_idx, std::mutex& mut) {
+          if (MatchFilters(tagh, rel, relation_filter, mut, &stats)) {
+            num_relations++;
+            if (print_raw) {
+              RAW_LOG_F(INFO, "Relation:\n%s\n",
+                        tagh.GetLoggingStr(rel, print_one_line).c_str());
+            }
+          }
+        });
     if (print_stats) {
       PrintStats("Relations", stats);
     }
@@ -244,6 +244,7 @@ int main(int argc, char* argv[]) {
     reader.ReadNodes([&node_filter, &num_nodes, print_raw, print_one_line,
                       &stats](const OSMTagHelper& tagh,
                               const OsmPbfReader::NodeWithTags& node,
+                              int thread_idx,
                               std::mutex& mut) {
       /*
         LOG_S(INFO) << "Node:" << node.id();

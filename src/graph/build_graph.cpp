@@ -633,22 +633,9 @@ void ApplyTarjan(Graph& g, GraphMetaData* meta) {
 }
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
-                     std::mutex& mut, GraphMetaData* meta) {
-  // TODO: Handle turn restrictions (currently we're only reading them).
-  TurnRestriction tr;
-  ResType rt =
-      ParseTurnRestriction(tagh, osm_rel, meta->opt.log_turn_restrictions, &tr);
-  if (rt == ResType::Ignore) return;
-
-  if (rt == ResType::Success &&
-      ConnectTurnRestriction(meta->graph, meta->opt.log_turn_restrictions,
-                             &tr)) {
-    std::unique_lock<std::mutex> l(mut);
-    meta->turn_restrictions.push_back(tr);
-  } else {
-    std::unique_lock<std::mutex> l(mut);
-    meta->stats.num_turn_restriction_errors++;
-  }
+                     GraphMetaData* meta, TRResult* result) {
+  ParseTurnRestriction(meta->graph, tagh, osm_rel,
+                       meta->opt.log_turn_restrictions, result);
 }
 
 // Read the ways that might useful for routing, remember the nodes ids touched
@@ -657,9 +644,9 @@ void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
                          BuildGraphStats* stats) {
   HugeBitset touched_nodes_ids;
   // Read ways and remember the touched nodes in 'touched_nodes_ids'.
-  reader->ReadWays([&touched_nodes_ids, stats](const OSMTagHelper& tagh,
-                                               const OSMPBF::Way& way,
-                                               std::mutex& mut) {
+  reader->ReadWays([&touched_nodes_ids, stats](
+                       const OSMTagHelper& tagh, const OSMPBF::Way& way,
+                       int thread_idx, std::mutex& mut) {
     ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids, stats);
   });
 
@@ -668,7 +655,7 @@ void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
       OsmPbfReader::ContentNodes,
       [&touched_nodes_ids, node_table](const OSMTagHelper& tagh,
                                        const OSMPBF::PrimitiveBlock& prim_block,
-                                       std::mutex& mut) {
+                                       int thread_idx, std::mutex& mut) {
         ConsumeNodeBlob(tagh, prim_block, mut, touched_nodes_ids, node_table);
       });
   // Make node table searchable, so we can look up lat/lon by node_id.
@@ -949,6 +936,35 @@ void MarkUniqueEdges(GraphMetaData* meta) {
   }
 }
 
+void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
+  std::vector<TRResult> results(reader->n_threads());
+  reader->ReadRelations([&meta, &results](const OSMTagHelper& tagh,
+                                          const OSMPBF::Relation& osm_rel,
+                                          int thread_idx, std::mutex& mut) {
+    ConsumeRelation(tagh, osm_rel, meta, &results.at(thread_idx));
+  });
+  for (const TRResult& res : results) {
+    meta->stats.num_turn_restriction_success += res.num_success;
+    meta->stats.max_turn_restriction_via_ways = std::max(
+        meta->stats.max_turn_restriction_via_ways, res.max_success_via_ways);
+    meta->stats.num_turn_restriction_error += res.num_error;
+    meta->stats.num_turn_restriction_error_connection +=
+        res.num_error_connection;
+    for (const TurnRestriction& tr : res.trs) {
+      if (tr.via_is_node) {
+        CHECK_EQ_S(tr.first_via_node_idx, tr.last_via_node_idx);
+        meta->simple_turn_restrictions.push_back(tr);
+      } else {
+        meta->complex_turn_restrictions.push_back(tr);
+      }
+    }
+  }
+
+  SortSimpleTurnRestrictions(&(meta->simple_turn_restrictions));
+  meta->graph.condensed_turn_restriction_map = ComputeCondensedTurnRestrictions(
+      meta->graph, meta->simple_turn_restrictions);
+}
+
 void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
   FUNC_TIMER();
   RoutingMetricTime metric;
@@ -1132,10 +1148,20 @@ void PrintStats(const GraphMetaData& meta) {
       "  bytes/var-node:   %12.2f",
       static_cast<double>(meta.node_table->mem_allocated()) /
           meta.node_table->total_records());
-  LOG_S(INFO) << absl::StrFormat("Num turn restrictions:%10lld",
-                                 meta.turn_restrictions.size());
-  LOG_S(INFO) << absl::StrFormat("Num turn restr errors:%10lld",
-                                 stats.num_turn_restriction_errors);
+  LOG_S(INFO) << absl::StrFormat("Num t-restr success: %11lld",
+                                 stats.num_turn_restriction_success);
+  LOG_S(INFO) << absl::StrFormat("Num t-restr errors:   %10lld",
+                                 stats.num_turn_restriction_error);
+  LOG_S(INFO) << absl::StrFormat("Num t-restr simple:  %11lld",
+                                 meta.simple_turn_restrictions.size());
+  LOG_S(INFO) << absl::StrFormat("Num t-restr complex: %11lld",
+                                 meta.complex_turn_restrictions.size());
+  LOG_S(INFO) << absl::StrFormat("Num t-restr condensed:%10lld",
+                                 graph.condensed_turn_restriction_map.size());
+  LOG_S(INFO) << absl::StrFormat("Max t-restr via ways: %10llu",
+                                 stats.max_turn_restriction_via_ways);
+  LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
+                                 stats.num_turn_restriction_error_connection);
 
   LOG_S(INFO) << "========= Graph Stats ============";
   std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
@@ -1326,7 +1352,8 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   {
     DeDuperWithIds<WaySharedAttrs> deduper;
     reader.ReadWays([&deduper, &meta](const OSMTagHelper& tagh,
-                                      const OSMPBF::Way& way, std::mutex& mut) {
+                                      const OSMPBF::Way& way, int thread_idx,
+                                      std::mutex& mut) {
       ConsumeWayWorker(tagh, way, mut, &deduper, &meta);
     });
     {
@@ -1344,11 +1371,6 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     }
   }
   SortGWays(&meta);
-
-  // TurnRestriction currently not used.
-  reader.ReadRelations(
-      [&meta](const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
-              std::mutex& mut) { ConsumeRelation(tagh, osm_rel, mut, &meta); });
 
   AllocateGNodes(&meta);
   SetCountryInGNodes(&meta);
@@ -1373,6 +1395,8 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
                                    207718684, found ? n.lat : 0,
                                    found ? n.lon : 0);
   }
+
+  LoadTurnRestrictions(&reader, &meta);
 
   FindLargeComponents(&meta.graph);
   ApplyTarjan(meta.graph, &meta);
