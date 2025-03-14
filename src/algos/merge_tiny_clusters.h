@@ -248,7 +248,7 @@ void RenumberClusters(const WorkData& wd, Graph* graph) {
     if (!wd.cluster_data.at(orig_id).deleted) {
       uint32_t new_id = new_clusters.size();
       new_clusters.push_back(
-          {.ncc = graph->clusters.at(orig_id).ncc, .cluster_id = new_id});
+          {.cluster_id = new_id, .ncc = graph->clusters.at(orig_id).ncc});
       old_to_new.at(orig_id) = new_id;
     }
   }

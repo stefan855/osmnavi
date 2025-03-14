@@ -169,13 +169,12 @@ class AStarRouter {
         NodeIdMap::value_type(node_idx, visited_nodes_.size()));
     if (iter.second) {
       // Key didn't exist and was inserted, so add it to visited_nodes_ too.
-      visited_nodes_.push_back(
-          {.node_idx = node_idx,
-           .from_v_idx = INFU32,
-           .min_metric = INFU32,
-           .done = 0,
-           .shortest_route = 0,
-           .heuristic_to_target = INFU30});
+      visited_nodes_.push_back({.node_idx = node_idx,
+                                .from_v_idx = INFU32,
+                                .min_metric = INFU32,
+                                .done = 0,
+                                .shortest_route = 0,
+                                .heuristic_to_target = INFU30});
     }
     return iter.first->second;
   }
@@ -189,9 +188,9 @@ class AStarRouter {
     // TODO: support mexspeed for different vehicles.
     // SOLUTION: Should use per (country, vehicle) maxspeed. If target
     // is in other country then use mix.
-    static const RoutingAttrs g_ra = {.access = ACC_YES, .maxspeed = 120};
-    static const WaySharedAttrs g_wsa = {.ra =
-                                             g_ra};  // Sets .ra[0] and .ra[1]!
+    static const WaySharedAttrs g_wsa =
+        WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
+
     return metric.Compute(
         g_wsa, opt.vt, DIR_FORWARD,
         {.distance_cm = static_cast<uint64_t>(

@@ -541,7 +541,8 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
     for (ep = edge_start; ep < edge_stop; ++ep) {
       if (g.edges.at(ep).other_node_idx == INFU32) break;
     }
-    // n.num_edges_out++;
+    CHECK_LT_S(n.num_edges_forward, MAX_NUM_EDGES_OUT) << n.node_id;
+    n.num_edges_forward++;
   }
   CHECK_S(ep >= edge_start && ep < edge_stop);
   CHECK_S(other_idx != INFU32);
@@ -558,13 +559,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.cross_country = n.ncc != other.ncc;
   e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
   e.car_label_strange = 0;
-#if 0
-  // Should not happen because we preallocated needed space.
-  ABORT_S() << absl::StrFormat(
-      "Cannot store edge at node:%lld start_idx:%u num_edges:%u other_idx:%u "
-      "out:%d way_idx:%u dist:%llu",
-      n.node_id, start_idx, num_edges, other_idx, out, way_idx, distance_cm);
-#endif
+  e.car_uturn_allowed = 0;
 }
 
 #if 0
@@ -634,8 +629,10 @@ void ApplyTarjan(Graph& g, GraphMetaData* meta) {
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
                      GraphMetaData* meta, TRResult* result) {
-  ParseTurnRestriction(meta->graph, tagh, osm_rel,
-                       meta->opt.log_turn_restrictions, result);
+  ParseTurnRestriction(
+      meta->graph, tagh, osm_rel,
+      meta->opt.log_turn_restrictions ? Verbosity::Verbose : Verbosity::Quiet,
+      result);
 }
 
 // Read the ways that might useful for routing, remember the nodes ids touched
@@ -682,10 +679,10 @@ void AllocateGNodes(GraphMetaData* meta) {
       n.cluster_id = INVALID_CLUSTER_ID;
       n.cluster_border_node = 0;
       n.edges_start_pos = 0;
-      // n.num_edges_inverted = 0;
-      // n.num_edges_out = 0;
+      n.num_edges_forward = 0;
       n.dead_end = 0;
       n.ncc = INVALID_NCC;
+      n.simple_turn_restriction_via_node = 0;
       n.lat = node->lat;
       n.lon = node->lon;
       meta->graph.nodes.push_back(n);
@@ -711,7 +708,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
     const GWay& way = graph.ways.at(way_idx);
     const WaySharedAttrs& wsa = GetWSA(graph, way);
 
-    std::vector<size_t> node_idx =
+    std::vector<uint32_t> node_idx =
         meta->graph.GetGWayNodeIndexes(*(meta->way_nodes_needed), way);
     {
       // Update edge counts.
@@ -736,15 +733,15 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
 
           if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
               WSAAnyRoutable(wsa, DIR_BACKWARD)) {
-            graph.nodes.at(prev_idx).num_edges_out++;
-            graph.nodes.at(idx).num_edges_out++;
+            graph.nodes.at(prev_idx).num_edges_forward++;
+            graph.nodes.at(idx).num_edges_forward++;
           } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
-            graph.nodes.at(prev_idx).num_edges_out++;
+            graph.nodes.at(prev_idx).num_edges_forward++;
             graph.nodes.at(idx).num_edges_inverted++;
           } else {
             CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
             graph.nodes.at(prev_idx).num_edges_inverted++;
-            graph.nodes.at(idx).num_edges_out++;
+            graph.nodes.at(idx).num_edges_forward++;
           }
 #endif
         }
@@ -936,6 +933,58 @@ void MarkUniqueEdges(GraphMetaData* meta) {
   }
 }
 
+inline bool IsUTurnAllowedEdge(const Graph& g, uint32_t from_idx,
+                               const GEdge& in_edge) {
+  // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
+  if (g.ways.at(in_edge.way_idx).highway_label <= HW_TRUNK_LINK) {
+    return false;
+  }
+  uint32_t to_idx = in_edge.other_node_idx;
+  bool restr = (in_edge.car_label != GEdge::LABEL_FREE);
+  bool found_u_turn = false;
+  bool found_continuation = false;
+  bool found_free_continuation = false;
+
+  for (const GEdge& o : gnode_forward_edges(g, to_idx)) {
+    found_u_turn |= (o.other_node_idx == from_idx);
+    if (o.other_node_idx != from_idx && o.other_node_idx != to_idx) {
+      found_continuation = true;
+      found_free_continuation |= (o.car_label == GEdge::LABEL_FREE);
+    }
+  }
+
+  if (found_u_turn) {
+    if (!found_continuation) {
+      /*
+      LOG_S(INFO) << absl::StrFormat(
+          "U-turn allowed from:%lld to:%lld way:%lld %s",
+          GetGNodeIdSafe(g, from_idx), GetGNodeIdSafe(g, to_idx),
+          g.ways.at(in_edge.way_idx).id, restr ? "restr" : "free");
+      */
+      return true;
+    }
+    if (!restr && !found_free_continuation) {
+      /*
+      LOG_S(INFO) << absl::StrFormat(
+          "U-turn allowed from:%lld to:%lld way:%lld stay-on-free",
+          GetGNodeIdSafe(g, from_idx), GetGNodeIdSafe(g, to_idx),
+          g.ways.at(in_edge.way_idx).id);
+      */
+      return true;
+    }
+  }
+  return false;
+}
+
+void MarkUTurnAllowedEdges(GraphMetaData* meta) {
+  FUNC_TIMER();
+  for (uint32_t from_idx = 0; from_idx < meta->graph.nodes.size(); ++from_idx) {
+    for (GEdge& e : gnode_forward_edges(meta->graph, from_idx)) {
+      e.car_uturn_allowed = IsUTurnAllowedEdge(meta->graph, from_idx, e);
+    }
+  }
+}
+
 void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
   std::vector<TRResult> results(reader->n_threads());
   reader->ReadRelations([&meta, &results](const OSMTagHelper& tagh,
@@ -952,7 +1001,7 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
         res.num_error_connection;
     for (const TurnRestriction& tr : res.trs) {
       if (tr.via_is_node) {
-        CHECK_EQ_S(tr.first_via_node_idx, tr.last_via_node_idx);
+        CHECK_EQ_S(tr.node_path.size(), 2);
         meta->simple_turn_restrictions.push_back(tr);
       } else {
         meta->complex_turn_restrictions.push_back(tr);
@@ -962,7 +1011,10 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
 
   SortSimpleTurnRestrictions(&(meta->simple_turn_restrictions));
   meta->graph.condensed_turn_restriction_map = ComputeCondensedTurnRestrictions(
-      meta->graph, meta->simple_turn_restrictions);
+      meta->graph,
+      meta->opt.log_turn_restrictions ? Verbosity::Verbose : Verbosity::Quiet,
+      meta->simple_turn_restrictions);
+  MarkCondensedViaNodes(&(meta->graph));
 }
 
 void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
@@ -1005,6 +1057,7 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
     // Check if astar and dijkstra find the same shortest paths.
     build_clusters::CheckShortestClusterPaths(meta->graph, meta->opt.n_threads);
   }
+  build_clusters::AssignClusterColors(&(meta->graph));
 }
 
 void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
@@ -1052,9 +1105,12 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
       stats.num_nodes_in_small_component++;
     }
     stats.num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
+    stats.num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
+    stats.num_edges_at_simple_tr_via +=
+        n.simple_turn_restriction_via_node ? n.num_edges_forward : 0;
 
     int64_t num_edges_inverted = 0;
-    int64_t num_edges_out = 0;
+    int64_t num_edges_forward = 0;
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
       const GNode& other = g.nodes.at(e.other_node_idx);
       // const bool edge_dead_end = n.dead_end || other.dead_end;
@@ -1062,7 +1118,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
         stats.num_edges_non_unique++;
       }
       num_edges_inverted += e.inverted;
-      num_edges_out += (e.inverted == 0);
+      num_edges_forward += (e.inverted == 0);
 
       if (!e.inverted && e.other_node_idx != node_idx) {
         stats.sum_edge_length_cm += e.distance_cm;
@@ -1074,19 +1130,19 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
             std::min(stats.min_edge_length_cm, (int64_t)e.distance_cm);
         stats.max_edge_length_cm =
             std::max(stats.max_edge_length_cm, (int64_t)e.distance_cm);
-        stats.num_edges_out_car_restr_unset +=
+        stats.num_edges_forward_car_restr_unset +=
             (e.car_label == GEdge::LABEL_UNSET);
-        stats.num_edges_out_car_restr_free +=
+        stats.num_edges_forward_car_restr_free +=
             (e.car_label == GEdge::LABEL_FREE);
-        stats.num_edges_out_car_restricted +=
+        stats.num_edges_forward_car_restricted +=
             (e.car_label == GEdge::LABEL_RESTRICTED);
-        stats.num_edges_out_car_restricted2 +=
+        stats.num_edges_forward_car_restricted2 +=
             (e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
-        stats.num_edges_out_car_strange += e.car_label_strange;
+        stats.num_edges_forward_car_strange += e.car_label_strange;
         CHECK_S(e.car_label_strange == 0 ||
                 e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
         CHECK_NE_S(e.car_label, GEdge::LABEL_TEMPORARY);
-        stats.num_edges_out_car_forbidden +=
+        stats.num_edges_forward_car_forbidden +=
             !RoutableAccess(GetRAFromWSA(g, e, VH_MOTOR_VEHICLE).access);
       }
       stats.num_cross_country_edges += (e.contra_way && e.cross_country);
@@ -1100,8 +1156,9 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
             (e.car_label != GEdge::LABEL_FREE);
         if (e.car_label != GEdge::LABEL_FREE) {
           LOG_S(INFO) << absl::StrFormat(
-              "Cross cluster restricted edge %lld to %lld", n.node_id,
-              other.node_id);
+              "Cross cluster restricted edge %lld to %lld, label:%d way:%lld",
+              n.node_id, other.node_id, (int)e.car_label,
+              g.ways.at(e.way_idx).id);
         }
         // By construction, this is 0, because dead-ends are omitted from
         // clusters.
@@ -1110,10 +1167,10 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
       }
     }
     stats.max_edges =
-        std::max(stats.max_edges, num_edges_out + num_edges_inverted);
-    stats.num_edges_out += num_edges_out;
+        std::max(stats.max_edges, num_edges_forward + num_edges_inverted);
+    stats.num_edges_forward += num_edges_forward;
     stats.num_edges_inverted += num_edges_inverted;
-    stats.max_edges_out = std::max(stats.max_edges_out, num_edges_out);
+    stats.max_edges_out = std::max(stats.max_edges_out, num_edges_forward);
     stats.max_edges_inverted =
         std::max(stats.max_edges_inverted, num_edges_inverted);
   }
@@ -1223,23 +1280,23 @@ void PrintStats(const GraphMetaData& meta) {
 
   LOG_S(INFO) << "Edges";
   LOG_S(INFO) << absl::StrFormat("  Num out:          %12lld",
-                                 stats.num_edges_out);
+                                 stats.num_edges_forward);
   LOG_S(INFO) << absl::StrFormat("  Num inverted:     %12lld",
                                  stats.num_edges_inverted);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  stats.num_edges_non_unique);
   LOG_S(INFO) << absl::StrFormat("  Car restr unset:  %12lld",
-                                 stats.num_edges_out_car_restr_unset);
+                                 stats.num_edges_forward_car_restr_unset);
   LOG_S(INFO) << absl::StrFormat("  Car restr free:   %12lld",
-                                 stats.num_edges_out_car_restr_free);
+                                 stats.num_edges_forward_car_restr_free);
   LOG_S(INFO) << absl::StrFormat("  Car restricted:   %12lld",
-                                 stats.num_edges_out_car_restricted);
+                                 stats.num_edges_forward_car_restricted);
   LOG_S(INFO) << absl::StrFormat("  Car restricted2:  %12lld",
-                                 stats.num_edges_out_car_restricted2);
+                                 stats.num_edges_forward_car_restricted2);
   LOG_S(INFO) << absl::StrFormat("  Car strange:      %12lld",
-                                 stats.num_edges_out_car_strange);
+                                 stats.num_edges_forward_car_strange);
   LOG_S(INFO) << absl::StrFormat("  Car forbidden:    %12lld",
-                                 stats.num_edges_out_car_forbidden);
+                                 stats.num_edges_forward_car_forbidden);
 
   LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
                                  stats.min_edge_length_cm);
@@ -1247,10 +1304,10 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.max_edge_length_cm);
   LOG_S(INFO) << absl::StrFormat(
       "  Avg edge length   %12.0f",
-      (double)stats.sum_edge_length_cm / stats.num_edges_out);
+      (double)stats.sum_edge_length_cm / stats.num_edges_forward);
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node:   %12.2f",
-      static_cast<double>(stats.num_edges_inverted + stats.num_edges_out) /
+      static_cast<double>(stats.num_edges_inverted + stats.num_edges_forward) /
           graph.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Max edges:        %12lld", stats.max_edges);
   LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld",
@@ -1397,10 +1454,10 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   }
 
   LoadTurnRestrictions(&reader, &meta);
-
   FindLargeComponents(&meta.graph);
   ApplyTarjan(meta.graph, &meta);
-  LabelAllCarEdges(&meta.graph);
+  LabelAllCarEdges(&meta.graph, Verbosity::Brief);
+  MarkUTurnAllowedEdges(&meta);
 
   ClusterGraph(meta.opt, &meta);
 

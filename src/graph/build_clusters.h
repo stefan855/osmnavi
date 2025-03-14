@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include <random>
 #include <iostream>
 #include <vector>
 
@@ -19,6 +20,7 @@ namespace build_clusters {
 
 namespace {
 
+// Maps a node index in graph to a node index in the louvain graph.
 using GNodeToLouvainIdx = absl::btree_map<uint32_t, uint32_t>;
 using TGVec = std::vector<std::unique_ptr<louvain::LouvainGraph>>;
 
@@ -36,8 +38,9 @@ inline bool EligibleNodeForLouvain(const GNode& n, std::uint16_t ncc) {
 }
 
 // Create The first two levels of the Louvain graph and return them in a vector.
-// The first level is a straight copy of the input. The second level has lines
-// of nodes clustered.
+// The first level is a straight copy of the input. The second level has
+// specific kinds of nodes(line nodes, restricted nodes, turn restriction nodes)
+// clustered.
 inline TGVec CreateInitalLouvainGraph(
     const Graph& graph, const GNodeToLouvainIdx& np_to_louvain_pos,
     uint16_t ncc) {
@@ -57,14 +60,25 @@ inline TGVec CreateInitalLouvainGraph(
       const GNode& other = graph.nodes.at(e.other_node_idx);
 
       if (ncc == INVALID_NCC) {
-        if (e.unique_other && e.other_node_idx != gnode_pos &&
+        if (e.other_node_idx != gnode_pos &&
             EligibleNodeForLouvain(other)) {
           auto it = np_to_louvain_pos.find(e.other_node_idx);
           CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
-          lg->AddEdge(it->second, /*weight=*/1);
-          // If the edge is restricted then we want to precluster the node.
+          if (e.unique_other) {
+            lg->AddEdge(it->second, /*weight=*/1);
+          }
+          // The code below needs to run for all, also non-unique edges.
           if (e.car_label != GEdge::LABEL_FREE) {
+            // Precluster node connected to restricted edges.
             precluster_restricted_nodes.AddBit(louvain_pos);
+            precluster_restricted_nodes.AddBit(it->second);
+          }
+          if (n.simple_turn_restriction_via_node ||
+              other.simple_turn_restriction_via_node) {
+            // This edge might be part of a turn restriction. Add both endpoints
+            // of the edge to preclustering.
+            precluster_restricted_nodes.AddBit(louvain_pos);
+            precluster_restricted_nodes.AddBit(it->second);
           }
         }
       } else {
@@ -476,4 +490,52 @@ inline void PrintClusterInformation(const Graph& g) {
       (100.0 * total_edges) / ((sum_in + sum_out) / 2), total_nodes,
       (100.0 * total_nodes) / sum_nodes);
 }
+
+// Go through clusters by increasing cluster id and assign each cluster the
+// lowest color number that hasn't been used by a connected, previous cluster.
+void AssignClusterColors(Graph* g) {
+  uint32_t max_color_no = 0;
+  std::srand(1);  // Get always the same pseudo-random numbers.
+
+  // First cluster has color_no 0.
+  for (uint32_t cluster_id = 1; cluster_id < g->clusters.size(); ++cluster_id) {
+    // Determine the colors of neighbor clusters.
+    std::vector<bool> neighbor_colors;
+    GCluster* cluster = &(g->clusters.at(cluster_id));
+    for (uint32_t n_idx : cluster->border_nodes) {
+      for (const GEdge& e : gnode_all_edges(*g, n_idx)) {
+        uint32_t other_cluster_id = g->nodes.at(e.other_node_idx).cluster_id;
+        // Make sure we don't collide with clusters before the current cluster.
+        if (other_cluster_id != INVALID_CLUSTER_ID &&
+            other_cluster_id < cluster_id) {
+          uint32_t other_color_no = g->clusters.at(other_cluster_id).color_no;
+          if (other_color_no >= neighbor_colors.size()) {
+            neighbor_colors.resize(other_color_no + 1, false);
+          }
+          neighbor_colors.at(other_color_no) = true;
+        }
+      }
+    }
+
+    uint32_t free_color_no = neighbor_colors.size();
+    // Find a random free color_no.
+    uint64_t start = 1 + rand();
+    for (uint64_t offset = 0; offset < neighbor_colors.size(); ++offset) {
+      uint64_t color_no = (start + offset) % neighbor_colors.size(); 
+      if (!neighbor_colors.at(color_no)) {
+        free_color_no = color_no;
+        break;
+      }
+    }
+
+    // LOG_S(INFO) << absl::StrFormat("Assign cluster %u color %u", cluster_id,
+    //                                free_color_no);
+    cluster->color_no = free_color_no;
+    max_color_no = std::max(max_color_no, free_color_no);
+  }
+
+  LOG_S(INFO) << "AssignClusterColors() max-color_no:" << max_color_no;
+  CHECK_LT_S(max_color_no, 16);
+}
+
 }  // namespace build_clusters

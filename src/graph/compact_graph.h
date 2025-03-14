@@ -7,8 +7,9 @@
 #include "base/util.h"
 #include "graph/graph_def.h"
 
-// This is a compacted view on the nodes and edges of a cluster, with a weight
-// for every edge. The nodes in the graph have ids 0..num_nodes()-1.
+// This is a compacted view on the nodes and edges of a graph, with a
+// precomputed weight for every edge. The nodes in the graph have ids
+// 0..num_nodes()-1.
 class CompactDirectedGraph {
  public:
   struct FullEdge {

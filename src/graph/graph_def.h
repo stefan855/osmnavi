@@ -3,55 +3,21 @@
 #include <type_traits>
 #include <vector>
 
-#include "absl/container/flat_hash_map.h"
+// #include "absl/container/flat_hash_map.h"
 #include "base/constants.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/routing_attrs.h"
-
-struct CondensedTurnRestrictionKey {
-  uint32_t from_node_idx;
-  uint32_t from_way_idx;
-  uint32_t via_node_idx;
-  bool operator==(const CondensedTurnRestrictionKey& other) const {
-    return from_node_idx == other.from_node_idx &&
-           from_way_idx == other.from_way_idx &&
-           via_node_idx == other.via_node_idx;
-  }
-};
-
-namespace std {
-template <>
-struct hash<CondensedTurnRestrictionKey> {
-  size_t operator()(const CondensedTurnRestrictionKey& key) const {
-    // Use already defined std::string_view hash function.
-    // Note: this only works as long as there are no filler bytes in the struct!
-    return std::hash<std::string_view>{}(
-        std::string_view((char*)&key, sizeof(key)));
-  }
-};
-}  // namespace std
-
-struct CondensedTurnRestrictionData {
-  // 32 bits that select the allowed outgoing edges at the via node.
-  uint32_t allowed_edge_bits;
-  // True if a u-turn at via node is allowed.
-  uint32_t uturn_allowed : 1;
-  int64_t osm_relation_id;
-};
-
-using CondensedTurnRestrictionMap =
-    absl::flat_hash_map<CondensedTurnRestrictionKey,
-                        CondensedTurnRestrictionData>;
+#include "osm/turn_restriction_defs.h"
 
 // WaySharedAttrs (=WSA) contains many of the way attributes in a
 // data structure that is shared between ways. The shared data is stored in
 // Graph::way_shared_attrs vector and accessed through GWay::wsa_id.
 // Used to decrease the storage needed to store ways, both in ram and on disk.
 // Also see base/deduper_with_ids.h.
-struct WaySharedAttrs {
+struct WaySharedAttrs final {
   // Vehicles types used in the ra array.
   static constexpr VEHICLE RA_VEHICLES[] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
                                             VH_FOOT};
@@ -59,6 +25,14 @@ struct WaySharedAttrs {
       2 * sizeof(RA_VEHICLES) / sizeof(RA_VEHICLES[0]);
   // Routing info in forward and backward direction.
   RoutingAttrs ra[RA_MAX];
+
+  static WaySharedAttrs Create(const RoutingAttrs dflt) {
+    WaySharedAttrs wsa;
+    for (RoutingAttrs& val : wsa.ra) {
+      val = dflt;
+    }
+    return wsa;
+  }
 };
 
 // Check that WaySharedAttrs is POD. Note the struct has to be completely zeroed
@@ -108,6 +82,7 @@ struct GWay {
 };
 
 constexpr std::uint32_t INVALID_CLUSTER_ID = (1 << 22) - 1;
+constexpr std::uint32_t MAX_NUM_EDGES_OUT = (1 << 5) - 1;
 
 struct GEdge;
 struct GNode {
@@ -125,6 +100,11 @@ struct GNode {
   // For easy access, check out helper functions gnode_edge_stop(),
   // gnode_all_edges(), gnode_forward_edges() and gnode_inverted_edges() below.
   std::int64_t edges_start_pos : 36;
+  // Number of forward edges of this node. These are allocated in
+  // [edges_start_pos, edges_start_pos + num_edges_forward). All other edges are
+  // "inverted", e.g. point to another node that has an forward edge to the
+  // current node.
+  std::uint32_t num_edges_forward : 5;
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
   // node outside of this dead end have to pass through the bridge edge.
@@ -151,8 +131,8 @@ struct GEdge {
     // Edge is not restricted, but can only be reached by going through
     // restricted edges.
     LABEL_RESTRICTED_SECONDARY,
-    // Only used during initial processing, does not exist in the resulting road
-    // network.
+    // Only used during initial processing, does not exist in the resulting
+    // road network.
     LABEL_TEMPORARY,
   };
   std::uint32_t other_node_idx;
@@ -197,13 +177,16 @@ struct GEdge {
   // restricted-secondary road that is a highway.
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
   std::uint64_t car_label_strange : 1;
-  // True iff the edge is an exit edge in a simple turn restriction.
-  std::uint64_t simple_turn_restriction_exit : 1;
+  // True if at 'other_node_idx' it is allowed to travel back to 'from' node of
+  // this edge. There are two cases for this. It is always allowed to do a
+  // u-turn at an endpoint of a street. Additionally, it is allowed to do a
+  // u-turn if the edge is non-restricted and one would have to enter a
+  // restricted access area if not doing a u-turn.
+  std::uint64_t car_uturn_allowed : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
 struct GCluster {
-  std::uint16_t ncc = 0;
   std::uint32_t cluster_id = 0;
   std::uint32_t num_nodes = 0;
   std::uint32_t num_border_nodes = 0;
@@ -217,6 +200,10 @@ struct GCluster {
   // For each border node, list distances to all other border nodes.
   // Distance INFU32 indicates that a node can't be reached.
   std::vector<std::vector<std::uint32_t>> distances;
+  // Color number for drawing clusters. Avoids neighbouring clusters having the
+  // same color.
+  std::uint16_t color_no = 0;
+  std::uint16_t ncc = 0;
 
   uint32_t FindBorderNodePos(uint32_t node_idx) const {
     const auto it =
@@ -288,6 +275,7 @@ struct Graph {
   static std::vector<uint64_t> GetGWayNodeIds(const GWay& way) {
     // Decode node_ids.
     std::uint64_t num_nodes;
+    CHECK_S(way.node_ids != nullptr);
     std::uint8_t* ptr = way.node_ids;
     ptr += DecodeUInt(ptr, &num_nodes);
     std::vector<uint64_t> ids;
@@ -298,15 +286,28 @@ struct Graph {
   // Given a way with the original node id list, return the list of node indexes
   // (in graph.nodes) of all graph nodes.
   // Note that this ignores nodes that don't exist or that are not relevant for
-  // routing.
-  std::vector<size_t> GetGWayNodeIndexes(const HugeBitset& graph_node_ids,
-                                         const GWay& way) const {
+  // routing, according to the graph_node_ids bitset.
+  std::vector<uint32_t> GetGWayNodeIndexes(const HugeBitset& graph_node_ids,
+                                           const GWay& way) const {
     // Find nodes
-    std::vector<size_t> node_idx;
+    std::vector<uint32_t> node_idx;
     for (const uint64_t id : GetGWayNodeIds(way)) {
       if (graph_node_ids.GetBit(id)) {
         std::size_t idx = FindNodeIndex(id);
-        CHECK_S(idx >= 0 && idx < nodes.size());
+        CHECK_LT_S(idx, nodes.size());
+        node_idx.push_back(idx);
+      }
+    }
+    return node_idx;
+  }
+
+  // Same as above, but without the bitset for selecting nodes. This is slightly
+  // slower.
+  std::vector<uint32_t> GetGWayNodeIndexes(const GWay& way) const {
+    std::vector<uint32_t> node_idx;
+    for (const uint64_t id : GetGWayNodeIds(way)) {
+      std::size_t idx = FindNodeIndex(id);
+      if (idx < nodes.size()) {
         node_idx.push_back(idx);
       }
     }
@@ -314,9 +315,20 @@ struct Graph {
   }
 };
 
+inline int64_t GetGNodeId(const Graph& g, uint32_t node_idx) {
+  return g.nodes.at(node_idx).node_id;
+}
+
 inline int64_t GetGNodeIdSafe(const Graph& g, uint32_t node_idx) {
   if (node_idx < g.nodes.size()) {
     return g.nodes.at(node_idx).node_id;
+  }
+  return -1;
+}
+
+inline int64_t GetGWayIdSafe(const Graph& g, uint32_t way_idx) {
+  if (way_idx < g.ways.size()) {
+    return g.ways.at(way_idx).id;
   }
   return -1;
 }
@@ -342,33 +354,55 @@ inline std::span<const GEdge> gnode_all_edges(const Graph& g,
 
 inline std::span<GEdge> gnode_forward_edges(Graph& g, uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  /*
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
   while (e_stop > e_start && g.edges.at(e_stop - 1).inverted) {
     e_stop--;
   }
   return std::span<GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+  */
+  return std::span<GEdge>(&(g.edges.at(e_start)),
+                          g.nodes.at(node_idx).num_edges_forward);
 }
 
 inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
                                                   uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  /*
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
   while (e_stop > e_start && g.edges.at(e_stop - 1).inverted) {
     e_stop--;
   }
   return std::span<const GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+  */
+  return std::span<const GEdge>(&(g.edges.at(e_start)),
+                                g.nodes.at(node_idx).num_edges_forward);
+}
+
+inline const GEdge& gnode_find_edge(const Graph& g, uint32_t from_node_idx,
+                                    uint32_t to_node_idx, uint32_t way_idx) {
+  for (const GEdge& e : gnode_all_edges(g, from_node_idx)) {
+    if (e.other_node_idx == to_node_idx && e.way_idx == way_idx) return e;
+  }
+  ABORT_S() << absl::StrFormat(
+      "Node %lld has no forward edge to node %lld with way %lld",
+      GetGNodeIdSafe(g, from_node_idx), GetGNodeIdSafe(g, to_node_idx),
+      g.ways.at(way_idx).id);
 }
 
 inline std::span<const GEdge> gnode_inverted_edges(const Graph& g,
                                                    uint32_t node_idx) {
-  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos +
+                     g.nodes.at(node_idx).num_edges_forward;
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  /*
   while (e_start < e_stop && !g.edges.at(e_start).inverted) {
     e_start++;
   }
   // Use g.edges[], not g.edges.at(), because this could be outside range if the
   // last node has no inverted edges.
   //
+  */
   return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
@@ -458,4 +492,14 @@ inline bool RoutableForward(const Graph& g, const GWay& way, VEHICLE vt) {
 
 inline bool RoutableBackward(const Graph& g, const GWay& way, VEHICLE vt) {
   return RoutableAccess(GetRAFromWSA(g, way, vt, DIR_BACKWARD).access);
+}
+
+inline bool RoutableForward(const Graph& g, const GEdge& e, VEHICLE vt) {
+  return RoutableAccess(
+      GetRAFromWSA(g, g.ways.at(e.way_idx), vt, EDGE_DIR(e)).access);
+}
+
+inline bool RoutableBackward(const Graph& g, const GEdge& e, VEHICLE vt) {
+  return RoutableAccess(
+      GetRAFromWSA(g, g.ways.at(e.way_idx), vt, EDGE_INVERSE_DIR(e)).access);
 }

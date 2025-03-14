@@ -1,8 +1,8 @@
+#include <osmpbf/osmpbf.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "test/test_utils.h"
 #include "algos/compact_dijkstra.h"
 #include "algos/edge_key.h"
 #include "algos/edge_router.h"
@@ -13,6 +13,7 @@
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
+#include "test/test_utils.h"
 
 // Create a compacted graph from 'g' which has the same node ordering and the
 // same number of edges.
@@ -96,67 +97,6 @@ void TestGEdgeKey() {
   CHECK_S(a.HashKey(g) == c.HashKey(g));
 }
 
-#if 0
-void AddCluster(Graph& g, uint32_t cluster_id, GCluster c) {
-  CHECK_EQ_S(cluster_id, g.clusters.size());
-  g.clusters.push_back(c);
-}
-
-void AddNode(Graph& g, uint32_t idx, uint32_t cluster_id = 0) {
-  CHECK_EQ_S(idx, g.nodes.size());
-  g.nodes.push_back({.node_id = 100 + idx,
-                     .large_component = 1,
-                     .cluster_id = cluster_id,
-                     .cluster_border_node = 0,
-                     .edges_start_pos = 0,
-                     .dead_end = 0,
-                     .ncc = NCC_CH,
-                     .lat = 100 + (int32_t)idx,
-                     .lon = 100 + (int32_t)idx});
-}
-
-using TEdge = std::tuple<uint32_t, uint32_t, uint32_t, GEdge::RESTRICTION>;
-void AddEdge(uint32_t from, uint32_t to, uint32_t w, GEdge::RESTRICTION label,
-             bool both_dirs, std::vector<TEdge>* edges) {
-  edges->push_back({from, to, w, label});
-  if (both_dirs) {
-    edges->push_back({to, from, w, label});
-  }
-}
-
-void StoreEdges(std::vector<TEdge> edges, Graph* g) {
-  std::sort(edges.begin(), edges.end());
-  for (const TEdge& e : edges) {
-    const uint32_t from_idx = std::get<0>(e);
-    const uint32_t to_idx = std::get<1>(e);
-    g->nodes.at(from_idx).edges_start_pos += 1;  // Hack: use as counter.
-    g->edges.push_back({.other_node_idx = to_idx,
-                        .way_idx = 0,
-                        .distance_cm = std::get<2>(e),
-                        .unique_other = 1,
-                        .bridge = 0,
-                        .to_bridge = 0,
-                        .contra_way = 0,
-                        .cross_country = 0,
-                        .inverted = 0,
-                        .both_directions = 0,
-                        .car_label = std::get<3>(e),
-                        .car_label_strange = 0});
-    // If this edge crosses clusters, then mark the nodes accordingly.
-    if (g->nodes.at(from_idx).cluster_id != g->nodes.at(to_idx).cluster_id) {
-      g->nodes.at(from_idx).cluster_border_node = 1;
-      g->nodes.at(to_idx).cluster_border_node = 1;
-    }
-  }
-  uint32_t curr_pos = 0;
-  for (GNode& n : g->nodes) {
-    uint32_t count = n.edges_start_pos;
-    n.edges_start_pos = curr_pos;
-    curr_pos += count;
-  }
-}
-#endif
-
 /*
  * A typical graph with restricted areas. The restricted edge [a][b] should be
  * bypassed through [e] because this it is shorter.
@@ -175,12 +115,9 @@ void StoreEdges(std::vector<TEdge> edges, Graph* g) {
 Graph CreateGraphWithRestrictedSimple(bool both_dirs) {
   enum : uint32_t { A = 0, B, C, D, E, F };  // Node names.
   Graph g;
-  const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
-  g.way_shared_attrs.push_back({.ra = ra_entry});
-  g.ways.push_back({.highway_label = HW_TERTIARY,
-                    .uniform_country = 1,
-                    .ncc = NCC_CH,
-                    .wsa_id = 0});
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
   AddNode(g, A);
   AddNode(g, B);
   AddNode(g, C);
@@ -249,12 +186,9 @@ void TestRouteRestrictedSimple() {
 Graph CreateGraphWithRestricted(bool both_dirs) {
   enum : uint32_t { A = 0, B, C, D, E, F, G, H, I };  // Node names.
   Graph g;
-  const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
-  g.way_shared_attrs.push_back({.ra = ra_entry});
-  g.ways.push_back({.highway_label = HW_TERTIARY,
-                    .uniform_country = 1,
-                    .ncc = NCC_CH,
-                    .wsa_id = 0});
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
   AddNode(g, A);
   AddNode(g, B);
   AddNode(g, C);
@@ -359,12 +293,9 @@ void TestRouteRestricted() {
 Graph CreateRestrictedGraphHard(bool both_dirs) {
   enum : uint32_t { A = 0, B, C, D, E, F, G, H };  // Node names.
   Graph g;
-  const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
-  g.way_shared_attrs.push_back({.ra = ra_entry});
-  g.ways.push_back({.highway_label = HW_TERTIARY,
-                    .uniform_country = 1,
-                    .ncc = NCC_CH,
-                    .wsa_id = 0});
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
   AddNode(g, A);
   AddNode(g, B);
   AddNode(g, C);
@@ -448,12 +379,9 @@ void TestRouteRestrictedHard() {
 Graph CreateClusterGraph(bool both_dirs) {
   enum : uint32_t { A = 0, B, C, D, E, F };  // Node names.
   Graph g;
-  const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
-  g.way_shared_attrs.push_back({.ra = ra_entry});
-  g.ways.push_back({.highway_label = HW_TERTIARY,
-                    .uniform_country = 1,
-                    .ncc = NCC_CH,
-                    .wsa_id = 0});
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
   AddCluster(g, 0, {.num_nodes = 2, .border_nodes = {B}, .distances = {{0}}});
   AddCluster(g, 1, {.num_nodes = 2, .border_nodes = {C}, .distances = {{0}}});
   AddCluster(g, 2,
@@ -519,12 +447,9 @@ void TestClusterRoute() {
 Graph CreateClusterGraphDoubleEdge(bool both_dirs) {
   enum : uint32_t { A = 0, B, C, D, E, F };  // Node names.
   Graph g;
-  const RoutingAttrs ra_entry = {.dir = 1, .access = ACC_YES, .maxspeed = 50};
-  g.way_shared_attrs.push_back({.ra = ra_entry});
-  g.ways.push_back({.highway_label = HW_TERTIARY,
-                    .uniform_country = 1,
-                    .ncc = NCC_CH,
-                    .wsa_id = 0});
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
   AddCluster(g, 0,
              {.num_nodes = 2,
               .border_nodes = {A, E},
@@ -597,6 +522,46 @@ void TestClusterRouteDoubleEdge() {
     CHECK_EQ_S(ve.key.GetFromIdx(), C);
     CHECK_EQ_S(ve.key.GetToIdx(g), D);
     CHECK_S(!ve.key.IsClusterEdge());
+  }
+}
+
+void TestRouteSimpleTurnRestriction() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3 };
+  Graph g = CreateStandardTurnRestrictionGraph(true);
+
+  {
+    // Test shortest way without turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(B, E, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 2000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 3);
+  }
+
+  // Add turn restriction to graph.
+  OsmWrapper w;
+  OSMPBF::Relation rel =
+      CreateTRRelation(g, &w, /*id=*/1, Way0, D, Way2, "no_right_turn");
+  TRResult res;
+  ParseTurnRestriction(g, w.tagh, rel, Verbosity::Trace, &res);
+  g.condensed_turn_restriction_map =
+      ComputeCondensedTurnRestrictions(g, Verbosity::Trace, res.trs);
+  CHECK_EQ_S(g.condensed_turn_restriction_map.size(), 1);
+  MarkCondensedViaNodes(&g);
+
+  {
+    // Test shortest way with turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(B, E, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+
+    // This checks that a simple turn restriction is working.
+    CHECK_EQ_S(res.found_distance, 4000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+    CHECK_S(router.GetShortestPathNodeIndexes(g, res) ==
+            std::vector<uint32_t>({B, A, C, D, E}));
   }
 }
 
@@ -681,11 +646,11 @@ void TestBitFunctions() {
   CHECK_EQ_S(sizeof(long long), 8);
   // __builtin_ctz(0) is undefined.
   // CHECK_EQ_S(__builtin_ctz(0), 32);
-  CHECK_EQ_S(__builtin_ctz(1u<<0), 0);
-  CHECK_EQ_S(__builtin_ctz(1u<<30), 30);
-  CHECK_EQ_S(__builtin_ctz(1u<<31), 31);
-  CHECK_EQ_S(__builtin_ctzll(1llu<<60), 60);
-  CHECK_EQ_S(__builtin_ctzll(1llu<<63), 63);
+  CHECK_EQ_S(__builtin_ctz(1u << 0), 0);
+  CHECK_EQ_S(__builtin_ctz(1u << 30), 30);
+  CHECK_EQ_S(__builtin_ctz(1u << 31), 31);
+  CHECK_EQ_S(__builtin_ctzll(1llu << 60), 60);
+  CHECK_EQ_S(__builtin_ctzll(1llu << 63), 63);
 }
 
 int main(int argc, char* argv[]) {
@@ -702,6 +667,7 @@ int main(int argc, char* argv[]) {
   TestClusterRouteDoubleEdge();
   TestCompareShortestPaths();
   TestBitFunctions();
+  TestRouteSimpleTurnRestriction();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

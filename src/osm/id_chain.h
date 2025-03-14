@@ -44,6 +44,21 @@ class IdChain {
         std::swap(node_idx1, node_idx2);
       }
     }
+
+    // if way_idx is set, then return the node indexes in the correct order,
+    // i.e. potentially they are reversed.
+    // The returned vector contains at least two elements.
+    std::vector<uint32_t> GetWayNodeIndexes(const Graph& g) const {
+      CHECK_NE_S(way_idx, INFU32);
+      std::vector<uint32_t> v = g.GetGWayNodeIndexes(g.ways.at(way_idx));
+      if (code == Reversed) {
+        std::reverse(v.begin(), v.end());
+      }
+      CHECK_GE_S(v.size(), 2);
+      CHECK_EQ_S(v.front(), node_idx1);
+      CHECK_EQ_S(v.back(), node_idx2);
+      return v;
+    }
   };
   IdChain(int64_t relation_id) : relation_id_(relation_id), success_(true) {}
 
@@ -52,11 +67,10 @@ class IdChain {
   static bool CreateIdPairFromWay(const Graph& g, int64_t way_id,
                                   IdPair* pair) {
     pair->way_idx = g.FindWayIndex(way_id);
-    // LOG_S(INFO) << "BB0 way_idx:" << pair->way_idx << " way_id:" << way_id;
     if (pair->way_idx >= g.ways.size()) return false;
-    GetFrontAndBackNodeId(g, g.ways.at(pair->way_idx), &pair->node_idx1,
-                          &pair->node_idx2);
-   //  LOG_S(INFO) << "BB1";
+    GetFrontAndBackNodeIdx(g, g.ways.at(pair->way_idx), &pair->node_idx1,
+                           &pair->node_idx2);
+    // TODO: return error when node_idx1 == node_idx2?
     return true;
   }
 
@@ -103,12 +117,13 @@ class IdChain {
   int64_t relation_id_;
   bool success_;
 
-  static void GetFrontAndBackNodeId(const Graph& g, const GWay& w,
-                                    uint32_t* front_idx, uint32_t* back_idx) {
+  static void GetFrontAndBackNodeIdx(const Graph& g, const GWay& w,
+                                     uint32_t* front_idx, uint32_t* back_idx) {
     std::vector<uint64_t> ids = Graph::GetGWayNodeIds(w);
     CHECK_GE_S(ids.size(), 2);
     *front_idx = g.FindNodeIndex(ids.front());
     *back_idx = g.FindNodeIndex(ids.back());
+    // Front and back node of a way must exist in node table by construction.
     CHECK_S(*front_idx < g.nodes.size()) << absl::StrFormat(
         "Front node %lld of way %lld not found in graph!", ids.front(), w.id);
     CHECK_S(*back_idx < g.nodes.size()) << absl::StrFormat(

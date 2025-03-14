@@ -100,7 +100,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
 // Labels all car edges in the graph that have GEdge::LABEL_UNSET, i.e. all
 // edges that were not labelled ACC_CUSTOMERS, ACC_DELIVERY, ACC_DESTINATION
 // during creation.
-inline void LabelAllCarEdges(Graph* g) {
+inline void LabelAllCarEdges(Graph* g, Verbosity verbosity) {
   constexpr bool strange_no = false;
   constexpr bool strange_yes = true;
   FUNC_TIMER();
@@ -114,8 +114,10 @@ inline void LabelAllCarEdges(Graph* g) {
       // Start node is already done or completely restricted, nothing to do.
     } else if (res.count < 500 && res.found_restricted &&
                res.only_residential_street_types) {
-      LOG_S(INFO) << "Mark secondary:" << res.count
-                  << " node_id:" << g->nodes.at(i).node_id;
+      if (verbosity >= Verbosity::Debug) {
+        LOG_S(INFO) << "Mark secondary:" << res.count
+                    << " node_id:" << g->nodes.at(i).node_id;
+      }
       const auto res2 =
           LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
                         GEdge::LABEL_RESTRICTED_SECONDARY, strange_no, g);
@@ -126,27 +128,33 @@ inline void LabelAllCarEdges(Graph* g) {
                                       GEdge::LABEL_FREE, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else if (res.count > 10000) {
-      LOG_S(INFO) << "Mark large:" << res.count
-                  << " node_id:" << g->nodes.at(i).node_id;
+      if (verbosity >= Verbosity::Debug) {
+        LOG_S(INFO) << "Mark large:" << res.count
+                    << " node_id:" << g->nodes.at(i).node_id;
+      }
       // This is a large network, label as free.
       const auto res2 = LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
                                       GEdge::LABEL_FREE, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else if (g->nodes.at(i).large_component == 0) {
-      LOG_S(INFO) << "Mark small comp:" << res.count
-                  << " node_id:" << g->nodes.at(i).node_id;
+      if (verbosity >= Verbosity::Debug) {
+        LOG_S(INFO) << "Mark small comp:" << res.count
+                    << " node_id:" << g->nodes.at(i).node_id;
+      }
       // Small component, and it didn't fit 'secondary', label as free.
       const auto res2 = LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
                                       GEdge::LABEL_FREE, strange_no, g);
       CHECK_EQ_S(res.count, res2.count);
     } else {
       CHECK_S(res.found_restricted);
-      LOG_S(INFO) << "Mark strange:" << res.count
-                  << " node_id:" << g->nodes.at(i).node_id
-                  << " country:" << CountryNumToString(g->nodes.at(i).ncc)
-                  << " found restricted:" << res.found_restricted
-                  << " only residential:" << res.only_residential_street_types
-                  << " large_comp:" << g->nodes.at(i).large_component;
+      if (verbosity >= Verbosity::Verbose) {
+        LOG_S(INFO) << "Mark strange:" << res.count
+                    << " node_id:" << g->nodes.at(i).node_id
+                    << " country:" << CountryNumToString(g->nodes.at(i).ncc)
+                    << " found restricted:" << res.found_restricted
+                    << " only residential:" << res.only_residential_street_types
+                    << " large_comp:" << g->nodes.at(i).large_component;
+      }
 
       // Something is not well understood right now. Label as restricted but
       // also mark as strange for debugging.

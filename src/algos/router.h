@@ -59,8 +59,9 @@ class Router {
   RoutingResult Route(std::uint32_t start_idx, std::uint32_t target_idx,
                       const RoutingMetric& metric, const RoutingOptions& opt) {
     if (verbosity_ > 0) {
-      LOG_S(INFO) << absl::StrFormat("Start routing from %u to %u (%s)",
-                                     g_.nodes.at(start_idx).node_id, g_.nodes.at(target_idx).node_id, Name(metric, opt));
+      LOG_S(INFO) << absl::StrFormat(
+          "Start routing from %u to %u (%s)", g_.nodes.at(start_idx).node_id,
+          g_.nodes.at(target_idx).node_id, Name(metric, opt));
     }
     Clear();
 
@@ -204,9 +205,9 @@ class Router {
     // TODO: support mexspeed for different vehicles.
     // SOLUTION: Should use per (country, vehicle) maxspeed. If target
     // is in other country then use mix.
-    static const RoutingAttrs g_ra = {.access = ACC_YES, .maxspeed = 120};
-    static const WaySharedAttrs g_wsa = {.ra =
-                                             g_ra};  // Sets .ra[0] and .ra[1]!
+    static const WaySharedAttrs g_wsa =
+        WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
+
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
         {.distance_cm = static_cast<uint64_t>(

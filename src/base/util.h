@@ -13,7 +13,14 @@
 #include "absl/time/time.h"
 #include "logging/loguru.h"
 
-enum class ResType : int { Success = 0, Ignore = 1, Error = 2 };
+enum class Verbosity : int {
+  Quiet = 0,
+  Brief = 1,
+  Warning = 2,
+  Verbose = 3,
+  Debug = 4,
+  Trace = 5
+};
 
 inline void InitLogging(int argc, char* argv[]) {
   loguru::g_preamble_date = false;

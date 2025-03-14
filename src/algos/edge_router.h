@@ -28,7 +28,7 @@ class EdgeRouter {
     GEdgeKey key;
     std::uint32_t done : 1;            // 1 <=> edge has been finalized.
     std::uint32_t shortest_route : 1;  // 1 <=> edge is part of shortest route.
-    std::uint32_t restricted : 1;
+    std::uint32_t restricted_obsolete : 1;
     std::uint32_t prev_v_idx;  // Predecessor in visited_edges vector.
     std::uint32_t min_metric;  // The minimal metric seen so far.
     std::uint32_t heuristic_to_target : 30;
@@ -78,23 +78,6 @@ class EdgeRouter {
                    .metric = metric,
                    .target_lat = g_.nodes.at(target_idx).lat,
                    .target_lon = g_.nodes.at(target_idx).lon};
-#if 0
-    ctx.target_restricted_access.InitialiseTransitionNodes(g_, start_idx,
-                                                           target_idx);
-    if (ctx.target_restricted_access.transition_nodes.contains(start_idx)) {
-      // Special case, start and target area are the same.
-    }
-
-    if (verbosity_ > 0) {
-      const auto& tr = ctx.target_restricted_access;
-      LOG_S(INFO) << absl::StrFormat(
-          "Restricted target area: active:%d trans-nodes:%d rect min:(%d,%d) "
-          "max:(%d,%d)",
-          tr.active, tr.transition_nodes.size(), tr.bounding_rect.minp.x,
-          tr.bounding_rect.minp.y, tr.bounding_rect.maxp.x,
-          tr.bounding_rect.maxp.y);
-    }
-#endif
 
     // Add all outgoing edges of the start node to the queue.
     ExpandNeighboursForward(ctx, {.other_idx = start_idx,
@@ -110,7 +93,7 @@ class EdgeRouter {
       const QueuedEdge qe = pq_.top();
       pq_.pop();
       VisitedEdge& ve = visited_edges_.at(qe.v_idx);
-      if (target_best_v_idx != INFU32 && ve.min_metric >= target_best_metric) {
+      if (ve.min_metric >= target_best_metric && target_best_v_idx != INFU32) {
         // We have found a shortest way.
         break;
       }
@@ -135,7 +118,7 @@ class EdgeRouter {
         ExpandNeighboursForward(ctx, {.other_idx = other_node_idx,
                                       .metric = ve.min_metric,
                                       .v_idx = qe.v_idx,
-                                      .restricted = ve.restricted != 0,
+                                      .restricted = ve.restricted_obsolete != 0,
                                       .in_target_area = ve.key.GetBit()});
       } else {
         CHECK_S(false);
@@ -177,6 +160,19 @@ class EdgeRouter {
 
   const VisitedEdge& GetVEdge(uint32_t v_idx) const {
     return visited_edges_.at(v_idx);
+  }
+
+  std::vector<uint32_t> GetShortestPathNodeIndexes(const Graph& g,
+                                                   const RoutingResult& res) {
+    std::vector<uint32_t> v;
+    if (!res.route_v_idx.empty()) {
+      v.reserve(res.route_v_idx.size() + 1);
+      v.push_back(visited_edges_.at(res.route_v_idx.front()).key.GetFromIdx());
+      for (uint32_t v_idx : res.route_v_idx) {
+        v.push_back(visited_edges_.at(v_idx).key.GetToIdx(g));
+      }
+    }
+    return v;
   }
 
  private:
@@ -257,7 +253,7 @@ class EdgeRouter {
           {.key = key,
            .done = 0,
            .shortest_route = 0,
-           .restricted = 0,
+           .restricted_obsolete = 0,
            .prev_v_idx = INFU32,
            .min_metric = INFU32,
            .heuristic_to_target = use_astar_heuristic ? INFU30 : 0});
@@ -273,9 +269,8 @@ class EdgeRouter {
     // TODO: support mexspeed for different vehicles.
     // SOLUTION: Should use per (country, vehicle) maxspeed. If target
     // is in other country then use mix.
-    static const RoutingAttrs g_ra = {.access = ACC_YES, .maxspeed = 120};
-    static const WaySharedAttrs g_wsa = {.ra =
-                                             g_ra};  // Sets .ra[0] and .ra[1]!
+    static const WaySharedAttrs g_wsa =
+        WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
         {.distance_cm = static_cast<uint64_t>(
@@ -291,33 +286,48 @@ class EdgeRouter {
       LOG_S(INFO) << "=== EXPAND node:" << expansion_node.node_id
                   << " cluster:" << expansion_node.cluster_id;
     }
-    // The node with 'uturn_node_idx' represents a u-turn, which is forbidden in
-    // general.
-    // TODO: Handle u-turns better, specifically (1) allowed u-turns and (2)
-    // when forward and backward lanes of a road or on different ways.
-    const uint32_t uturn_node_idx =
-        prev.v_idx == INFU32 ? INFU32
-                             : visited_edges_.at(prev.v_idx).key.GetFromIdx();
 
-#if 0
-    if (expansion_node.simple_turn_restriction_via_node) {
+    // The node with 'uturn_node_idx' represents a forbidden u-turn.
+    uint32_t uturn_forbidden_node_idx = INFU32;
+    // Compute a bitset that has bits for all the allowed edge offsets.
+    uint32_t allowed_offset_bits = ~0;  // all '1'.
+
+    if (prev.v_idx != INFU32) {
+      const GEdgeKey& prev_key = visited_edges_.at(prev.v_idx).key;
+      if (!prev_key.IsClusterEdge()) {
+        if (expansion_node.simple_turn_restriction_via_node) {
+          auto iter = g_.condensed_turn_restriction_map.find(
+              {.from_node_idx = prev_key.GetFromIdx(),
+               .from_way_idx = prev_key.GetEdge(g_).way_idx,
+               .via_node_idx = prev.other_idx});
+          if (iter != g_.condensed_turn_restriction_map.end()) {
+            if (verbosity_ >= 3) {
+              LOG_S(INFO) << "*** TR found relation_id="
+                          << iter->second.osm_relation_id;
+            }
+            allowed_offset_bits = iter->second.allowed_edge_bits;
+          }
+        } else if (!prev_key.GetEdge(g_).car_uturn_allowed) {
+          // Store a uturn node idx that is forbidden. This is not needed when a
+          // bitset from simple turn restrictions above is available - it
+          // already contains the uturn information.
+          uturn_forbidden_node_idx = prev_key.GetFromIdx();
+        }
+      }
     }
-#endif
 
-    for (const GEdge& curr_ge : gnode_forward_edges(g_, prev.other_idx)) {
-      if (curr_ge.other_node_idx == uturn_node_idx) {
+    // for (const GEdge& curr_ge : gnode_forward_edges(g_, prev.other_idx)) {
+    for (uint64_t offset = 0; offset < expansion_node.num_edges_forward;
+         ++offset) {
+      const GEdge& curr_ge =
+          g_.edges.at(expansion_node.edges_start_pos + offset);
+
+      if (curr_ge.other_node_idx == uturn_forbidden_node_idx ||
+          ((1u << offset) & allowed_offset_bits) == 0) {
         // TODO: allow u-turn iff this is the only way out, the node has only
         // this one outgoing edge.
         continue;
       }
-
-#if 0
-      if (curr_ge.simple_turn_restriction_exit) {
-        // This edge is an exit edge in some simple turn restriction(s). 
-        // Find the restrictions and check if we're allowed to travel the edge.
-
-      }
-#endif
 
       const WaySharedAttrs& wsa = GetWSA(g_, curr_ge.way_idx);
       if (RoutingRejectEdge(g_, ctx.opt, expansion_node, prev.other_idx,
@@ -325,14 +335,6 @@ class EdgeRouter {
         continue;
       }
 
-#if 0
-      bool next_in_target_area;
-      if (!CheckRestrictedAccessTransition(ctx, prev, curr_ge,
-                                           &next_in_target_area)) {
-        continue;
-      }
-#endif
-#if 1
       bool next_in_target_area = prev.in_target_area;
       if (prev.restricted != (curr_ge.car_label != GEdge::LABEL_FREE)) {
         if (!CheckRestrictedAccessTransition(ctx, prev, curr_ge,
@@ -340,8 +342,8 @@ class EdgeRouter {
           continue;
         }
       }
-#endif
 
+      // We want to expand this edge!
       std::uint32_t v_idx = FindOrAddVisitedEdge(
           GEdgeKey::Create(g_, prev.other_idx, curr_ge, next_in_target_area),
           ctx.opt.use_astar_heuristic);
@@ -360,7 +362,7 @@ class EdgeRouter {
       if (new_metric < ve.min_metric) {
         ve.min_metric = new_metric;
         ve.prev_v_idx = prev.v_idx;
-        ve.restricted = (curr_ge.car_label != GEdge::LABEL_FREE);
+        ve.restricted_obsolete = (curr_ge.car_label != GEdge::LABEL_FREE);
 
         // In A* mode, compute heuristic distance from new node to target.
         if (ve.heuristic_to_target == INFU30) {
@@ -413,14 +415,14 @@ class EdgeRouter {
         std::uint32_t new_metric = prev.metric + dist;
 
         if (!ve.done && new_metric < ve.min_metric) {
-          // Cluster edges might have different keys but are mapped to the same
-          // hash key, because the from node is not part of the key.
-          ve.key =
-              GEdgeKey::CreateClusterEdge(g_, prev.other_idx, i, /*bit=*/false);
+          // Cluster edges might have different keys but are mapped to the
+          // same hash key, because the from node is not part of the key.
+          ve.key = GEdgeKey::CreateClusterEdge(g_, prev.other_idx, i,
+                                               /*bit=*/false);
           ve.min_metric = new_metric;
           ve.prev_v_idx = prev.v_idx;
           // ve.restricted is already false.
-          CHECK_S(!ve.restricted);
+          CHECK_S(!ve.restricted_obsolete);
 
           // Compute heuristic distance from new node to target.
           if (ve.heuristic_to_target == INFU30) {
@@ -488,8 +490,15 @@ class EdgeRouter {
   // "start-restricted"->"free" and "free"->"destination restricted". Returns
   // false if a transition is happening that is not allowed, and true in all
   // other cases (i.e. no transition and allowed transitions). Sets
-  // next_in_target_area to true if the corresponding bit in the edge key should
-  // be set. This happens when entering a restricted-access area from free.
+  // next_in_target_area to true if the corresponding bit in the edge key
+  // should be set. This happens when entering a restricted-access area from
+  // free.
+  // When entering a restricted area, 'next_in_target_area' will be set to
+  // true and all following edges will have the corresponding bit in the edge
+  // key set. Note that this bit can not be unset, since it is not allowed to
+  // leave the target restricted area. Setting the bit avoids conflicting
+  // metrics when the start and target area are the same, but the fastest path
+  // leaves and re-enters it.
   inline bool CheckRestrictedAccessTransition(const Context& ctx,
                                               const PrevEdgeData& prev,
                                               const GEdge& curr_ge,
@@ -502,70 +511,12 @@ class EdgeRouter {
     // curr edge is restricted.
     if (!prev.restricted) {
       // We're entering restricted.
-      CHECK_S(!prev.in_target_area);  // We can't be in restricted because we're
-                                      // entering it.
+      CHECK_S(!prev.in_target_area);  // We can't be in restricted because
+                                      // we're entering it.
       *next_in_target_area = true;
     }
     return true;
   }
-
-#if 0
-    const bool curr_restricted = curr_ge.car_label != GEdge::LABEL_FREE;
-    const RestrictedAccessArea& d_area = ctx.target_restricted_access;
-
-    if (!d_area.start_equal_target) {
-      // Normal case, the start and target areas *not* the same.
-      const GNode& from_node = g_.nodes.at(prev.other_idx);
-      const bool is_target_transition_node =
-          d_area.active &&
-          d_area.bounding_rect.Contains({from_node.lat, from_node.lon}) &&
-          d_area.transition_nodes.contains(prev.other_idx);
-      if (prev.restricted == is_target_transition_node) {
-        // This catches two transition cases:
-        //   restricted->free: forbidden when leaving target restricted
-        //   area.
-        //   free->restricted: forbidden when not moving into target
-        //   restricted area.
-        if (verbosity_ >= 3) {
-          int64_t prev_node_id = -1;
-          if (prev.v_idx != INFU32) {
-            prev_node_id =
-                visited_edges_.at(prev.v_idx).key.FromNode(g_).node_id;
-          }
-          LOG_S(INFO) << absl::StrFormat(
-              "RESTRICTED: transition (%lld->) %lld->%lld forbidden (edge %s)",
-              prev_node_id, from_node.node_id,
-              g_.nodes.at(curr_ge.other_node_idx).node_id,
-              curr_restricted ? "restricted" : "free");
-        }
-        return false;
-      }
-    } else {
-      // Special case, the start and target areas are the same and
-      // non-empty.
-      if (prev.in_target_area) {
-        CHECK_S(prev.restricted);
-        CHECK_S(!curr_restricted);
-        // If we're in the target area, then it is not allowed to leave it
-        // again.
-        return false;
-      } else if (!curr_restricted) {
-        // OK, we're leaving the start area.
-      } else {
-        CHECK_S(!prev.in_target_area);
-        CHECK_S(!prev.restricted);
-        CHECK_S(curr_restricted);
-        if (!d_area.transition_nodes.contains(prev.other_idx)) {
-          // We're not allowed to enter another restricted area.
-          return false;
-        }
-        // We're entering the target area, set bit in edge keys.
-        *curr_in_target_area = true;
-        return true;
-      }
-    }
-    return true;
-#endif
 
   void Clear() {
     visited_edges_.clear();

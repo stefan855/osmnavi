@@ -29,23 +29,25 @@
 
 void PrintStructSizes() {
   LOG_S(INFO) << "----------- Struct Sizes ---------";
-  LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(VisitedNode): %4u",
+  LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(VisitedNode):  %4u",
                                  sizeof(Router::VisitedNode));
-  LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(QueuedNode):  %4u",
+  LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(QueuedNode):   %4u",
                                  sizeof(Router::QueuedNode));
-  LOG_S(INFO) << absl::StrFormat("sizeof(GNode):                 %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(GNode):                  %4u",
                                  sizeof(GNode));
-  LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                 %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                  %4u",
                                  sizeof(GEdge));
-  LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):              %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):               %4u",
                                  sizeof(GEdgeKey));
-  LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                  %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter::VisitedEdge):%4u",
+                                 sizeof(EdgeRouter::VisitedEdge));
+  LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
-  LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):          %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):           %4u",
                                  sizeof(RoutingAttrs));
-  LOG_S(INFO) << absl::StrFormat("sizeof(WayTaggedZones):        %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(WayTaggedZones):         %4u",
                                  sizeof(build_graph::WayTaggedZones));
-  LOG_S(INFO) << absl::StrFormat("sizeof(pair<int32_t,int32_t>): %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(pair<int32_t,int32_t>):  %4u",
                                  sizeof(std::pair<int32_t, int32_t>));
 }
 
@@ -313,7 +315,7 @@ void WriteCrossCountryEdges(const build_graph::GraphMetaData& meta,
     if (way.uniform_country == 1) {
       continue;
     }
-    const std::vector<size_t> node_idx =
+    const std::vector<uint32_t> node_idx =
         meta.graph.GetGWayNodeIndexes(*(meta.way_nodes_needed), way);
     for (size_t pos = 0; pos < node_idx.size() - 1; ++pos) {
       const GNode& n1 = meta.graph.nodes.at(node_idx.at(pos));
@@ -357,11 +359,25 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
         // Edge within cluster.
         constexpr int32_t kMaxColor = 17;
         static std::string_view colors[kMaxColor] = {
-            "blue",   "green",  "red",     "yel",    "violet", "olive",
-            "lblue",  "dgreen", "dred",    "brown",  "grey",   "gblue",
-            "orange", "lgreen", "greenbl", "lbrown", "pink",
+            "blue",     //
+            "dgreen",   //
+            "orange",   //
+            "yel",      //
+            "brown",    //
+            "violet",   //
+            "lblue",    //
+            "dred",     //
+            "green",    //
+            "red",      //
+            "grey",     //
+            "gblue",    //
+            "lgreen",   //
+            "greenbl",  //
+            "lbrown",   //
+            "pink",     //
+            "olive",    //
         };
-        color = colors[n0.cluster_id % kMaxColor];
+        color = colors[g.clusters.at(n0.cluster_id).color_no % kMaxColor];
       }
 
       myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, n0.lat, n0.lon,
