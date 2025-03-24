@@ -29,43 +29,65 @@ struct TurnRestriction {
   // A list of (from_node,to_node,way) entries that describe the path of the
   // turn restriction from start to end. The to_node of an entry is equal to the
   // from node of the following entry.
-  struct NodePathEntry {
+  // Note that the first entry in the path is the last edge in the from way,
+  // ending in the first via node. And the last entry in the path is the first
+  // edge in the to way, starting at the last via node. If the list has only two
+  // entries, then the path represents a simple turn restriction.
+  struct TREdge {
     std::uint32_t from_node_idx;
-    std::uint32_t to_node_idx;
     std::uint32_t way_idx;
-  };
-  std::vector<NodePathEntry> node_path;
-};
+    std::uint32_t to_node_idx;
 
-struct CondensedTurnRestrictionKey {
-  uint32_t from_node_idx;
-  uint32_t from_way_idx;
-  uint32_t via_node_idx;
-  bool operator==(const CondensedTurnRestrictionKey& other) const {
-    return from_node_idx == other.from_node_idx &&
-           from_way_idx == other.from_way_idx &&
-           via_node_idx == other.via_node_idx;
+    bool operator==(const TREdge& other) const {
+      return from_node_idx == other.from_node_idx && way_idx == other.way_idx &&
+             to_node_idx == other.to_node_idx;
+    }
+    bool operator<(const TREdge& b) const {
+      if (from_node_idx != b.from_node_idx) {
+        return from_node_idx < b.from_node_idx;
+      }
+      if (way_idx != b.way_idx) {
+        return way_idx < b.way_idx;
+      }
+      return to_node_idx < b.to_node_idx;
+    }
+  };
+  std::vector<TREdge> path;
+
+  // Get the key for the edge that triggers the start of the turn restriction.
+  // This works for both simple and complex turn restrictions and is simply the
+  // first edge in the path.
+  const TREdge& GetTriggerKey() const {
+    CHECK_GE_S(path.size(), 2);
+    return path.front();
   }
 };
 
-struct CondensedTurnRestrictionData {
+struct SimpleTurnRestrictionData {
   // 32 bits that select the allowed outgoing edges at the via node.
   uint32_t allowed_edge_bits;
   int64_t osm_relation_id;
 };
 
+// Make sure there are no filler bytes, because we hash the whole thing.
+static_assert(sizeof(TurnRestriction::TREdge) == 3 * sizeof(std::uint32_t));
+
 namespace std {
 template <>
-struct hash<CondensedTurnRestrictionKey> {
-  size_t operator()(const CondensedTurnRestrictionKey& key) const {
+
+struct hash<TurnRestriction::TREdge> {
+  size_t operator()(const TurnRestriction::TREdge& key) const {
     // Use already defined std::string_view hash function.
     // Note: this only works as long as there are no filler bytes in the struct!
+
     return std::hash<std::string_view>{}(
         std::string_view((char*)&key, sizeof(key)));
   }
 };
 }  // namespace std
+   //
+using SimpleTurnRestrictionMap =
+    absl::flat_hash_map<TurnRestriction::TREdge, SimpleTurnRestrictionData>;
 
-using CondensedTurnRestrictionMap =
-    absl::flat_hash_map<CondensedTurnRestrictionKey,
-                        CondensedTurnRestrictionData>;
+using ComplexTurnRestrictionMap =
+    absl::flat_hash_map<TurnRestriction::TREdge, uint32_t>;

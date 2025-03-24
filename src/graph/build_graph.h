@@ -43,9 +43,7 @@ struct BuildGraphOptions {
   int n_threads = 8;
 
   // Development, Debugging...
-  // Currently only reading is implemented.
-  bool process_turn_restrictions = true;
-  bool log_turn_restrictions = false;
+  Verbosity verb_turn_restrictions = Verbosity::Brief;
   bool log_way_tag_stats = false;
   // Compute all cluster shortest paths a second time with A* and compare to the
   // results of single source Dijkstra. This is extremely time consuming.
@@ -137,10 +135,9 @@ struct GraphMetaData {
   // Resulting graph data structure used for routing.
   Graph graph;
 
-  // Simple turn restrictions with a single via node.
+  // Simple turn restrictions with a single via node. Only needed during
+  // construction of the graph.
   std::vector<TurnRestriction> simple_turn_restrictions;
-  // TODO: Handle complex turn restrictions with one or more via ways.
-  std::vector<TurnRestriction> complex_turn_restrictions;
 
   BuildGraphStats stats;
 };

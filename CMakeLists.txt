@@ -22,7 +22,7 @@ include_directories(${CMAKE_BINARY_DIR})
 message(CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 message(CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}")
 
-add_definitions(-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64)
+add_definitions(-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D LOGURU_DEBUG_CHECKS=1)
 
 # print file paths
 # add_compile_options(-H)

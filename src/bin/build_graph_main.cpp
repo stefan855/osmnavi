@@ -435,9 +435,10 @@ int main(int argc, char* argv[]) {
            .desc = "Collect and print the way-tag-stats found in the data, "
                    "sorted by decreasing frequency."},
 
-          {.name = "log_turn_restrictions",
-           .type = "bool",
-           .desc = "Log information about turn restrictions."},
+          {.name = "verb_turn_restrictions",
+           .type = "string",
+           .dflt = "brief",
+           .desc = "Verbosity level for turn restrictions reading"},
 
           {.name = "check_shortest_cluster_paths",
            .type = "bool",
@@ -459,7 +460,8 @@ int main(int argc, char* argv[]) {
   opt.merge_tiny_clusters =
       opt.align_clusters_to_ncc && argli.GetBool("merge_tiny_clusters");
   opt.n_threads = argli.GetInt("n_threads");
-  opt.log_turn_restrictions = argli.GetBool("log_turn_restrictions");
+  opt.verb_turn_restrictions =
+      ParseVerbosityFlag(argli.GetString("verb_turn_restrictions"));
   opt.log_way_tag_stats = argli.GetBool("log_way_tag_stats");
   opt.check_shortest_cluster_paths =
       argli.GetBool("check_shortest_cluster_paths");

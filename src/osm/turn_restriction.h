@@ -194,7 +194,7 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
   // Build the node path.
   if (success) {
     const std::vector<IdChain::IdPair>& ch = chain.get_chain();
-    CHECK_S(tr->node_path.empty());
+    CHECK_S(tr->path.empty());
     CHECK_GE_S(ch.size(), 3);
 
     {
@@ -202,9 +202,9 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       const IdChain::IdPair& p = ch.front();
       CHECK_NE_S(p.way_idx, INFU32);
       const std::vector<uint32_t> v = p.GetWayNodeIndexes(g);
-      tr->node_path.push_back({.from_node_idx = v.at(v.size() - 2),
-                               .to_node_idx = v.at(v.size() - 1),
-                               .way_idx = p.way_idx});
+      tr->path.push_back({.from_node_idx = v.at(v.size() - 2),
+                          .way_idx = p.way_idx,
+                          .to_node_idx = v.at(v.size() - 1)});
     }
 
     if (!tr->via_is_node) {
@@ -213,9 +213,9 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
         const IdChain::IdPair& p = ch.at(i);
         const auto node_indexes = p.GetWayNodeIndexes(g);
         for (size_t pos = 0; pos < node_indexes.size() - 1; ++pos) {
-          tr->node_path.push_back({.from_node_idx = node_indexes.at(pos),
-                                   .to_node_idx = node_indexes.at(pos + 1),
-                                   .way_idx = p.way_idx});
+          tr->path.push_back({.from_node_idx = node_indexes.at(pos),
+                              .way_idx = p.way_idx,
+                              .to_node_idx = node_indexes.at(pos + 1)});
         }
       }
     }
@@ -225,16 +225,16 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       const IdChain::IdPair& p = ch.back();
       CHECK_NE_S(p.way_idx, INFU32);
       const std::vector<uint32_t> v = p.GetWayNodeIndexes(g);
-      tr->node_path.push_back({.from_node_idx = v.at(0),
-                               .to_node_idx = v.at(1),
-                               .way_idx = p.way_idx});
+      tr->path.push_back({.from_node_idx = v.at(0),
+                          .way_idx = p.way_idx,
+                          .to_node_idx = v.at(1)});
     }
   }
 
   if (success) {
     // Now check that the path is sane.
     int64_t prev_idx = -1;
-    for (TurnRestriction::NodePathEntry entry : tr->node_path) {
+    for (TurnRestriction::TREdge entry : tr->path) {
       CHECK_S(prev_idx == -1 || prev_idx == entry.from_node_idx)
           << tr->relation_id;
       prev_idx = entry.to_node_idx;
@@ -284,44 +284,34 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
                                    chain.get_chain().size(),
                                    success ? "success" : "error",
                                    chain.GetChainCodeString(), tr->relation_id);
-    if (tr->node_path.size() >= 2) {
+    if (tr->path.size() >= 2) {
       LOG_S(INFO) << absl::StrFormat(
           "TR: Connecting nodes from:%lld via-in:%lld via-out:%lld to:%lld",
-          GetGNodeIdSafe(g, tr->node_path.front().from_node_idx),
-          GetGNodeIdSafe(g, tr->node_path.front().to_node_idx),
-          GetGNodeIdSafe(g, tr->node_path.back().from_node_idx),
-          GetGNodeIdSafe(g, tr->node_path.back().to_node_idx));
+          GetGNodeIdSafe(g, tr->path.front().from_node_idx),
+          GetGNodeIdSafe(g, tr->path.front().to_node_idx),
+          GetGNodeIdSafe(g, tr->path.back().from_node_idx),
+          GetGNodeIdSafe(g, tr->path.back().to_node_idx));
     }
   }
 
   return success;
 }
 
-inline CondensedTurnRestrictionKey CreateCondensedTurnRestrictionKey(
-    const TurnRestriction& tr) {
-  CHECK_EQ_S(tr.node_path.size(), 2);
-  TurnRestriction::NodePathEntry entry = tr.node_path.front();
-  return {.from_node_idx = entry.from_node_idx,
-          .from_way_idx = entry.way_idx,
-          .via_node_idx = entry.to_node_idx};
-}
-
 // Computes a bitset representing the allowed outgoing edges at the via node,
 // applying all turn restrictions in 'trs' at once.
 //
-// The turn restrictions in 'trs' must all have identical condensed keys, i.e.
+// The turn restrictions in 'trs' must all have identical keys, i.e.
 // identical (from_node_idx,from_way_idx, last_via_node_idx).
-inline bool CreateCondensedTurnRestrictionData(
+inline bool CreateSimpleTurnRestrictionData(
     const Graph& g, Verbosity verbosity,
-    const std::span<const TurnRestriction> trs,
-    CondensedTurnRestrictionData* d) {
+    const std::span<const TurnRestriction> trs, SimpleTurnRestrictionData* d) {
   CHECK_S(!trs.empty());
   const TurnRestriction& first_tr = trs.front();
-  CHECK_EQ_S(first_tr.node_path.size(), 2) << first_tr.relation_id;
+  CHECK_EQ_S(first_tr.path.size(), 2) << first_tr.relation_id;
 
-  const uint32_t from_node_idx = first_tr.node_path.front().from_node_idx;
-  const uint32_t from_way_idx = first_tr.node_path.front().way_idx;
-  const uint32_t via_node_idx = first_tr.node_path.front().to_node_idx;
+  const uint32_t from_node_idx = first_tr.path.front().from_node_idx;
+  const uint32_t from_way_idx = first_tr.path.front().way_idx;
+  const uint32_t via_node_idx = first_tr.path.front().to_node_idx;
   const GNode& via_node = g.nodes.at(via_node_idx);
   uint32_t num_edges =
       gnode_edge_stop(g, via_node_idx) - via_node.edges_start_pos;
@@ -340,8 +330,8 @@ inline bool CreateCondensedTurnRestrictionData(
       if (e.inverted) {
         // Remove the bit belonging to the edge.
         d->allowed_edge_bits = d->allowed_edge_bits & ~(1u << offset);
-      } else if (e.way_idx == tr.node_path.back().way_idx &&
-                 e.other_node_idx == tr.node_path.back().to_node_idx) {
+      } else if (e.way_idx == tr.path.back().way_idx &&
+                 e.other_node_idx == tr.path.back().to_node_idx) {
         found = true;
         if (tr.forbidden) {
           // Remove the bit belonging to the edge.
@@ -515,37 +505,25 @@ inline void ParseTurnRestriction(const Graph& g, const OSMTagHelper& tagh,
   }
 }
 
-// Sort the simple turn restrictions by the edge that triggers the
+// Sort the turn restrictions by the edge that triggers the
 // restriction, i.e. the edge of the from way that connects to the via node.
-inline void SortSimpleTurnRestrictions(std::vector<TurnRestriction>* trs) {
+inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
   std::sort(trs->begin(), trs->end(),
             [](const TurnRestriction& a, const TurnRestriction& b) {
-              CHECK_EQ_S(a.node_path.size(), 2);
-              CHECK_EQ_S(b.node_path.size(), 2);
-              const auto& fa = a.node_path.front();
-              const auto& fb = b.node_path.front();
-
-              if (fa.from_node_idx != fb.from_node_idx) {
-                return fa.from_node_idx < fb.from_node_idx;
+              if (a.GetTriggerKey() != b.GetTriggerKey()) {
+                return a.GetTriggerKey() < b.GetTriggerKey();
               }
-              if (fa.way_idx != fb.way_idx) {
-                return fa.way_idx < fb.way_idx;
-              }
-              // This is the via node in a simple turn restriction.
-              if (fa.to_node_idx != fb.to_node_idx) {
-                return fa.to_node_idx < fb.to_node_idx;
-              }
-              return a.node_path.back().way_idx < b.node_path.back().way_idx;
+              return a.path.back() < b.path.back();
             });
 }
 
 // Compute simple turn restrictions for the turn restrictions in 'trs'.
-// Note that trs needs to be sorted by SortSimpleTurnRestrictions() and must
+// Note that trs needs to be sorted by SortTurnRestrictions() and must
 // contain simple restrictions only.
-inline CondensedTurnRestrictionMap ComputeCondensedTurnRestrictions(
+inline SimpleTurnRestrictionMap ComputeSimpleTurnRestrictionMap(
     const Graph& g, Verbosity verbosity,
     const std::vector<TurnRestriction>& trs) {
-  CondensedTurnRestrictionMap res;
+  SimpleTurnRestrictionMap res;
   if (trs.empty()) {
     return res;
   }
@@ -553,14 +531,13 @@ inline CondensedTurnRestrictionMap ComputeCondensedTurnRestrictions(
   for (size_t i = 0; i < trs.size(); ++i) {
     CHECK_S(trs.at(i).via_is_node);
     if (i == trs.size() - 1 ||
-        CreateCondensedTurnRestrictionKey(trs.at(i)) !=
-            CreateCondensedTurnRestrictionKey(trs.at(i + 1))) {
-      CondensedTurnRestrictionData d;
-      if (CreateCondensedTurnRestrictionData(
+        trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
+      SimpleTurnRestrictionData d;
+      if (CreateSimpleTurnRestrictionData(
               g, verbosity,
               std::span<const TurnRestriction>(&(trs.at(start)), 1 + i - start),
               &d)) {
-        res[CreateCondensedTurnRestrictionKey(trs.at(start))] = d;
+        res[trs.at(start).GetTriggerKey()] = d;
       }
       start = i + 1;
     }
@@ -568,8 +545,37 @@ inline CondensedTurnRestrictionMap ComputeCondensedTurnRestrictions(
   return res;
 }
 
-inline void MarkCondensedViaNodes(Graph* g) {
-  for (const auto& [key, data] : g->condensed_turn_restriction_map) {
-    g->nodes.at(key.via_node_idx).simple_turn_restriction_via_node = 1;
+inline void MarkSimpleViaNodes(Graph* g) {
+  for (const auto& [key, data] : g->simple_turn_restriction_map) {
+    g->nodes.at(key.to_node_idx).simple_turn_restriction_via_node = 1;
+  }
+}
+
+// Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
+// first position in trs where that key occurs. Note that trs needs to be sorted
+// by SortTurnRestrictions() and must contain complex turn  restrictions only.
+inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
+    const Graph& g, Verbosity verbosity,
+    const std::vector<TurnRestriction>& trs) {
+  ComplexTurnRestrictionMap res;
+  if (trs.empty()) {
+    return res;
+  }
+  size_t start = 0;
+  for (size_t i = 0; i < trs.size(); ++i) {
+    CHECK_S(!trs.at(i).via_is_node);
+    if (i == trs.size() - 1 ||
+        trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
+      res[trs.at(start).GetTriggerKey()] = start;
+      start = i + 1;
+    }
+  }
+  return res;
+}
+
+inline void MarkComplexTriggerEdges(Graph* g) {
+  for (const auto& [key, pos] : g->complex_turn_restriction_map) {
+    gnode_find_edge(*g, key.from_node_idx, key.to_node_idx, key.way_idx)
+        .complex_turn_restriction_trigger = 1;
   }
 }

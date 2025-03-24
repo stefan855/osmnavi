@@ -183,6 +183,7 @@ struct GEdge {
   // u-turn if the edge is non-restricted and one would have to enter a
   // restricted access area if not doing a u-turn.
   std::uint64_t car_uturn_allowed : 1;
+  std::uint64_t complex_turn_restriction_trigger : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -236,7 +237,13 @@ struct Graph {
   std::vector<GEdge> edges;
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
-  CondensedTurnRestrictionMap condensed_turn_restriction_map;
+
+  // Turn restrictions. Both types are indexed by the first entry edge.
+  SimpleTurnRestrictionMap simple_turn_restriction_map;
+  std::vector<TurnRestriction> complex_turn_restrictions;
+  // Map from entry edge to the index in 'complex_turn_restrictions' above.
+  ComplexTurnRestrictionMap complex_turn_restriction_map;
+
   std::vector<GCluster> clusters;
 
   // SimpleMemPool aligned_pool_;
@@ -389,6 +396,33 @@ inline const GEdge& gnode_find_edge(const Graph& g, uint32_t from_node_idx,
       GetGNodeIdSafe(g, from_node_idx), GetGNodeIdSafe(g, to_node_idx),
       g.ways.at(way_idx).id);
 }
+
+inline GEdge& gnode_find_edge(Graph& g, uint32_t from_node_idx,
+                              uint32_t to_node_idx, uint32_t way_idx) {
+  for (GEdge& e : gnode_all_edges(g, from_node_idx)) {
+    if (e.other_node_idx == to_node_idx && e.way_idx == way_idx) return e;
+  }
+  ABORT_S() << absl::StrFormat(
+      "Node %lld has no forward edge to node %lld with way %lld",
+      GetGNodeIdSafe(g, from_node_idx), GetGNodeIdSafe(g, to_node_idx),
+      g.ways.at(way_idx).id);
+}
+
+#if 0
+// Find edge between two nodes. If way_idx is >=0, then also checks the way of
+// the edge.
+// Returns a pointer to the edge or nullptr, if the edge couldn't be found.
+const GEdge* FindForwardEdge(uint32_t from_node_idx, uint32_t to_node_idx,
+                             int64_t way_idx = -1) const {
+  for (const GEdge& e : gnode_forward_edges(*this, from_node_idx)) {
+    if (e.other_node_idx == to_node_idx &&
+        (way_idx == -1 || e.way_idx == way_idx)) {
+      return &e;
+    }
+  }
+  return nullptr;
+}
+#endif
 
 inline std::span<const GEdge> gnode_inverted_edges(const Graph& g,
                                                    uint32_t node_idx) {

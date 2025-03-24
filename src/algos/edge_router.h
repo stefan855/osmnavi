@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fstream>
+#include <optional>
 #include <queue>
 #include <vector>
 
@@ -80,11 +81,11 @@ class EdgeRouter {
                    .target_lon = g_.nodes.at(target_idx).lon};
 
     // Add all outgoing edges of the start node to the queue.
-    ExpandNeighboursForward(ctx, {.other_idx = start_idx,
-                                  .metric = 0,
-                                  .v_idx = INFU32,
-                                  .restricted = true,
-                                  .in_target_area = false});
+    ExpandForwardEdges(ctx, {.other_idx = start_idx,
+                             .metric = 0,
+                             .v_idx = INFU32,
+                             .restricted = true,
+                             .in_target_area = false});
 
     // Store the best edge seen so far that points to target_idx.
     uint32_t target_best_v_idx = INFU32;
@@ -102,10 +103,11 @@ class EdgeRouter {
       }
       ve.done = 1;
       if (verbosity_ >= 3) {
+        LOG_S(INFO) << "======";
         LOG_S(INFO) << "POP   " << VisitedEdgeToString(ve);
       }
 
-      const uint32_t other_node_idx = ve.key.GetToIdx(g_);
+      const uint32_t other_node_idx = ve.key.GetToIdx(g_, ctr_deduper_);
       if (other_node_idx == target_idx) {
         // This edge ends at the target node. Remember it if it is the fastest.
         if (ve.min_metric < target_best_metric) {
@@ -115,11 +117,11 @@ class EdgeRouter {
       }
 
       if (!ctx.opt.backward_search) {
-        ExpandNeighboursForward(ctx, {.other_idx = other_node_idx,
-                                      .metric = ve.min_metric,
-                                      .v_idx = qe.v_idx,
-                                      .restricted = ve.restricted_obsolete != 0,
-                                      .in_target_area = ve.key.GetBit()});
+        ExpandForwardEdges(ctx, {.other_idx = other_node_idx,
+                                 .metric = ve.min_metric,
+                                 .v_idx = qe.v_idx,
+                                 .restricted = ve.restricted_obsolete != 0,
+                                 .in_target_area = ve.key.GetBit()});
       } else {
         CHECK_S(false);
         // ExpandNeighboursBackward(qedge, ctx, vedge);
@@ -147,8 +149,8 @@ class EdgeRouter {
     for (int output_shortest = 0; output_shortest <= 1; output_shortest++) {
       for (const VisitedEdge& ve : visited_edges_) {
         if (ve.shortest_route == (output_shortest > 0)) {
-          const GNode a = ve.key.FromNode(g_);
-          const GNode b = ve.key.ToNode(g_);
+          const GNode a = ve.key.FromNode(g_, ctr_deduper_);
+          const GNode b = ve.key.ToNode(g_, ctr_deduper_);
           myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
                                     ve.shortest_route ? "red" : "black", a.lat,
                                     a.lon, b.lat, b.lon);
@@ -162,25 +164,27 @@ class EdgeRouter {
     return visited_edges_.at(v_idx);
   }
 
-  std::vector<uint32_t> GetShortestPathNodeIndexes(const Graph& g,
-                                                   const RoutingResult& res) {
+  std::vector<uint32_t> GetShortestPathNodeIndexes(const RoutingResult& res) {
     std::vector<uint32_t> v;
     if (!res.route_v_idx.empty()) {
       v.reserve(res.route_v_idx.size() + 1);
-      v.push_back(visited_edges_.at(res.route_v_idx.front()).key.GetFromIdx());
+      v.push_back(visited_edges_.at(res.route_v_idx.front())
+                      .key.GetFromIdx(g_, ctr_deduper_));
       for (uint32_t v_idx : res.route_v_idx) {
-        v.push_back(visited_edges_.at(v_idx).key.GetToIdx(g));
+        v.push_back(visited_edges_.at(v_idx).key.GetToIdx(g_, ctr_deduper_));
       }
     }
     return v;
   }
 
  private:
+  friend void TestClusterRouteDoubleEdge();
+
   struct Context {
     const RoutingOptions opt;
     const RoutingMetric& metric;
-    int32_t target_lat;
-    int32_t target_lon;
+    const int32_t target_lat;
+    const int32_t target_lon;
     // RestrictedAccessArea target_restricted_access;
   };
 
@@ -198,16 +202,25 @@ class EdgeRouter {
   }
 
   std::string VisitedEdgeToString(const VisitedEdge& ve) {
+    std::string tr_str;
+    if (ve.key.GetType() == GEdgeKey::TURN_RESTRICTION) {
+      tr_str = ActiveCtrsToDebugString(
+          g_, ctr_deduper_.GetObj(ve.key.GetCtrConfigId()));
+    }
+
     return absl::StrFormat(
         "Edge from:%10u to:%10u metric:%10lld type:%s cluster:%u->%u "
-        "t-area:%d done:%d",
-        ve.key.FromNode(g_).node_id, ve.key.ToNode(g_).node_id,
+        "t-area:%d done:%d %s",
+        ve.key.FromNode(g_, ctr_deduper_).node_id,
+        ve.key.ToNode(g_, ctr_deduper_).node_id,
         (ve.min_metric == INFU32) ? -1ll : (int64_t)ve.min_metric,
-        ve.key.IsClusterEdge()                              ? "clus"
-        : ve.key.GetEdge(g_).car_label == GEdge::LABEL_FREE ? "free"
-                                                            : "rest",
-        ve.key.FromNode(g_).cluster_id, ve.key.ToNode(g_).cluster_id,
-        ve.key.GetBit(), ve.done);
+        ve.key.IsClusterEdge() ? "clus"
+        : ve.key.GetEdge(g_, ctr_deduper_).car_label == GEdge::LABEL_FREE
+            ? "free"
+            : "rest",
+        ve.key.FromNode(g_, ctr_deduper_).cluster_id,
+        ve.key.ToNode(g_, ctr_deduper_).cluster_id, ve.key.GetBit(), ve.done,
+        tr_str);
   }
 
   RoutingResult CreateResult(uint32_t target_v_idx, uint32_t target_metric) {
@@ -245,8 +258,8 @@ class EdgeRouter {
   std::uint32_t FindOrAddVisitedEdge(GEdgeKey key, bool use_astar_heuristic) {
     // Prevent doing two lookups by following
     // https://stackoverflow.com/questions/1409454.
-    const auto iter = edgekey_to_v_idx_.insert(
-        EdgeIdMap::value_type(key.HashKey(g_), visited_edges_.size()));
+    const auto iter = edgekey_to_v_idx_.insert(EdgeIdMap::value_type(
+        key.UInt64Key(g_, ctr_deduper_), visited_edges_.size()));
     if (iter.second) {
       // Key didn't exist and was inserted, so add it to visited_edges_ too.
       visited_edges_.push_back(
@@ -279,11 +292,67 @@ class EdgeRouter {
          .contra_way = 0});
   }
 
+  std::optional<GEdgeKey> CreateNextEdgeKey(const Context& ctx,
+                                            const PrevEdgeData prev,
+                                            const GEdge& next_edge,
+                                            bool next_in_target_area) {
+    const bool active_key =
+        (prev.v_idx != INFU32 && visited_edges_.at(prev.v_idx).key.GetType() ==
+                                     GEdgeKey::TURN_RESTRICTION);
+
+    if (!active_key && !next_edge.complex_turn_restriction_trigger) {
+      // Common case, no turn restriction active, no turn restriction triggered.
+      return GEdgeKey::CreateGraphEdge(g_, prev.other_idx, next_edge,
+                                       next_in_target_area);
+    }
+
+    ActiveCtrs active_ctrs;
+    if (active_key) {
+      // We have an active config. Check if it triggers and if it forbids
+      // next_edge.
+      active_ctrs = ctr_deduper_.GetObj(
+          visited_edges_.at(prev.v_idx).key.GetCtrConfigId());
+      if (!ActiveCtrsAddNextEdge(g_, prev.other_idx, next_edge, &active_ctrs)) {
+        // Forbidden turn!
+        return std::nullopt;
+      }
+    }
+
+    if (next_edge.complex_turn_restriction_trigger) {
+      // Find triggering turn restrictions.
+      TurnRestriction::TREdge key = {.from_node_idx = prev.other_idx,
+                                     .way_idx = next_edge.way_idx,
+                                     .to_node_idx = next_edge.other_node_idx};
+      auto it = g_.complex_turn_restriction_map.find(key);
+      if (it != g_.complex_turn_restriction_map.end()) {
+        uint32_t ctr_idx = it->second;
+        do {
+          const TurnRestriction& tr = g_.complex_turn_restrictions.at(ctr_idx);
+          if (tr.GetTriggerKey() != key) {
+            CHECK_NE_S(ctr_idx, it->second);
+            break;
+          }
+          active_ctrs.push_back({.ctr_idx = ctr_idx, .position = 0});
+        } while (++ctr_idx < g_.complex_turn_restrictions.size());
+      }
+    }
+
+    if (active_ctrs.empty()) {
+      // No active ctrs exist. Return normal edge key.
+      return GEdgeKey::CreateGraphEdge(g_, prev.other_idx, next_edge,
+                                       next_in_target_area);
+    } else {
+      uint32_t id = ctr_deduper_.Add(active_ctrs);
+      return GEdgeKey::CreateTurnRestrictionEdge(g_, id, 0,
+                                                 next_in_target_area);
+    }
+  }
+
   // Expand the forward edges.
-  void ExpandNeighboursForward(const Context& ctx, const PrevEdgeData prev) {
+  void ExpandForwardEdges(const Context& ctx, const PrevEdgeData prev) {
     const GNode& expansion_node = g_.nodes.at(prev.other_idx);
     if (verbosity_ >= 3) {
-      LOG_S(INFO) << "=== EXPAND node:" << expansion_node.node_id
+      LOG_S(INFO) << "EXPA  node:" << expansion_node.node_id
                   << " cluster:" << expansion_node.cluster_id;
     }
 
@@ -296,22 +365,24 @@ class EdgeRouter {
       const GEdgeKey& prev_key = visited_edges_.at(prev.v_idx).key;
       if (!prev_key.IsClusterEdge()) {
         if (expansion_node.simple_turn_restriction_via_node) {
-          auto iter = g_.condensed_turn_restriction_map.find(
-              {.from_node_idx = prev_key.GetFromIdx(),
-               .from_way_idx = prev_key.GetEdge(g_).way_idx,
-               .via_node_idx = prev.other_idx});
-          if (iter != g_.condensed_turn_restriction_map.end()) {
+          auto iter = g_.simple_turn_restriction_map.find(
+              {.from_node_idx = prev_key.GetFromIdx(g_, ctr_deduper_),
+               .way_idx = prev_key.GetEdge(g_, ctr_deduper_).way_idx,
+               .to_node_idx = prev.other_idx});
+          if (iter != g_.simple_turn_restriction_map.end()) {
             if (verbosity_ >= 3) {
               LOG_S(INFO) << "*** TR found relation_id="
                           << iter->second.osm_relation_id;
             }
             allowed_offset_bits = iter->second.allowed_edge_bits;
           }
-        } else if (!prev_key.GetEdge(g_).car_uturn_allowed) {
+        } else if (!prev_key.GetEdge(g_, ctr_deduper_).car_uturn_allowed) {
           // Store a uturn node idx that is forbidden. This is not needed when a
           // bitset from simple turn restrictions above is available - it
           // already contains the uturn information.
-          uturn_forbidden_node_idx = prev_key.GetFromIdx();
+          //
+          // TODO: Use way_idx in addition to uturn_forbidden_node_idx.
+          uturn_forbidden_node_idx = prev_key.GetFromIdx(g_, ctr_deduper_);
         }
       }
     }
@@ -343,10 +414,24 @@ class EdgeRouter {
         }
       }
 
+      // Create the edge key for the current edge, also handles complex turn
+      // restrictions if necessary.
+      const std::optional<GEdgeKey> next_edge_key =
+          CreateNextEdgeKey(ctx, prev, curr_ge, next_in_target_area);
+      if (!next_edge_key.has_value()) {
+        // ABORT_S() << "no edge key";
+        continue;
+      }
+
       // We want to expand this edge!
+      std::uint32_t v_idx = FindOrAddVisitedEdge(next_edge_key.value(),
+                                                 ctx.opt.use_astar_heuristic);
+#if 0
       std::uint32_t v_idx = FindOrAddVisitedEdge(
-          GEdgeKey::Create(g_, prev.other_idx, curr_ge, next_in_target_area),
+          GEdgeKey::CreateGraphEdge(g_, prev.other_idx, curr_ge,
+                                    next_in_target_area),
           ctx.opt.use_astar_heuristic);
+#endif
       VisitedEdge& ve = visited_edges_.at(v_idx);
       if (verbosity_ >= 3) {
         LOG_S(INFO) << "CONS  " << VisitedEdgeToString(ve);
@@ -415,8 +500,12 @@ class EdgeRouter {
         std::uint32_t new_metric = prev.metric + dist;
 
         if (!ve.done && new_metric < ve.min_metric) {
-          // Cluster edges might have different keys but are mapped to the
-          // same hash key, because the from node is not part of the key.
+          // During routing, cluster edges compete for the shortest time at the
+          // target node, i.e. the start node and the edge are irrelevant.
+          // Therefore, the UInt64Key() of a cluster edge contains (cluster_id,
+          // offset), not (start_node, offset).
+          // So here, we have to set again the current start node, because it
+          // might be different from what is in an already existing edge.
           ve.key = GEdgeKey::CreateClusterEdge(g_, prev.other_idx, i,
                                                /*bit=*/false);
           ve.min_metric = new_metric;
@@ -427,7 +516,7 @@ class EdgeRouter {
           // Compute heuristic distance from new node to target.
           if (ve.heuristic_to_target == INFU30) {
             ve.heuristic_to_target =
-                ComputeHeuristicToTarget(ve.key.ToNode(g_), ctx);
+                ComputeHeuristicToTarget(ve.key.ToNode(g_, ctr_deduper_), ctx);
             CHECK_LT_S(ve.heuristic_to_target, INFU30);
           }
           pq_.emplace(new_metric + ve.heuristic_to_target, v_idx);
@@ -519,6 +608,7 @@ class EdgeRouter {
   }
 
   void Clear() {
+    ctr_deduper_ = CTRDeDuper();
     visited_edges_.clear();
     edgekey_to_v_idx_.clear();
     CHECK_S(pq_.empty());  // No clear() method, should be empty anyways.
@@ -526,6 +616,7 @@ class EdgeRouter {
   }
 
   const Graph& g_;
+  CTRDeDuper ctr_deduper_;
   std::vector<VisitedEdge> visited_edges_;
 
   typedef absl::flat_hash_map<uint64_t, uint32_t> EdgeIdMap;

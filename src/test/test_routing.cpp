@@ -49,6 +49,7 @@ uint32_t ExecuteSingleSourceDijkstra(const CompactDirectedGraph& cg,
 void TestGEdgeKey() {
   FUNC_TIMER();
   Graph g;
+  CTRDeDuper dd;
   g.nodes.push_back({.node_id = 100, .cluster_id = 0, .edges_start_pos = 0});
   g.nodes.push_back({.node_id = 101, .cluster_id = 0, .edges_start_pos = 2});
   g.nodes.push_back({.node_id = 102, .cluster_id = 0, .edges_start_pos = 4});
@@ -60,12 +61,12 @@ void TestGEdgeKey() {
       GEdgeKey::CreateClusterEdge(g, /*from_idx=*/0, /*offset=*/1, 0);
   GEdgeKey cl_edge2 =
       GEdgeKey::CreateClusterEdge(g, /*from_idx=*/2, /*offset=*/1, 0);
-  CHECK_EQ_S(cl_edge1.GetToIdx(g), 3);
-  CHECK_EQ_S(cl_edge1.ToNode(g).node_id, 103);
+  CHECK_EQ_S(cl_edge1.GetToIdx(g, dd), 3);
+  CHECK_EQ_S(cl_edge1.ToNode(g, dd).node_id, 103);
   // Cluster edges hash key encodes cluster_id + offset + bits, i.e. the
   // from_idx is replaced with cluster_id. Therefore, the two edges must have
   // the same hash key.
-  CHECK_EQ_S(cl_edge1.HashKey(g), cl_edge2.HashKey(g));
+  CHECK_EQ_S(cl_edge1.UInt64Key(g, dd), cl_edge2.UInt64Key(g, dd));
 
   // Dummy edges of node 100.
   g.edges.push_back({});
@@ -74,27 +75,37 @@ void TestGEdgeKey() {
   g.edges.push_back({.other_node_idx = 2});
   g.edges.push_back({.other_node_idx = 3});
 
-  GEdgeKey a = GEdgeKey::Create(g, 1, g.edges.at(2), 1);
-  GEdgeKey b = GEdgeKey::Create(g, 1, g.edges.at(3), 0);
-  CHECK_EQ_S(a.GetFromIdx(), 1);
-  CHECK_EQ_S(b.GetFromIdx(), 1);
+  GEdgeKey a = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(2), 1);
+  GEdgeKey b = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(3), 0);
+  CHECK_EQ_S(a.GetFromIdx(g, dd), 1);
+  CHECK_EQ_S(b.GetFromIdx(g, dd), 1);
   CHECK_EQ_S(a.GetOffset(), 0);
   CHECK_EQ_S(b.GetOffset(), 1);
   CHECK_EQ_S(a.GetBit(), 1);
   CHECK_EQ_S(b.GetBit(), 0);
 
-  CHECK_EQ_S(a.GetEdge(g).other_node_idx, 2);
-  CHECK_EQ_S(b.GetEdge(g).other_node_idx, 3);
+  CHECK_EQ_S(a.GetEdge(g, dd).other_node_idx, 2);
+  CHECK_EQ_S(b.GetEdge(g, dd).other_node_idx, 3);
 
-  CHECK_EQ_S(a.FromNode(g).node_id, 101);
-  CHECK_EQ_S(b.FromNode(g).node_id, 101);
+  CHECK_EQ_S(a.FromNode(g, dd).node_id, 101);
+  CHECK_EQ_S(b.FromNode(g, dd).node_id, 101);
 
-  CHECK_EQ_S(a.ToNode(g).node_id, 102);
-  CHECK_EQ_S(b.ToNode(g).node_id, 103);
+  CHECK_EQ_S(a.ToNode(g, dd).node_id, 102);
+  CHECK_EQ_S(b.ToNode(g, dd).node_id, 103);
 
-  CHECK_S(a.HashKey(g) != b.HashKey(g));
-  GEdgeKey c = GEdgeKey::Create(g, 1, g.edges.at(2), 1);
-  CHECK_S(a.HashKey(g) == c.HashKey(g));
+  CHECK_S(a.UInt64Key(g, dd) != b.UInt64Key(g, dd));
+  GEdgeKey c = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(2), 1);
+  CHECK_S(a.UInt64Key(g, dd) == c.UInt64Key(g, dd));
+}
+
+void TestCTRDeDuper() {
+  FUNC_TIMER();
+
+  CTRDeDuper ctr_deduper;
+  ActiveCtrs active_ctrs;
+  active_ctrs.emplace_back(1, 2);
+  uint32_t active_ctrs_id = ctr_deduper.Add(active_ctrs);
+  CHECK_EQ_S(active_ctrs_id, 0);
 }
 
 /*
@@ -504,23 +515,23 @@ void TestClusterRouteDoubleEdge() {
     CHECK_EQ_S(res.route_v_idx.size(), 4);
 
     EdgeRouter::VisitedEdge ve = router.GetVEdge(res.route_v_idx.at(0));
-    CHECK_EQ_S(ve.key.GetFromIdx(), A);
-    CHECK_EQ_S(ve.key.GetToIdx(g), E);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), A);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), E);
     CHECK_S(!ve.key.IsClusterEdge());
 
     ve = router.GetVEdge(res.route_v_idx.at(1));
-    CHECK_EQ_S(ve.key.GetFromIdx(), E);
-    CHECK_EQ_S(ve.key.GetToIdx(g), F);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), E);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), F);
     CHECK_S(!ve.key.IsClusterEdge());
 
     ve = router.GetVEdge(res.route_v_idx.at(2));
-    CHECK_EQ_S(ve.key.GetFromIdx(), F);
-    CHECK_EQ_S(ve.key.GetToIdx(g), C);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), F);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), C);
     CHECK_S(ve.key.IsClusterEdge());
 
     ve = router.GetVEdge(res.route_v_idx.at(3));
-    CHECK_EQ_S(ve.key.GetFromIdx(), C);
-    CHECK_EQ_S(ve.key.GetToIdx(g), D);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), C);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), D);
     CHECK_S(!ve.key.IsClusterEdge());
   }
 }
@@ -543,13 +554,13 @@ void TestRouteSimpleTurnRestriction() {
   // Add turn restriction to graph.
   OsmWrapper w;
   OSMPBF::Relation rel =
-      CreateTRRelation(g, &w, /*id=*/1, Way0, D, Way2, "no_right_turn");
+      CreateSimpleTRRelation(g, &w, /*id=*/1, Way0, D, Way2, "no_right_turn");
   TRResult res;
   ParseTurnRestriction(g, w.tagh, rel, Verbosity::Trace, &res);
-  g.condensed_turn_restriction_map =
-      ComputeCondensedTurnRestrictions(g, Verbosity::Trace, res.trs);
-  CHECK_EQ_S(g.condensed_turn_restriction_map.size(), 1);
-  MarkCondensedViaNodes(&g);
+  g.simple_turn_restriction_map =
+      ComputeSimpleTurnRestrictionMap(g, Verbosity::Trace, res.trs);
+  CHECK_EQ_S(g.simple_turn_restriction_map.size(), 1);
+  MarkSimpleViaNodes(&g);
 
   {
     // Test shortest way with turn restriction.
@@ -560,8 +571,239 @@ void TestRouteSimpleTurnRestriction() {
     // This checks that a simple turn restriction is working.
     CHECK_EQ_S(res.found_distance, 4000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
-    CHECK_S(router.GetShortestPathNodeIndexes(g, res) ==
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({B, A, C, D, E}));
+  }
+}
+
+/*
+ * Find the shortest way from [a] to [d].
+ *
+ * Given the forbidden turn w0-w1-w2, it is not possible to go [a][b][c][d], so
+ * one needs to go [a][b][c][f][d] instead
+ *
+ *
+ *                [e]               [f]
+ *                 |               /   \
+ *             1w3 |          5w4 /     \ 5w4
+ *                 |             /       \
+ *                 |            /         \
+ *    [a] ------- [b] ------- [c] ------- [d]
+ *          1w0         1w1          1w2
+ *
+ *       Notation: '5w4': Labels an edge of length 5 and on way 4.
+ */
+inline Graph CreateComplexTurnRestrictionGraph(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
+  Graph g;
+  AddDefaultWSA(g);
+
+  AddNode(g, A);
+  AddNode(g, B);
+  AddNode(g, C);
+  AddNode(g, D);
+  AddNode(g, E);
+  AddNode(g, F);
+
+  AddWay(g, /*way_idx=*/Way0, HW_TERTIARY, /*wsa_id=*/0, {A, B});
+  AddWay(g, /*way_idx=*/Way1, HW_TERTIARY, /*wsa_id=*/0, {B, C});
+  AddWay(g, /*way_idx=*/Way2, HW_TERTIARY, /*wsa_id=*/0, {C, D});
+  AddWay(g, /*way_idx=*/Way3, HW_TERTIARY, /*wsa_id=*/0, {E, B});
+  AddWay(g, /*way_idx=*/Way4, HW_TERTIARY, /*wsa_id=*/0, {C, F, D});
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
+  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
+  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
+  AddEdge(E, B, 1000, GEdge::LABEL_FREE, Way3, both_dirs, &edges);
+  AddEdge(C, F, 5000, GEdge::LABEL_FREE, Way4, both_dirs, &edges);
+  AddEdge(F, D, 5000, GEdge::LABEL_FREE, Way4, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+  return g;
+}
+
+void TestRouteComplexTurnRestrictionNegative() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
+  Graph g = CreateComplexTurnRestrictionGraph(true);
+
+  {
+    // Test shortest way without turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 3000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 4);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({A, B, C, D}));
+  }
+  {
+    // Test shortest way without turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(E, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 3000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 4);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({E, B, C, D}));
+  }
+
+  // Add turn restriction to graph.
+  OsmWrapper w;
+  OSMPBF::Relation rel = CreateComplexTRRelation(
+      g, &w, /*id=*/1, {Way0, Way1, Way2}, "no_straight_on");
+  TRResult res;
+  ParseTurnRestriction(g, w.tagh, rel, Verbosity::Trace, &res);
+  g.complex_turn_restrictions = res.trs;
+  CHECK_EQ_S(g.complex_turn_restrictions.size(), 1);
+  g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
+      g, Verbosity::Trace, g.complex_turn_restrictions);
+  CHECK_EQ_S(g.complex_turn_restriction_map.size(), 1);
+  MarkComplexTriggerEdges(&g);
+
+  {
+    // Test shortest way with turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 12000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({A, B, C, F, D}));
+  }
+  {
+    // Test route without initial segment.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(E, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 3000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 4);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({E, B, C, D}));
+  }
+}
+
+void TestRouteComplexTurnRestrictionPositive() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
+  Graph g = CreateComplexTurnRestrictionGraph(true);
+
+  // Add turn restriction to graph.
+  OsmWrapper w;
+  OSMPBF::Relation rel = CreateComplexTRRelation(
+      g, &w, /*id=*/1, {Way0, Way1, Way4}, "only_straight_on");
+  TRResult res;
+  ParseTurnRestriction(g, w.tagh, rel, Verbosity::Trace, &res);
+  g.complex_turn_restrictions = res.trs;
+  CHECK_EQ_S(g.complex_turn_restrictions.size(), 1);
+  g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
+      g, Verbosity::Trace, g.complex_turn_restrictions);
+  CHECK_EQ_S(g.complex_turn_restriction_map.size(), 1);
+  MarkComplexTriggerEdges(&g);
+
+  {
+    // Test shortest way with turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 12000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({A, B, C, F, D}));
+  }
+}
+
+/*
+ * Find the shortest way from [a] to [f].
+ *
+ *    [a] ------- [b] ------- [c] ------- [d] ------- [e] ------- [f]
+ *          1w0         1w1          1w2        1w3         1w4
+ *
+ */
+inline Graph CreateOverlappingTurnRestrictionsGraph(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
+  Graph g;
+  AddDefaultWSA(g);
+
+  AddNode(g, A);
+  AddNode(g, B);
+  AddNode(g, C);
+  AddNode(g, D);
+  AddNode(g, E);
+  AddNode(g, F);
+
+  AddWay(g, /*way_idx=*/Way0, HW_TERTIARY, /*wsa_id=*/0, {A, B});
+  AddWay(g, /*way_idx=*/Way1, HW_TERTIARY, /*wsa_id=*/0, {B, C});
+  AddWay(g, /*way_idx=*/Way2, HW_TERTIARY, /*wsa_id=*/0, {C, D});
+  AddWay(g, /*way_idx=*/Way3, HW_TERTIARY, /*wsa_id=*/0, {D, E});
+  AddWay(g, /*way_idx=*/Way4, HW_TERTIARY, /*wsa_id=*/0, {E, F});
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
+  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
+  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
+  AddEdge(D, E, 1000, GEdge::LABEL_FREE, Way3, both_dirs, &edges);
+  AddEdge(E, F, 1000, GEdge::LABEL_FREE, Way4, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+  return g;
+}
+
+void TestRouteOverlappingTurnRestrictions() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
+  Graph g = CreateOverlappingTurnRestrictionsGraph(true);
+
+  {
+    // Test shortest way without turn restrictions.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, F, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 5000);
+  }
+
+  // Add multiple turn restrictions to graph.
+  // The longest turn restriction forbids the last segment. The other turn
+  // restrictions start later and allow the last leg.
+  TRResult res;
+  OsmWrapper w;
+  OSMPBF::Relation rel1 = CreateComplexTRRelation(
+      g, &w, /*id=*/1, {Way0, Way1, Way2, Way3, Way4}, "no_straight_on");
+  ParseTurnRestriction(g, w.tagh, rel1, Verbosity::Trace, &res);
+  OSMPBF::Relation rel2 = CreateComplexTRRelation(
+      g, &w, /*id=*/2, {Way1, Way2, Way3, Way4}, "only_straight_on");
+  ParseTurnRestriction(g, w.tagh, rel2, Verbosity::Trace, &res);
+  OSMPBF::Relation rel3 = CreateComplexTRRelation(
+      g, &w, /*id=*/3, {Way2, Way3, Way4}, "only_straight_on");
+  ParseTurnRestriction(g, w.tagh, rel3, Verbosity::Trace, &res);
+  CHECK_EQ_S(res.max_success_via_ways, 3);
+  g.complex_turn_restrictions = res.trs;
+  CHECK_EQ_S(g.complex_turn_restrictions.size(), 3);
+  g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
+      g, Verbosity::Trace, g.complex_turn_restrictions);
+  CHECK_EQ_S(g.complex_turn_restriction_map.size(), 3);
+  MarkComplexTriggerEdges(&g);
+
+  {
+    // Test shortest way with turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, F, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(!res.found);
+  }
+  {
+    // Test route without initial segment.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(B, F, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 5);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({B, C, D, E, F}));
   }
 }
 
@@ -668,6 +910,10 @@ int main(int argc, char* argv[]) {
   TestCompareShortestPaths();
   TestBitFunctions();
   TestRouteSimpleTurnRestriction();
+  TestCTRDeDuper();
+  TestRouteComplexTurnRestrictionNegative();
+  TestRouteComplexTurnRestrictionPositive();
+  TestRouteOverlappingTurnRestrictions();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

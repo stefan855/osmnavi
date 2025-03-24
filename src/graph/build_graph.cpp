@@ -560,6 +560,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
   e.car_label_strange = 0;
   e.car_uturn_allowed = 0;
+  e.complex_turn_restriction_trigger = 0;
 }
 
 #if 0
@@ -629,10 +630,8 @@ void ApplyTarjan(Graph& g, GraphMetaData* meta) {
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
                      GraphMetaData* meta, TRResult* result) {
-  ParseTurnRestriction(
-      meta->graph, tagh, osm_rel,
-      meta->opt.log_turn_restrictions ? Verbosity::Verbose : Verbosity::Quiet,
-      result);
+  ParseTurnRestriction(meta->graph, tagh, osm_rel,
+                       meta->opt.verb_turn_restrictions, result);
 }
 
 // Read the ways that might useful for routing, remember the nodes ids touched
@@ -1001,20 +1000,26 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
         res.num_error_connection;
     for (const TurnRestriction& tr : res.trs) {
       if (tr.via_is_node) {
-        CHECK_EQ_S(tr.node_path.size(), 2);
+        CHECK_EQ_S(tr.path.size(), 2);
         meta->simple_turn_restrictions.push_back(tr);
       } else {
-        meta->complex_turn_restrictions.push_back(tr);
+        meta->graph.complex_turn_restrictions.push_back(tr);
       }
     }
   }
 
-  SortSimpleTurnRestrictions(&(meta->simple_turn_restrictions));
-  meta->graph.condensed_turn_restriction_map = ComputeCondensedTurnRestrictions(
-      meta->graph,
-      meta->opt.log_turn_restrictions ? Verbosity::Verbose : Verbosity::Quiet,
+  SortTurnRestrictions(&(meta->simple_turn_restrictions));
+  meta->graph.simple_turn_restriction_map = ComputeSimpleTurnRestrictionMap(
+      meta->graph, meta->opt.verb_turn_restrictions,
       meta->simple_turn_restrictions);
-  MarkCondensedViaNodes(&(meta->graph));
+  MarkSimpleViaNodes(&(meta->graph));
+
+  SortTurnRestrictions(&(meta->graph.complex_turn_restrictions));
+  meta->graph.complex_turn_restriction_map =
+      ComputeComplexTurnRestrictionMap(meta->graph,
+                                       meta->opt.verb_turn_restrictions,
+                                       meta->graph.complex_turn_restrictions);
+  MarkComplexTriggerEdges(&(meta->graph));
 }
 
 void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
@@ -1212,9 +1217,9 @@ void PrintStats(const GraphMetaData& meta) {
   LOG_S(INFO) << absl::StrFormat("Num t-restr simple:  %11lld",
                                  meta.simple_turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num t-restr complex: %11lld",
-                                 meta.complex_turn_restrictions.size());
-  LOG_S(INFO) << absl::StrFormat("Num t-restr condensed:%10lld",
-                                 graph.condensed_turn_restriction_map.size());
+                                 graph.complex_turn_restrictions.size());
+  LOG_S(INFO) << absl::StrFormat("Num t-restr comb/simple:%8lld",
+                                 graph.simple_turn_restriction_map.size());
   LOG_S(INFO) << absl::StrFormat("Max t-restr via ways: %10llu",
                                  stats.max_turn_restriction_via_ways);
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",

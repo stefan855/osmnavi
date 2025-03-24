@@ -22,6 +22,28 @@ enum class Verbosity : int {
   Trace = 5
 };
 
+inline Verbosity ParseVerbosityFlag(std::string_view flag) {
+  if (std::string_view("quiet").starts_with(flag)) {
+    return Verbosity::Quiet;
+  }
+  if (std::string_view("brief").starts_with(flag)) {
+    return Verbosity::Brief;
+  }
+  if (std::string_view("warning").starts_with(flag)) {
+    return Verbosity::Warning;
+  }
+  if (std::string_view("verbose").starts_with(flag)) {
+    return Verbosity::Verbose;
+  }
+  if (std::string_view("debug").starts_with(flag)) {
+    return Verbosity::Debug;
+  }
+  if (std::string_view("trace").starts_with(flag)) {
+    return Verbosity::Trace;
+  }
+  ABORT_S() << "Unknown verbosity value <" << flag << ">";
+}
+
 inline void InitLogging(int argc, char* argv[]) {
   loguru::g_preamble_date = false;
   loguru::g_preamble_uptime = false;
