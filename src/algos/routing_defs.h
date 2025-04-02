@@ -120,6 +120,8 @@ struct RoutingResult {
   uint32_t found_distance = 0;
   uint32_t num_visited = 0;  // edges or nodes, depending on router type.
   uint32_t num_shortest_route_nodes = 0;
+  uint32_t num_complex_turn_restriction_keys = 0;
+  float complex_turn_restriction_keys_reduction_factor = 0;
   std::vector<uint32_t> route_v_idx;  // Filled iff found == true.
 };
 

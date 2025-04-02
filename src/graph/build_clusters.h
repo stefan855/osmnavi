@@ -2,8 +2,8 @@
 
 #include <stdio.h>
 
-#include <random>
 #include <iostream>
+#include <random>
 #include <vector>
 
 #include "absl/container/btree_map.h"
@@ -60,8 +60,7 @@ inline TGVec CreateInitalLouvainGraph(
       const GNode& other = graph.nodes.at(e.other_node_idx);
 
       if (ncc == INVALID_NCC) {
-        if (e.other_node_idx != gnode_pos &&
-            EligibleNodeForLouvain(other)) {
+        if (e.other_node_idx != gnode_pos && EligibleNodeForLouvain(other)) {
           auto it = np_to_louvain_pos.find(e.other_node_idx);
           CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
           if (e.unique_other) {
@@ -350,15 +349,15 @@ inline void ComputeShortestClusterPaths(const Graph& g,
   // Construct a minimal graph with all necessary information.
   uint32_t num_nodes = 0;
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
-  compact_dijkstra::CollectEdgesForCompactGraph(
-      g, metric,
-      {.vt = vt,
-       .avoid_restricted_access_edges = true,
-       .restrict_to_cluster = true,
-       .restrict_cluster_id = cluster->cluster_id},
-      cluster->border_nodes,
-      /*undirected_expand=*/false, &num_nodes, &full_edges);
-  compact_dijkstra::SortAndCleanupEdges(&full_edges);
+  CollectEdgesForCompactGraph(g, metric,
+                              {.vt = vt,
+                               .avoid_restricted_access_edges = true,
+                               .restrict_to_cluster = true,
+                               .restrict_cluster_id = cluster->cluster_id},
+                              cluster->border_nodes,
+                              /*undirected_expand=*/false, &num_nodes,
+                              &full_edges);
+  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
   const CompactDirectedGraph cg(num_nodes, full_edges);
   cg.LogStats();
 
@@ -521,7 +520,7 @@ void AssignClusterColors(Graph* g) {
     // Find a random free color_no.
     uint64_t start = 1 + rand();
     for (uint64_t offset = 0; offset < neighbor_colors.size(); ++offset) {
-      uint64_t color_no = (start + offset) % neighbor_colors.size(); 
+      uint64_t color_no = (start + offset) % neighbor_colors.size();
       if (!neighbor_colors.at(color_no)) {
         free_color_no = color_no;
         break;

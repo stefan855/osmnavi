@@ -12,6 +12,11 @@
 #include "graph/routing_attrs.h"
 #include "osm/turn_restriction_defs.h"
 
+// Number of bits at least needed when storing way_idx.
+// TODO: create and use the same for other fundamental data types, including
+// node_idx, edge_idx and all kinds of osm-ids.
+constexpr uint64_t WAY_IDX_BITS = 31;
+
 // WaySharedAttrs (=WSA) contains many of the way attributes in a
 // data structure that is shared between ways. The shared data is stored in
 // Graph::way_shared_attrs vector and accessed through GWay::wsa_id.
@@ -178,10 +183,10 @@ struct GEdge {
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
   std::uint64_t car_label_strange : 1;
   // True if at 'other_node_idx' it is allowed to travel back to 'from' node of
-  // this edge. There are two cases for this. It is always allowed to do a
-  // u-turn at an endpoint of a street. Additionally, it is allowed to do a
-  // u-turn if the edge is non-restricted and one would have to enter a
-  // restricted access area if not doing a u-turn.
+  // this edge. There are two cases for this that are selected automatically. It
+  // is always allowed to do a u-turn at an endpoint of a street. Additionally,
+  // it is allowed to do a u-turn if the edge is non-restricted and one would
+  // have to enter a restricted access area if not doing a u-turn.
   std::uint64_t car_uturn_allowed : 1;
   std::uint64_t complex_turn_restriction_trigger : 1;
 };
@@ -238,10 +243,10 @@ struct Graph {
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
 
-  // Turn restrictions. Both types are indexed by the first entry edge.
+  // Turn restrictions. Both types are indexed by the first trigger edge.
   SimpleTurnRestrictionMap simple_turn_restriction_map;
   std::vector<TurnRestriction> complex_turn_restrictions;
-  // Map from entry edge to the index in 'complex_turn_restrictions' above.
+  // Map from trigger edge to the index in 'complex_turn_restrictions' above.
   ComplexTurnRestrictionMap complex_turn_restriction_map;
 
   std::vector<GCluster> clusters;

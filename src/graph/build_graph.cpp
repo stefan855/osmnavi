@@ -37,7 +37,15 @@ struct WayContext {
   PerCountryConfig::ConfigValue config_forw;
   PerCountryConfig::ConfigValue config_backw;
 };
+
+void ValidateGraph(const Graph& g) {
+  CHECK_LT_S(g.ways.size(), 1ull << WAY_IDX_BITS);
+  CHECK_LT_S(g.nodes.size(), 1ull << 32);
+  CHECK_LT_S(g.edges.size(), 1ull << 36);
+}
+
 }  // namespace
+
 
 void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     const OSMPBF::Way& osm_way, std::mutex& mut,
@@ -1016,8 +1024,7 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
 
   SortTurnRestrictions(&(meta->graph.complex_turn_restrictions));
   meta->graph.complex_turn_restriction_map =
-      ComputeComplexTurnRestrictionMap(meta->graph,
-                                       meta->opt.verb_turn_restrictions,
+      ComputeComplexTurnRestrictionMap(meta->opt.verb_turn_restrictions,
                                        meta->graph.complex_turn_restrictions);
   MarkComplexTriggerEdges(&(meta->graph));
 }
@@ -1473,6 +1480,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   FillStats(reader, &meta);
   PrintStats(meta);
   LogMemoryUsage();
+  ValidateGraph(meta.graph);
   return meta;
 }
 }  // namespace build_graph

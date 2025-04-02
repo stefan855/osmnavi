@@ -65,7 +65,7 @@ using ActiveCtrs = std::vector<CTRPosition>;
 // This deduper is used to allocate unique Ids for CTR configurations.
 using CTRDeDuper = DeDuperWithIds<ActiveCtrs>;
 
-std::string ActiveCtrsToDebugString(const Graph& g,
+inline std::string ActiveCtrsToDebugString(const Graph& g,
                                     const ActiveCtrs& active_ctrs) {
   std::string res;
   for (const CTRPosition ctr_pos : active_ctrs) {
@@ -89,7 +89,7 @@ std::string ActiveCtrsToDebugString(const Graph& g,
 // Returns true if it is allowed to follow the edge, and modifies active_ctrs to
 // reflect the new state. Returns false if some turn restriction prohibits
 // following the edge. In this case, active_ctrs is unchanged.
-bool ActiveCtrsAddNextEdge(const Graph& g, uint32_t from_idx, const GEdge& edge,
+inline bool ActiveCtrsAddNextEdge(const Graph& g, uint32_t from_idx, const GEdge& edge,
                            ActiveCtrs* active_ctrs) {
   ActiveCtrs new_ctrs;
   for (CTRPosition ctrp : *active_ctrs) {

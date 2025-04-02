@@ -79,10 +79,20 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
         backward ? "backward" : "forward", hybrid ? "_hybrid" : ""));
   }
 
+  uint32_t num_len_gt_1 = 0;
+  uint32_t max_len = 0;
+  if constexpr (std::is_same_v<RouterT, EdgeRouter>) {
+    router.TurnRestrictionSpecialStats(&num_len_gt_1, &max_len);
+  }
+
   LOG_S(INFO) << absl::StrFormat(
-      "Metric:%u %s secs:%6.3f #nodes:%5u visits:%10u %s", res.found_distance,
-      res.found ? "SUC" : "ERR", elapsed, res.num_shortest_route_nodes,
-      res.num_visited, router.Name(metric, opt));
+      "Metr:%u %s secs:%6.3f #n:%5u vis:%9u cTR:%4u(%3.0f%% max:%u lgt1:%u) "
+      "%s",
+      res.found_distance, res.found ? "SUC" : "ERR", elapsed,
+      res.num_shortest_route_nodes, res.num_visited,
+      res.num_complex_turn_restriction_keys,
+      res.complex_turn_restriction_keys_reduction_factor * 100.0, max_len,
+      num_len_gt_1, router.Name(metric, opt));
 }
 
 void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,

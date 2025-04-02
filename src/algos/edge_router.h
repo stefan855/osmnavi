@@ -177,6 +177,16 @@ class EdgeRouter {
     return v;
   }
 
+  void TurnRestrictionSpecialStats(uint32_t* num_len_gt_1, uint32_t* max_len) {
+    *num_len_gt_1 = 0;
+    *max_len = 0;
+    for (uint32_t i = 0; i < ctr_deduper_.num_unique(); ++i) {
+      const ActiveCtrs& a = ctr_deduper_.GetObj(i);
+      *num_len_gt_1 += a.size() > 1;
+      *max_len = std::max(*max_len, static_cast<uint32_t>(a.size()));
+    }
+  }
+
  private:
   friend void TestClusterRouteDoubleEdge();
 
@@ -224,10 +234,15 @@ class EdgeRouter {
   }
 
   RoutingResult CreateResult(uint32_t target_v_idx, uint32_t target_metric) {
-    RoutingResult result = {.found = true,
-                            .found_distance = target_metric,
-                            .num_visited = (uint32_t)visited_edges_.size(),
-                            .num_shortest_route_nodes = 1};
+    RoutingResult result = {
+        .found = true,
+        .found_distance = target_metric,
+        .num_visited = (uint32_t)visited_edges_.size(),
+        .num_shortest_route_nodes = 1,
+        .num_complex_turn_restriction_keys = ctr_deduper_.num_unique(),
+        .complex_turn_restriction_keys_reduction_factor =
+            static_cast<float>(ctr_deduper_.num_unique()) /
+            std::max(1u, ctr_deduper_.num_added())};
 
     auto current_idx = target_v_idx;
     while (current_idx != INFU32) {
@@ -319,7 +334,7 @@ class EdgeRouter {
     }
 
     if (next_edge.complex_turn_restriction_trigger) {
-      // Find triggering turn restrictions.
+      // Find new triggering turn restrictions.
       TurnRestriction::TREdge key = {.from_node_idx = prev.other_idx,
                                      .way_idx = next_edge.way_idx,
                                      .to_node_idx = next_edge.other_node_idx};
@@ -329,6 +344,7 @@ class EdgeRouter {
         do {
           const TurnRestriction& tr = g_.complex_turn_restrictions.at(ctr_idx);
           if (tr.GetTriggerKey() != key) {
+            // Check that we iterated at least once.
             CHECK_NE_S(ctr_idx, it->second);
             break;
           }
@@ -415,7 +431,7 @@ class EdgeRouter {
       }
 
       // Create the edge key for the current edge, also handles complex turn
-      // restrictions if necessary.
+      // restrictions.
       const std::optional<GEdgeKey> next_edge_key =
           CreateNextEdgeKey(ctx, prev, curr_ge, next_in_target_area);
       if (!next_edge_key.has_value()) {
@@ -608,7 +624,7 @@ class EdgeRouter {
   }
 
   void Clear() {
-    ctr_deduper_ = CTRDeDuper();
+    ctr_deduper_.clear();
     visited_edges_.clear();
     edgekey_to_v_idx_.clear();
     CHECK_S(pq_.empty());  // No clear() method, should be empty anyways.

@@ -505,6 +505,7 @@ inline void ParseTurnRestriction(const Graph& g, const OSMTagHelper& tagh,
   }
 }
 
+#if 0
 // Sort the turn restrictions by the edge that triggers the
 // restriction, i.e. the edge of the from way that connects to the via node.
 inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
@@ -516,6 +517,7 @@ inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
               return a.path.back() < b.path.back();
             });
 }
+#endif
 
 // Compute simple turn restrictions for the turn restrictions in 'trs'.
 // Note that trs needs to be sorted by SortTurnRestrictions() and must
@@ -551,12 +553,12 @@ inline void MarkSimpleViaNodes(Graph* g) {
   }
 }
 
+#if 0
 // Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
 // first position in trs where that key occurs. Note that trs needs to be sorted
 // by SortTurnRestrictions() and must contain complex turn  restrictions only.
 inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
-    const Graph& g, Verbosity verbosity,
-    const std::vector<TurnRestriction>& trs) {
+    Verbosity verbosity, const std::vector<TurnRestriction>& trs) {
   ComplexTurnRestrictionMap res;
   if (trs.empty()) {
     return res;
@@ -572,6 +574,7 @@ inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
   }
   return res;
 }
+#endif
 
 inline void MarkComplexTriggerEdges(Graph* g) {
   for (const auto& [key, pos] : g->complex_turn_restriction_map) {

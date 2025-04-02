@@ -15,6 +15,33 @@
 #include "osm/osm_helpers.h"
 #include "test/test_utils.h"
 
+uint32_t RunQueryOnCompactGraph(const Graph& g, uint32_t g_start,
+                                uint32_t g_target, const RoutingMetric& metric,
+                                const RoutingOptions& opt) {
+  constexpr uint32_t CG_START = 0;
+  constexpr uint32_t CG_TARGET = 1;
+  uint32_t num_nodes;
+  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
+  CollectEdgesForCompactGraph(g, metric, opt, {g_start, g_target},
+                              /*undirected_expand=*/true, &num_nodes,
+                              &full_edges, &graph_to_compact_nodemap);
+  CHECK_S(graph_to_compact_nodemap.contains(g_start));
+  CHECK_S(graph_to_compact_nodemap.contains(g_target));
+  CHECK_EQ_S(graph_to_compact_nodemap.find(g_start)->second, CG_START);
+  CHECK_EQ_S(graph_to_compact_nodemap.find(g_target)->second, CG_TARGET);
+  CompactDirectedGraph cg(num_nodes, full_edges);
+  cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
+                               graph_to_compact_nodemap);
+
+  // Now route!
+  SingleSourceEdgeDijkstra edge_router;
+  edge_router.Route(cg, CG_START, {.handle_restricted_access = true});
+  std::vector<uint32_t> w =
+      edge_router.GetNodeWeightsFromVisitedEdges(cg, CG_START);
+  return w.at(CG_TARGET);
+}
+
 // Create a compacted graph from 'g' which has the same node ordering and the
 // same number of edges.
 CompactDirectedGraph CreateCompactGraph(const Graph& g) {
@@ -28,7 +55,7 @@ CompactDirectedGraph CreateCompactGraph(const Graph& g) {
            .restricted_access = (e.car_label != GEdge::LABEL_FREE)});
     }
   }
-  compact_dijkstra::SortAndCleanupEdges(&full_edges);
+  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
   CompactDirectedGraph cg(g.nodes.size(), full_edges);
   CHECK_EQ_S(cg.num_nodes(), g.nodes.size());
   CHECK_EQ_S(cg.edges().size(), g.edges.size());
@@ -104,8 +131,11 @@ void TestCTRDeDuper() {
   CTRDeDuper ctr_deduper;
   ActiveCtrs active_ctrs;
   active_ctrs.emplace_back(1, 2);
-  uint32_t active_ctrs_id = ctr_deduper.Add(active_ctrs);
-  CHECK_EQ_S(active_ctrs_id, 0);
+  CHECK_EQ_S(ctr_deduper.Add(active_ctrs), 0);
+  CHECK_EQ_S(ctr_deduper.Add(active_ctrs), 0);
+  active_ctrs.emplace_back(1, 3);
+  CHECK_EQ_S(ctr_deduper.Add(active_ctrs), 1);
+  CHECK_EQ_S(ctr_deduper.Add(active_ctrs), 1);
 }
 
 /*
@@ -550,6 +580,10 @@ void TestRouteSimpleTurnRestriction() {
     CHECK_EQ_S(res.found_distance, 2000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 3);
   }
+  {
+    CHECK_EQ_S(2000, RunQueryOnCompactGraph(g, B, E, RoutingMetricDistance(),
+                                            RoutingOptions()));
+  }
 
   // Add turn restriction to graph.
   OsmWrapper w;
@@ -573,6 +607,11 @@ void TestRouteSimpleTurnRestriction() {
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({B, A, C, D, E}));
+  }
+  {
+    // Now check that running on the compact graph yields the same results.
+    CHECK_EQ_S(2000, RunQueryOnCompactGraph(g, B, E, RoutingMetricDistance(),
+                                            RoutingOptions()));
   }
 }
 
@@ -660,7 +699,7 @@ void TestRouteComplexTurnRestrictionNegative() {
   g.complex_turn_restrictions = res.trs;
   CHECK_EQ_S(g.complex_turn_restrictions.size(), 1);
   g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
-      g, Verbosity::Trace, g.complex_turn_restrictions);
+      Verbosity::Trace, g.complex_turn_restrictions);
   CHECK_EQ_S(g.complex_turn_restriction_map.size(), 1);
   MarkComplexTriggerEdges(&g);
 
@@ -701,7 +740,7 @@ void TestRouteComplexTurnRestrictionPositive() {
   g.complex_turn_restrictions = res.trs;
   CHECK_EQ_S(g.complex_turn_restrictions.size(), 1);
   g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
-      g, Verbosity::Trace, g.complex_turn_restrictions);
+      Verbosity::Trace, g.complex_turn_restrictions);
   CHECK_EQ_S(g.complex_turn_restriction_map.size(), 1);
   MarkComplexTriggerEdges(&g);
 
@@ -786,7 +825,7 @@ void TestRouteOverlappingTurnRestrictions() {
   g.complex_turn_restrictions = res.trs;
   CHECK_EQ_S(g.complex_turn_restrictions.size(), 3);
   g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
-      g, Verbosity::Trace, g.complex_turn_restrictions);
+      Verbosity::Trace, g.complex_turn_restrictions);
   CHECK_EQ_S(g.complex_turn_restriction_map.size(), 3);
   MarkComplexTriggerEdges(&g);
 

@@ -1,5 +1,11 @@
 #pragma once
 
+/*
+ * Turn restriction data structures used in both Graph and CompactGraph.
+ * Note that the node indexes and edge offsets are valid within the referenced
+ * Graph/CompactGraph.
+ */
+
 #include <string_view>
 #include <vector>
 
@@ -85,9 +91,45 @@ struct hash<TurnRestriction::TREdge> {
   }
 };
 }  // namespace std
-   //
+
 using SimpleTurnRestrictionMap =
     absl::flat_hash_map<TurnRestriction::TREdge, SimpleTurnRestrictionData>;
 
+// Points to index of turn restriction in complex_turn_restriction vector.
 using ComplexTurnRestrictionMap =
     absl::flat_hash_map<TurnRestriction::TREdge, uint32_t>;
+
+// Sort the turn restrictions by the edge that triggers the
+// restriction, i.e. the edge of the from way that connects to the via node.
+inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
+  std::sort(trs->begin(), trs->end(),
+            [](const TurnRestriction& a, const TurnRestriction& b) {
+              if (a.GetTriggerKey() != b.GetTriggerKey()) {
+                return a.GetTriggerKey() < b.GetTriggerKey();
+              }
+              return a.path.back() < b.path.back();
+            });
+}
+
+
+// Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
+// first position in trs where that key occurs. Note that trs needs to be sorted
+// by SortTurnRestrictions() and must contain complex turn  restrictions only.
+inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
+    Verbosity verbosity, const std::vector<TurnRestriction>& trs) {
+  ComplexTurnRestrictionMap res;
+  if (trs.empty()) {
+    return res;
+  }
+  size_t start = 0;
+  for (size_t i = 0; i < trs.size(); ++i) {
+    CHECK_S(!trs.at(i).via_is_node);
+    if (i == trs.size() - 1 ||
+        trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
+      res[trs.at(start).GetTriggerKey()] = start;
+      start = i + 1;
+    }
+  }
+  return res;
+}
+

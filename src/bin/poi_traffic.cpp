@@ -321,20 +321,21 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
 
   // Create a compact graph for the largest component in the graph.
-  compact_dijkstra::CollectEdgesForCompactGraph(
-      g, metric,
-      {
-          .vt = VH_MOTOR_VEHICLE,
-          .avoid_dead_end = false,
-          .avoid_restricted_access_edges = false,
-          .restrict_to_cluster = false,
-      },
-      start_nodes, /*undirected_expand=*/true, &num_nodes, &full_edges,
-      &graph_to_compact_nodemap);
+  CollectEdgesForCompactGraph(g, metric,
+                              {
+                                  .vt = VH_MOTOR_VEHICLE,
+                                  .avoid_dead_end = false,
+                                  .avoid_restricted_access_edges = false,
+                                  .restrict_to_cluster = false,
+                              },
+                              start_nodes, /*undirected_expand=*/true,
+                              &num_nodes, &full_edges,
+                              &graph_to_compact_nodemap);
 
   const std::vector<std::uint32_t> compact_to_graph_nodemap =
-      compact_dijkstra::InvertGraphToCompactNodeMap(graph_to_compact_nodemap);
-  compact_dijkstra::SortAndCleanupEdges(&full_edges);
+      CompactDirectedGraph::InvertGraphToCompactNodeMap(
+          graph_to_compact_nodemap);
+  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
   const CompactDirectedGraph cg(num_nodes, full_edges);
   cg.LogStats();
 

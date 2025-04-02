@@ -31,6 +31,8 @@
 template <typename TObj>
 class DeDuperWithIds {
  public:
+   DeDuperWithIds() { clear(); }
+
   // Add object 'obj' and return the id for it. If the object hasn't been seen
   // before, then a new id will be returned, otherwise the id of the already
   // stored object is returned.
@@ -103,6 +105,14 @@ class DeDuperWithIds {
     return v;
   }
 
+  void clear() {
+    sorted_ = false;
+    added_ = 0;
+    objs_.clear();
+    entries_.clear();
+    lookup_.clear();
+  }
+
  private:
   friend void TestDeDuperWithIdsInt();
   friend void TestDeDuperWithIdsString();
@@ -125,8 +135,8 @@ class DeDuperWithIds {
   // Get Information we have for object identified by 'id'.
   const Entry& GetEntryAt(uint32_t id) const { return entries_.at(id); }
 
-  bool sorted_ = false;
-  uint32_t added_ = 0;
+  bool sorted_;
+  uint32_t added_;
   // Objects TObj and Entry are not stored together. This way we avoid sorting a
   // vector with potentially large objects. We use deques to allow stable
   // pointers into the data, see below.
