@@ -78,6 +78,7 @@ class SingleSourceEdgeDijkstra {
 
     const std::vector<uint32_t>& edges_start = cg.edges_start();
     const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
+    const auto& compact_tr_map = cg.GetCompactSimpleTurnRestrictionMap();
 
     // Push edges of start node into queue.
     for (size_t i = edges_start.at(start_idx);
@@ -107,22 +108,28 @@ class SingleSourceEdgeDijkstra {
       const uint32_t start = edges_start.at(prev_cg_edge.to_c_idx);
       const uint32_t num_edges =
           edges_start.at(prev_cg_edge.to_c_idx + 1) - start;
-                                          
-      /*
+
       uint32_t allowed_offset_bits = -1;  // Set all bits
       if (prev_cg_edge.simple_turn_restriction_trigger) {
-        auto iter = cg.GetSimpleTurnRestrictionMap()->find()
+        LOG_S(INFO) << "Search simple TR trigger!";
+        auto iter = compact_tr_map.find(qedge.ve_idx);
+        if (iter != compact_tr_map.end()) {
+          allowed_offset_bits = iter->second;
+          LOG_S(INFO) << "Found simple TR trigger!";
+        }
       }
-      */
 
       for (uint32_t off = 0; off < num_edges; ++off) {
         const uint32_t i = start + off;
         const CompactDirectedGraph::PartialEdge& e = edges.at(i);
 
-        if (opt.handle_restricted_access &&
-            prev_edge.in_target_restricted_access_area &&
-            !e.restricted_access) {
-          // We're in the target restricted access area, not allowed to
+        if (!(allowed_offset_bits & (1u << off)) ||
+            (opt.handle_restricted_access &&
+             prev_edge.in_target_restricted_access_area &&
+             !e.restricted_access)) {
+          // At least one of these holds:
+          // 1) Not all edges are allowed because of a TR
+          // 2) We're in the target restricted access area, not allowed to
           // transition to a free edge.
           continue;
         }
@@ -228,120 +235,6 @@ class SingleSourceEdgeDijkstra {
 //
 
 namespace compact_dijkstra {
-
-#if 0
-// Visit all reachable nodes using a BFS, starting from the nodes in
-// 'start_nodes', using 'opt' to limit expansion. Assigns a serial id=0..N-1 to
-// each node. The start nodes are mapped to indices [0..start_node.size()-1] in
-// the given order.
-//
-// 'undirected_expand': If 'false', then only forward edges are followed, i.e.
-// only nodes reachable by forward routing from one of the start nodes will be
-// considered. If 'true', then all nodes that are connected through forward
-// and/or backward routable edges are allowed.
-//
-// Returns the number of visited nodes in 'num_nodes' and the edges between
-// visited nodes in 'full_edges'.
-//
-// If 'graph_to_compact_nodemap' is not nullptr, then it will contain a mapping
-// from indexes in graph.nodes to indexes in the compact graph [0..num_nodes-1].
-inline void CollectEdgesForCompactGraph(
-    const Graph& g, const RoutingMetric& metric, const RoutingOptions& opt,
-    const std::vector<std::uint32_t>& start_nodes, bool undirected_expand,
-    uint32_t* num_nodes,
-    std::vector<CompactDirectedGraph::FullEdge>* full_edges,
-    absl::flat_hash_map<uint32_t, uint32_t>* graph_to_compact_nodemap =
-        nullptr) {
-  // Map from node index in g.nodes to the node index in the compact graph.
-  absl::flat_hash_map<uint32_t, uint32_t> internal_nodemap;
-  if (graph_to_compact_nodemap == nullptr) {
-    graph_to_compact_nodemap = &internal_nodemap;
-  } else {
-    CHECK_S(graph_to_compact_nodemap->empty());
-  }
-  // FIFO queue for bfs, containing node indices in g.nodes.
-  std::queue<uint32_t> q;
-
-  // Preallocate ids for all start nodes.
-  for (uint32_t pos = 0; pos < start_nodes.size(); ++pos) {
-    uint32_t node_idx = start_nodes.at(pos);
-    (*graph_to_compact_nodemap)[node_idx] = pos;
-    q.push(node_idx);
-  }
-
-  // Do a BFS.
-  uint32_t check_idx = 0;
-  while (!q.empty()) {
-    uint32_t node_idx = q.front();
-    q.pop();
-    const GNode& node = g.nodes.at(node_idx);
-    // By construction, this number is strictly increasing, i.e. +1 in every
-    // loop.
-    uint32_t c_idx = (*graph_to_compact_nodemap)[node_idx];
-    CHECK_EQ_S(c_idx, check_idx);
-    check_idx++;
-
-    // Examine neighbours.
-    for (const GEdge& edge : gnode_forward_edges(g, node_idx)) {
-      // for (size_t i = 0; i < node.num_edges_out; ++i) {
-      // const GEdge& edge = node.edges[i];
-      const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
-      if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
-                            EDGE_DIR(edge))) {
-        continue;
-      }
-
-      uint32_t other_c_idx;
-      auto iter = graph_to_compact_nodemap->find(edge.other_node_idx);
-      if (iter == graph_to_compact_nodemap->end()) {
-        // The node hasn't been seen before. This means we need to allocate a
-        // new id, and we need to enqueue the node because it hasn't been
-        // handled yet.
-        other_c_idx = graph_to_compact_nodemap->size();
-        (*graph_to_compact_nodemap)[edge.other_node_idx] =
-            graph_to_compact_nodemap->size();
-        q.push(edge.other_node_idx);
-      } else {
-        other_c_idx = iter->second;
-      }
-
-      full_edges->push_back(
-          {.from_c_idx = c_idx,
-           .to_c_idx = other_c_idx,
-           .weight = metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge),
-           .way_idx = edge.way_idx,
-           .restricted_access = edge.car_label != GEdge::LABEL_FREE});
-    }
-
-    if (undirected_expand) {
-      // Examine neighbours connected by backward edges and add them to the
-      // queue if they haven't been seen yet.
-      for (const GEdge& edge : gnode_inverted_edges(g, node_idx)) {
-        // for (size_t i = node.num_edges_out; i < gnode_total_edges(node); ++i)
-        // { const GEdge& edge = node.edges[i];
-        const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
-        if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
-                              EDGE_INVERSE_DIR(edge))) {
-          continue;
-        }
-
-        auto iter = graph_to_compact_nodemap->find(edge.other_node_idx);
-        if (iter == graph_to_compact_nodemap->end()) {
-          (*graph_to_compact_nodemap)[edge.other_node_idx] =
-              graph_to_compact_nodemap->size();
-          q.push(edge.other_node_idx);
-        }
-      }
-    }
-  }
-  // TODO: graph_to_compact_nodemap->size() is sometimes smaller than
-  // cluster.num_nodes. Investigate why this happens. Maybe some nodes in the
-  // cluster are not reachable when using the directed graph - clustering is
-  // done on the undirected graph.
-  *num_nodes = graph_to_compact_nodemap->size();
-  CHECK_LT_S(*num_nodes, 1 << 31) << "Not supported, Internal data has 31 bits";
-}
-#endif
 
 // This exists once per 'node_idx'.
 struct VisitedNode {

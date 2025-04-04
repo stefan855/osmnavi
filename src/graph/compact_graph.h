@@ -2,12 +2,13 @@
 
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "base/util.h"
 #include "graph/graph_def.h"
 #include "osm/turn_restriction_defs.h"
 
 // This is a compact, i.e. memory efficient view on the nodes and edges of a
-// graph, with a precomputed weight for every edge. The nodes in the graph have
+// graph, with precomputed weights for every edge. The nodes in the graph have
 // ids 0..num_nodes()-1.
 class CompactDirectedGraph {
  public:
@@ -31,6 +32,9 @@ class CompactDirectedGraph {
     uint8_t simple_turn_restriction_trigger : 1;
     uint8_t complex_turn_restriction_trigger : 1;
   };
+
+  using CompactSimpleTurnRestrictionMap =
+      absl::flat_hash_map<uint32_t, uint32_t>;
 
   // Create a graph with the given number of nodes and edges in 'full_edges'.
   // 'full_edges' must be sorted non-decreasing by (from_c_idx, to_c_idx,
@@ -59,10 +63,12 @@ class CompactDirectedGraph {
 
   // Return the position of the edge (from_node, to_node) in edges().
   // Returns -1 in case the edge does not exist.
-  const int64_t FindEdge(uint32_t from_node, uint32_t to_node) const {
+  const int64_t FindEdge(uint32_t from_node, uint32_t to_node,
+                         int64_t way_idx = -1) const {
     for (size_t i = edges_start_.at(from_node);
          i < edges_start_.at(from_node + 1); ++i) {
-      if (edges_.at(i).to_c_idx == to_node) {
+      if (edges_.at(i).to_c_idx == to_node &&
+          (way_idx < 0 || edges_.at(i).way_idx == way_idx)) {
         return i;
       }
     }
@@ -157,27 +163,32 @@ class CompactDirectedGraph {
     MarkComplexTriggerEdges();
   }
 
+  // Add simple turn restrictions, transforming from Graph format to
+  // CompactGraph format.
   void AddSimpleTurnRestrictions(
       const Graph& g,
       const SimpleTurnRestrictionMap& simple_turn_restriction_map,
       const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
-    CHECK_S(simple_turn_restriction_map_.empty());
+    CHECK_S(compact_simple_turn_restriction_map_.empty());
     for (const auto& [g_key, g_data] : simple_turn_restriction_map) {
       TurnRestriction::TREdge new_key;
       if (!ConvertGraphBasedTurnRestrictionEdge(g_key, graph_to_compact_nodemap,
                                                 &new_key)) {
         continue;
       }
+      const int64_t key_edge_idx =
+          FindEdge(new_key.from_node_idx, new_key.to_node_idx, new_key.way_idx);
+      if (key_edge_idx < 0) {
+        continue;
+      }
 
-      SimpleTurnRestrictionData new_data{
-          .allowed_edge_bits = 0, .osm_relation_id = g_data.osm_relation_id};
-
-      // Iterate over the offsets of the allowed edges.
+      uint32_t allowed_edge_bits = 0;
       uint32_t bits = g_data.allowed_edge_bits;
       uint64_t g_start = g.nodes.at(g_key.to_node_idx).edges_start_pos;
       uint64_t cg_start = edges_start_.at(new_key.to_node_idx);
-      uint64_t cg_stop = edges_start_.at(new_key.to_node_idx + 1);
       bool error = false;
+      // Iterate edges starting at new_key.to_node_idx (via-node).
+      // Iterates over the offsets of the allowed edges.
       while (!error && bits != 0) {
         uint32_t g_offset = __builtin_ctz(bits);
         bits = bits - (1u << g_offset);
@@ -189,28 +200,27 @@ class CompactDirectedGraph {
           break;
         }
         // Now find this edge in the compact graph.
-        uint64_t i = cg_start;
-        for (; i < cg_stop; ++i) {
-          if (edges_.at(i).way_idx == g_edge.way_idx &&
-              edges_.at(i).way_idx == iter->second) {
-            break;
-          }
-        }
-        if (i >= cg_stop) {
+        const int64_t to_edge_idx =
+            FindEdge(new_key.to_node_idx, iter->second, g_edge.way_idx);
+        if (to_edge_idx < 0) {
           error = true;
           break;
         }
+
         // Encode offset into the new data;
-        new_data.allowed_edge_bits |= (1u << (i - cg_start));
+        allowed_edge_bits |= (1u << (to_edge_idx - cg_start));
       }
       if (!error) {
-        simple_turn_restriction_map_[new_key] = new_data;
+        compact_simple_turn_restriction_map_[static_cast<uint32_t>(
+            key_edge_idx)] = allowed_edge_bits;
+        edges_.at(key_edge_idx).simple_turn_restriction_trigger = 1;
       }
     }
   }
 
-  const SimpleTurnRestrictionMap& GetSimpleTurnRestrictionMap() const {
-    return simple_turn_restriction_map_;
+  const CompactSimpleTurnRestrictionMap& GetCompactSimpleTurnRestrictionMap()
+      const {
+    return compact_simple_turn_restriction_map_;
   }
 
  private:
@@ -291,9 +301,10 @@ class CompactDirectedGraph {
   std::vector<uint32_t> edges_start_;
   std::vector<PartialEdge> edges_;
 
-  // Simple turn restrictions (3 nodes involved). Indexed by the first trigger
-  // edge.
-  SimpleTurnRestrictionMap simple_turn_restriction_map_;
+  // Simple turn restrictions (3 nodes involved). Key is the edge index of
+  // the trigger edge. Value is the allowed offsets of outgoing edges at the via
+  // node.
+  CompactSimpleTurnRestrictionMap compact_simple_turn_restriction_map_;
 
   // Complex turn restrictions, involving more than 3 nodes.
   // The map is indexed by the first trigger edge and contains an index to the

@@ -234,7 +234,7 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
   if (success) {
     // Now check that the path is sane.
     int64_t prev_idx = -1;
-    for (TurnRestriction::TREdge entry : tr->path) {
+    for (const TurnRestriction::TREdge& entry : tr->path) {
       CHECK_S(prev_idx == -1 || prev_idx == entry.from_node_idx)
           << tr->relation_id;
       prev_idx = entry.to_node_idx;

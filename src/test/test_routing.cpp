@@ -610,7 +610,7 @@ void TestRouteSimpleTurnRestriction() {
   }
   {
     // Now check that running on the compact graph yields the same results.
-    CHECK_EQ_S(2000, RunQueryOnCompactGraph(g, B, E, RoutingMetricDistance(),
+    CHECK_EQ_S(4000, RunQueryOnCompactGraph(g, B, E, RoutingMetricDistance(),
                                             RoutingOptions()));
   }
 }
