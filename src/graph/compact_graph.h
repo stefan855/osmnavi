@@ -130,27 +130,50 @@ class CompactDirectedGraph {
         min_weight, max_weight);
   }
 
+  // Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
+  // first position in trs where that key occurs. Note that trs needs to be
+  // sorted by SortTurnRestrictions() and must contain complex turn restrictions
+  // only.
+  inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
+      Verbosity verbosity, const std::vector<TurnRestriction>& trs) {
+    ComplexTurnRestrictionMap res;
+    if (trs.empty()) {
+      return res;
+    }
+    size_t start = 0;
+    for (size_t i = 0; i < trs.size(); ++i) {
+      CHECK_S(!trs.at(i).via_is_node);
+      if (i == trs.size() - 1 ||
+          trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
+        res[trs.at(start).GetTriggerKey()] = start;
+        start = i + 1;
+      }
+    }
+    return res;
+  }
+
   // After creating the compact graph, add complex turn restrictions from the
   // standard Graph, which means that node references have to be converted to
   // reference the compact_graph.
   void AddComplexTurnRestrictions(
       const std::vector<TurnRestriction>& graph_based_trs,
       const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
+#if 0
     for (const TurnRestriction& g_tr : graph_based_trs) {
-      TurnRestriction cg_tr = {.relation_id = g_tr.relation_id,
-                               .from_way_id = g_tr.from_way_id,
-                               .via_ids = g_tr.via_ids,
-                               .to_way_id = g_tr.to_way_id,
-                               .via_is_node = g_tr.via_is_node,
-                               .forbidden = g_tr.forbidden,
-                               .direction = g_tr.direction};
+      ComplexTurnRestriction cg_tr = {.forbidden = g_tr.forbidden};
+
       for (const TurnRestriction::TREdge& tr_edge : g_tr.path) {
-        TurnRestriction::TREdge converted;
+        TurnRestriction::TREdge cg_edge;
         if (!ConvertGraphBasedTurnRestrictionEdge(
-                tr_edge, graph_to_compact_nodemap, &converted)) {
+                tr_edge, graph_to_compact_nodemap, &cg_edge)) {
           break;
         }
-        cg_tr.path.push_back(converted);
+        const int64_t cg_edge_idx = FindEdge(
+            cg_edge.from_node_idx, cg_edge.to_node_idx, cg_edge.way_idx);
+        if (cg_edge_idx < 0) {
+          break;
+        }
+        cg_tr.path.push_back(cg_edge_idx);
       }
       if (cg_tr.path.size() == g_tr.path.size()) {
         // All references were resolved.
@@ -161,6 +184,7 @@ class CompactDirectedGraph {
     complex_turn_restriction_map_ = ComputeComplexTurnRestrictionMap(
         Verbosity::Trace, complex_turn_restrictions_);
     MarkComplexTriggerEdges();
+#endif
   }
 
   // Add simple turn restrictions, transforming from Graph format to
@@ -169,7 +193,7 @@ class CompactDirectedGraph {
       const Graph& g,
       const SimpleTurnRestrictionMap& simple_turn_restriction_map,
       const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
-    CHECK_S(compact_simple_turn_restriction_map_.empty());
+    CHECK_S(simple_turn_restriction_map_.empty());
     for (const auto& [g_key, g_data] : simple_turn_restriction_map) {
       TurnRestriction::TREdge new_key;
       if (!ConvertGraphBasedTurnRestrictionEdge(g_key, graph_to_compact_nodemap,
@@ -211,8 +235,8 @@ class CompactDirectedGraph {
         allowed_edge_bits |= (1u << (to_edge_idx - cg_start));
       }
       if (!error) {
-        compact_simple_turn_restriction_map_[static_cast<uint32_t>(
-            key_edge_idx)] = allowed_edge_bits;
+        simple_turn_restriction_map_[static_cast<uint32_t>(key_edge_idx)] =
+            allowed_edge_bits;
         edges_.at(key_edge_idx).simple_turn_restriction_trigger = 1;
       }
     }
@@ -220,10 +244,23 @@ class CompactDirectedGraph {
 
   const CompactSimpleTurnRestrictionMap& GetCompactSimpleTurnRestrictionMap()
       const {
-    return compact_simple_turn_restriction_map_;
+    return simple_turn_restriction_map_;
   }
 
  private:
+  struct ComplexTurnRestriction {
+    // List of edge indexes. Contains at least 3 entries.
+    std::vector<uint32_t> path;
+    // True if the last edge in the path is forbidden, false if the last edge is
+    // mandatory.
+    bool forbidden;
+
+    uint32_t GetTriggerEdgeIdx() {
+      CHECK_GE_S(path.size(), 3);
+      return path.front();
+    }
+  };
+
   // Nodes are numbered [0..num_nodes). For each one, we want to store
   // the start of its edges in the edge array.
   // In the end we add one more element with value full_edges.size(), to allow
@@ -304,12 +341,13 @@ class CompactDirectedGraph {
   // Simple turn restrictions (3 nodes involved). Key is the edge index of
   // the trigger edge. Value is the allowed offsets of outgoing edges at the via
   // node.
-  CompactSimpleTurnRestrictionMap compact_simple_turn_restriction_map_;
+  CompactSimpleTurnRestrictionMap simple_turn_restriction_map_;
 
   // Complex turn restrictions, involving more than 3 nodes.
   // The map is indexed by the first trigger edge and contains an index to the
   // first complex turn restriction in the vector below.
   ComplexTurnRestrictionMap complex_turn_restriction_map_;
+  // std::vector<ComplexTurnRestriction> complex_turn_restrictions_;
   std::vector<TurnRestriction> complex_turn_restrictions_;
 };
 

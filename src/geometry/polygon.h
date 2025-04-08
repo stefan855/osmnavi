@@ -32,8 +32,8 @@ inline Polygon LoadPolygon(const std::string& filename) {
     CHECK_EQ_S(row.size(), 4u);
 
     int32_t lat, lon;
-    absl::SimpleAtoi(row.at(2), &lat);
-    absl::SimpleAtoi(row.at(3), &lon);
+    CHECK_S(absl::SimpleAtoi(row.at(2), &lat)) << row.at(2);
+    CHECK_S(absl::SimpleAtoi(row.at(3), &lon)) << row.at(3);
     if (poly.coords.empty()) {
       CHECK_S(row.at(0) == "poly-start") << filename << ":" << row.at(0);
     } else {

@@ -43,6 +43,7 @@ struct TurnRestriction {
     std::uint32_t from_node_idx;
     std::uint32_t way_idx;
     std::uint32_t to_node_idx;
+    std::uint32_t edge_idx;
 
     bool operator==(const TREdge& other) const {
       return from_node_idx == other.from_node_idx && way_idx == other.way_idx &&
@@ -58,6 +59,7 @@ struct TurnRestriction {
       return to_node_idx < b.to_node_idx;
     }
   };
+  uint32_t path_start_node_idx;  // The start node of the first edge in 'path'.
   std::vector<TREdge> path;
 
   // Get the key for the edge that triggers the start of the turn restriction.
@@ -76,7 +78,7 @@ struct SimpleTurnRestrictionData {
 };
 
 // Make sure there are no filler bytes, because we hash the whole thing.
-static_assert(sizeof(TurnRestriction::TREdge) == 3 * sizeof(std::uint32_t));
+static_assert(sizeof(TurnRestriction::TREdge) == 4 * sizeof(std::uint32_t));
 
 namespace std {
 template <>
@@ -87,7 +89,7 @@ struct hash<TurnRestriction::TREdge> {
     // Note: this only works as long as there are no filler bytes in the struct!
 
     return std::hash<std::string_view>{}(
-        std::string_view((char*)&key, sizeof(key)));
+        std::string_view((char*)&key, sizeof(3 * sizeof(std::uint32_t))));
   }
 };
 }  // namespace std

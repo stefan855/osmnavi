@@ -205,6 +205,7 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       tr->path.push_back({.from_node_idx = v.at(v.size() - 2),
                           .way_idx = p.way_idx,
                           .to_node_idx = v.at(v.size() - 1)});
+      tr->path_start_node_idx = v.at(v.size() - 2);
     }
 
     if (!tr->via_is_node) {
@@ -234,13 +235,14 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
   if (success) {
     // Now check that the path is sane.
     int64_t prev_idx = -1;
-    for (const TurnRestriction::TREdge& entry : tr->path) {
+    for (TurnRestriction::TREdge& entry : tr->path) {
       CHECK_S(prev_idx == -1 || prev_idx == entry.from_node_idx)
           << tr->relation_id;
       prev_idx = entry.to_node_idx;
 
-      const GEdge& edge = gnode_find_edge(g, entry.from_node_idx,
-                                          entry.to_node_idx, entry.way_idx);
+      entry.edge_idx = gnode_find_forward_edge_idx(
+          g, entry.from_node_idx, entry.to_node_idx, entry.way_idx);
+      const GEdge& edge = g.edges.at(entry.edge_idx);
       if (edge.inverted || edge.other_node_idx != entry.to_node_idx) {
         if (verbosity >= Verbosity::Warning) {
           LOG_S(INFO) << absl::StrFormat(

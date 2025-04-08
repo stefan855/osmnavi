@@ -391,6 +391,25 @@ inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
                                 g.nodes.at(node_idx).num_edges_forward);
 }
 
+inline const uint32_t gnode_find_forward_edge_idx(const Graph& g,
+                                                  uint32_t from_node_idx,
+                                                  uint32_t to_node_idx,
+                                                  uint32_t way_idx) {
+  uint32_t e_start = g.nodes.at(from_node_idx).edges_start_pos;
+  // uint32_t num = g.nodes.at(from_node_idx).num_edges_forward;
+  uint32_t num = gnode_edge_stop(g, from_node_idx) - e_start;
+  for (uint32_t off = 0; off < num; ++off) {
+    if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
+        g.edges.at(e_start + off).way_idx == way_idx) {
+      return e_start + off;
+    }
+  }
+  ABORT_S() << absl::StrFormat(
+      "Node %lld has no forward edge to node %lld with way %lld",
+      GetGNodeIdSafe(g, from_node_idx), GetGNodeIdSafe(g, to_node_idx),
+      g.ways.at(way_idx).id);
+}
+
 inline const GEdge& gnode_find_edge(const Graph& g, uint32_t from_node_idx,
                                     uint32_t to_node_idx, uint32_t way_idx) {
   for (const GEdge& e : gnode_all_edges(g, from_node_idx)) {
