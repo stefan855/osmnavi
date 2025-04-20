@@ -100,8 +100,9 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
                std::string_view csv_prefix = "") {
   std::uint32_t start_idx = g.FindNodeIndex(start_node_id);
   std::uint32_t target_idx = g.FindNodeIndex(target_node_id);
-  LOG_S(INFO) << absl::StrFormat("**** Route from %s(%u) to %s(%u)", start_name,
-                                 start_node_id, target_name, target_node_id);
+  LOG_S(INFO) << absl::StrFormat(
+      "\n********************** Route from %s(%u) to %s(%u)", start_name,
+      start_node_id, target_name, target_node_id);
   if (start_idx >= g.nodes.size() || target_idx >= g.nodes.size()) {
     LOG_S(INFO) << "Can't find endpoints";
     return;
@@ -119,6 +120,11 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
   DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
                          RoutingMetricTime(),
                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
+
+  compact_dijkstra::RouteOnCompactGraph(g, start_idx, target_idx,
+                                        RoutingMetricTime(), RoutingOptions(),
+                                        Verbosity::Brief);
+
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
                      RoutingMetricTime(),
                      /*backward=*/true, /*hybrid=*/false, csv_prefix);
@@ -511,6 +517,7 @@ int main(int argc, char* argv[]) {
 
   TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp-Norwegen",
             /*csv_prefix=*/"ln");
+  return 0;
   TestRoute(g, 899297768, 1131001345, "Nordkapp-Norwegen", "Lissabon",
             /*csv_prefix=*/"");
 

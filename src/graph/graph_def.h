@@ -67,7 +67,12 @@ struct GWay {
 
   // 'uniform_country' is 0 if more than one country_num exists for the nodes in
   // the way, 1 if all the nodes belong to the same country.
-  std::uint16_t uniform_country : 1 = 0;
+  std::uint8_t uniform_country : 1 = 0;
+  // Some ways have loops. This is some information about them.
+  std::uint8_t head_loop : 1 = 0;   // First node appears multiple times.
+  std::uint8_t tail_loop : 1 = 0;   // Last node appears multiple times.
+  std::uint8_t inner_loop : 1 = 0;    // Some inner node appears multiple times.
+  std::uint8_t closed_way : 1 = 0;    // First node == Last node.
   // Country of the first node in the way.
   // If uniform_country==1, then this value is the country of all the nodes.
   std::uint16_t ncc : 10 = INVALID_NCC;
@@ -187,7 +192,7 @@ struct GEdge {
   // is always allowed to do a u-turn at an endpoint of a street. Additionally,
   // it is allowed to do a u-turn if the edge is non-restricted and one would
   // have to enter a restricted access area if not doing a u-turn.
-  std::uint64_t car_uturn_allowed : 1;
+  std::uint8_t car_uturn_allowed : 1;
   std::uint64_t complex_turn_restriction_trigger : 1;
 };
 
@@ -354,40 +359,26 @@ inline size_t gnode_edge_stop(const Graph& g, uint32_t node_idx) {
 inline std::span<GEdge> gnode_all_edges(Graph& g, uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
-  return std::span<GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+  return std::span<GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
 inline std::span<const GEdge> gnode_all_edges(const Graph& g,
                                               uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
-  return std::span<const GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
+  return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
 inline std::span<GEdge> gnode_forward_edges(Graph& g, uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
-  /*
-  uint32_t e_stop = gnode_edge_stop(g, node_idx);
-  while (e_stop > e_start && g.edges.at(e_stop - 1).inverted) {
-    e_stop--;
-  }
-  return std::span<GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
-  */
-  return std::span<GEdge>(&(g.edges.at(e_start)),
+  return std::span<GEdge>(&(g.edges[e_start]),
                           g.nodes.at(node_idx).num_edges_forward);
 }
 
 inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
                                                   uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
-  /*
-  uint32_t e_stop = gnode_edge_stop(g, node_idx);
-  while (e_stop > e_start && g.edges.at(e_stop - 1).inverted) {
-    e_stop--;
-  }
-  return std::span<const GEdge>(&(g.edges.at(e_start)), e_stop - e_start);
-  */
-  return std::span<const GEdge>(&(g.edges.at(e_start)),
+  return std::span<const GEdge>(&(g.edges[e_start]),
                                 g.nodes.at(node_idx).num_edges_forward);
 }
 

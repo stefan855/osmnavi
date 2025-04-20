@@ -233,7 +233,8 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
   }
 
   if (success) {
-    // Now check that the path is sane.
+    // Now check that the path is sane and determine edge_idx for each edge in
+    // the path.
     int64_t prev_idx = -1;
     for (TurnRestriction::TREdge& entry : tr->path) {
       CHECK_S(prev_idx == -1 || prev_idx == entry.from_node_idx)

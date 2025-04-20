@@ -33,8 +33,15 @@ add_compile_options(-Wall)
 add_compile_options(-DLOGURU_WITH_STREAMS=1)
 add_compile_options(-march=native)
 
+# profiling
+# Running a binary produces gmon.out
+# gprof <binary> gmon.out > bla.gprof
+# vim bla.gprof
+# add_compile_options(-pg)
+# add_link_options(-pg)
+
 # Debugging information
-# add_compile_options(-g)
+# add_compile_options(-g -rdynamic)
 
 # add_compile_options(-D_GLIBCXX_CONCEPT_CHECKS -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC)
 
@@ -68,7 +75,7 @@ target_link_libraries(test_louvain PRIVATE absl::strings absl::str_format loguru
 
 add_executable(test_routing src/test/test_routing.cpp)
 target_include_directories(test_routing SYSTEM PRIVATE)
-target_link_libraries(test_routing PRIVATE osmpbf protobuf::libprotobuf absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
+target_link_libraries(test_routing PRIVATE osmpbf protobuf::libprotobuf absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time build_graph_lib)
 
 add_executable(tile_server src/bin/tile_server.cpp)
 target_include_directories(tile_server SYSTEM PRIVATE)

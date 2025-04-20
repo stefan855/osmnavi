@@ -7,103 +7,6 @@
 #include "base/util.h"
 #include "graph/graph_def.h"
 
-// Mark the bridge (from_idx, to_idx) as bridge, but only when node 'from_idx'
-// is not marked as 'dead-end'. This happens when a larger dead-end contains a
-// smaller dead-end.
-inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
-  GNode& from = g.nodes.at(from_idx);
-  if (from.dead_end) return;
-  for (GEdge& e : gnode_all_edges(g, from_idx)) {
-    // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(from); ++edge_pos)
-    // { GEdge& e = from.edges[edge_pos];
-    if (e.other_node_idx == to_idx) {
-      e.bridge = 1;
-    }
-  }
-}
-
-// Mark the nodes in the subtree below 'start_node_idx' as 'dead-end' and make
-// sure for dead-end each node there is at least one edge marked 'to_bridge'.
-//
-// Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
-// Requires that bridge edges at 'start_node_idx' are already marked.
-inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
-                                 uint32_t expected_size) {
-  GNode& start = g.nodes.at(start_node_idx);
-  if (start.dead_end) {
-    // There was a bridge with a larger subtree that contained this bridge, so
-    // we ignore this start_node.
-    return 0;
-  }
-  std::vector<uint32_t> nodes;
-  nodes.push_back(start_node_idx);
-  start.dead_end = 1;
-  uint32_t num_nodes = 1;
-  size_t pos = 0;
-  while (pos < nodes.size()) {
-    uint32_t node_pos = nodes.at(pos++);
-    // GNode& n = g.nodes.at(node_pos);
-    for (GEdge& e : gnode_all_edges(g, node_pos)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { GEdge& e = n.edges[edge_pos];
-      if (e.bridge || !e.unique_other) continue;
-      GNode& other = g.nodes.at(e.other_node_idx);
-      if (!other.dead_end) {
-        other.dead_end = 1;
-        num_nodes++;
-        nodes.push_back(e.other_node_idx);
-        // Mark to_bridge edges on the other node.
-        bool has_to_bridge = false;
-        for (GEdge& e : gnode_all_edges(g, e.other_node_idx)) {
-          // for (size_t o_pos = 0; o_pos < gnode_total_edges(other); ++o_pos) {
-          // GEdge& e = other.edges[o_pos];
-          if (e.other_node_idx == node_pos) {
-            e.to_bridge = true;
-            has_to_bridge = true;
-          }
-        }
-        // Every dead-end node needs at least one edge with to_bridge==1.
-        CHECK_S(has_to_bridge) << start.node_id << " " << other.node_id;
-      }
-    }
-  }
-  return num_nodes;
-}
-
-// Given a dead-end node at 'start_node_idx', find the bridge belonging to the
-// node. Check fails if the node is not in a dead-end or if the bridge can't be
-// found.
-//
-// As a result, node1_idx is the node on the dead-end side of the bridge and
-// node2_idx on the non-dead-end side of the bridge.
-inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
-                       uint32_t* node1_idx, uint32_t* node2_idx) {
-  // Stop after too many iterations, looks like a program error.
-  int32_t count = 10000000;
-  uint32_t pos = start_node_idx;
-  while (count-- > 0) {
-    const GNode& n = g.nodes.at(pos);
-    CHECK_S(n.dead_end);
-    for (const GEdge& e : gnode_all_edges(g, pos)) {
-      // for (size_t i = 0; i < gnode_total_edges(n); ++i) {
-      // const GEdge& e = n.edges[i];
-      if (e.to_bridge) {
-        pos = e.other_node_idx;
-        break;
-      } else if (e.bridge) {
-        // Found the bridge.
-        if (node1_idx != nullptr) *node1_idx = pos;
-        if (node2_idx != nullptr) *node2_idx = e.other_node_idx;
-        CHECK_S(!g.nodes.at(e.other_node_idx).dead_end)
-            << g.nodes.at(e.other_node_idx).node_id;
-        return;
-      }
-    }
-  }
-  ABORT_S() << "FindBridge " << g.nodes.at(start_node_idx).node_id << " "
-            << count;
-}
-
 // Find bridges in undirected graph.
 class Tarjan {
  public:
@@ -275,3 +178,131 @@ class Tarjan {
   const Graph& g_;
   std::vector<std::int32_t> tmp_node_list_;
 };
+
+// Mark the bridge (from_idx, to_idx) as bridge, but only when node 'from_idx'
+// is not marked as 'dead-end'. This happens when a larger dead-end contains a
+// smaller dead-end.
+inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
+  GNode& from = g.nodes.at(from_idx);
+  if (from.dead_end) return;
+  for (GEdge& e : gnode_all_edges(g, from_idx)) {
+    // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(from); ++edge_pos)
+    // { GEdge& e = from.edges[edge_pos];
+    if (e.other_node_idx == to_idx) {
+      e.bridge = 1;
+    }
+  }
+}
+
+// Mark the nodes in the subtree below 'start_node_idx' as 'dead-end' and make
+// sure for dead-end each node there is at least one edge marked 'to_bridge'.
+//
+// Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
+// Requires that bridge edges at 'start_node_idx' are already marked.
+inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
+                                 uint32_t expected_size) {
+  GNode& start = g.nodes.at(start_node_idx);
+  if (start.dead_end) {
+    // There was a bridge with a larger subtree that contained this bridge, so
+    // we ignore this start_node.
+    return 0;
+  }
+  std::vector<uint32_t> nodes;
+  nodes.push_back(start_node_idx);
+  start.dead_end = 1;
+  uint32_t num_nodes = 1;
+  size_t pos = 0;
+  while (pos < nodes.size()) {
+    uint32_t node_pos = nodes.at(pos++);
+    // GNode& n = g.nodes.at(node_pos);
+    for (GEdge& e : gnode_all_edges(g, node_pos)) {
+      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
+      // { GEdge& e = n.edges[edge_pos];
+      if (e.bridge || !e.unique_other) continue;
+      GNode& other = g.nodes.at(e.other_node_idx);
+      if (!other.dead_end) {
+        other.dead_end = 1;
+        num_nodes++;
+        nodes.push_back(e.other_node_idx);
+        // Mark to_bridge edges on the other node.
+        bool has_to_bridge = false;
+        for (GEdge& e : gnode_all_edges(g, e.other_node_idx)) {
+          // for (size_t o_pos = 0; o_pos < gnode_total_edges(other); ++o_pos) {
+          // GEdge& e = other.edges[o_pos];
+          if (e.other_node_idx == node_pos) {
+            e.to_bridge = true;
+            has_to_bridge = true;
+          }
+        }
+        // Every dead-end node needs at least one edge with to_bridge==1.
+        CHECK_S(has_to_bridge) << start.node_id << " " << other.node_id;
+      }
+    }
+  }
+  return num_nodes;
+}
+
+// Given a dead-end node at 'start_node_idx', find the bridge belonging to the
+// node. Check fails if the node is not in a dead-end or if the bridge can't be
+// found.
+//
+// As a result, node1_idx is the node on the dead-end side of the bridge and
+// node2_idx on the non-dead-end side of the bridge.
+inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
+                       uint32_t* node1_idx, uint32_t* node2_idx) {
+  // Stop after too many iterations, looks like a program error.
+  int32_t count = 10000000;
+  uint32_t pos = start_node_idx;
+  while (count-- > 0) {
+    const GNode& n = g.nodes.at(pos);
+    CHECK_S(n.dead_end);
+    for (const GEdge& e : gnode_all_edges(g, pos)) {
+      // for (size_t i = 0; i < gnode_total_edges(n); ++i) {
+      // const GEdge& e = n.edges[i];
+      if (e.to_bridge) {
+        pos = e.other_node_idx;
+        break;
+      } else if (e.bridge) {
+        // Found the bridge.
+        if (node1_idx != nullptr) *node1_idx = pos;
+        if (node2_idx != nullptr) *node2_idx = e.other_node_idx;
+        CHECK_S(!g.nodes.at(e.other_node_idx).dead_end)
+            << g.nodes.at(e.other_node_idx).node_id;
+        return;
+      }
+    }
+  }
+  ABORT_S() << "FindBridge " << g.nodes.at(start_node_idx).node_id << " "
+            << count;
+}
+
+inline int64_t ApplyTarjan(Graph& g) {
+  FUNC_TIMER();
+  int64_t num_dead_end_nodes = 0;
+  if (g.large_components.empty()) {
+    ABORT_S() << "g.large_components is empty";
+  }
+  Tarjan t(g);
+  std::vector<Tarjan::BridgeInfo> bridges;
+  for (const Graph::Component& comp : g.large_components) {
+    bridges.clear();
+    t.FindBridges(comp, &bridges);
+    // Sort bridges in descending order of subtrees. If a dead-end contains
+    // other, smaller dead-ends, then only the dead-end with the largest subtree
+    // is actually used.
+    std::sort(bridges.begin(), bridges.end(),
+              [](const Tarjan::BridgeInfo& a, const Tarjan::BridgeInfo& b) {
+                return a.subtree_size > b.subtree_size;
+              });
+    for (const Tarjan::BridgeInfo& bridge : bridges) {
+      MarkBridgeEdge(g, bridge.from_node_idx, bridge.to_node_idx);
+      MarkBridgeEdge(g, bridge.to_node_idx, bridge.from_node_idx);
+      num_dead_end_nodes +=
+          MarkDeadEndNodes(g, bridge.to_node_idx, bridge.subtree_size);
+    }
+  }
+  LOG_S(INFO) << absl::StrFormat("Graph has %lld (%.2f%%) dead end nodes.",
+                                 num_dead_end_nodes,
+                                 (100.0 * num_dead_end_nodes) / g.nodes.size());
+  return num_dead_end_nodes;
+}

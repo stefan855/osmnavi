@@ -71,8 +71,8 @@ class EdgeRouter {
     if (start_idx == target_idx) {
       return {.found = true,
               .found_distance = 0,
-              .num_visited = 0,
-              .num_shortest_route_nodes = 0};
+              .num_shortest_route_nodes = 0,
+              .num_visited = 0};
     }
 
     Context ctx = {.opt = opt,
@@ -237,8 +237,8 @@ class EdgeRouter {
     RoutingResult result = {
         .found = true,
         .found_distance = target_metric,
-        .num_visited = (uint32_t)visited_edges_.size(),
         .num_shortest_route_nodes = 1,
+        .num_visited = (uint32_t)visited_edges_.size(),
         .num_complex_turn_restriction_keys = ctr_deduper_.num_unique(),
         .complex_turn_restriction_keys_reduction_factor =
             static_cast<float>(ctr_deduper_.num_unique()) /
@@ -323,11 +323,10 @@ class EdgeRouter {
 
     ActiveCtrs active_ctrs;
     if (active_key) {
-      // We have an active config. Check if it triggers and if it forbids
-      // next_edge.
+      // We have active turn restrictions. Check if they forbid the next edge.
       active_ctrs = ctr_deduper_.GetObj(
           visited_edges_.at(prev.v_idx).key.GetCtrConfigId());
-      if (!ActiveCtrsAddNextEdge(g_, prev.other_idx, next_edge, &active_ctrs)) {
+      if (!ActiveCtrsAddNextEdge(g_, next_edge, &active_ctrs)) {
         // Forbidden turn!
         return std::nullopt;
       }
@@ -633,7 +632,7 @@ class EdgeRouter {
 
   const Graph& g_;
   CTRDeDuper ctr_deduper_;
-  std::vector<VisitedEdge> visited_edges_;
+  std::deque<VisitedEdge> visited_edges_;
 
   typedef absl::flat_hash_map<uint64_t, uint32_t> EdgeIdMap;
   EdgeIdMap edgekey_to_v_idx_;

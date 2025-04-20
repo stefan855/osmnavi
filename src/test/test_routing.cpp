@@ -7,6 +7,7 @@
 #include "algos/edge_key.h"
 #include "algos/edge_router.h"
 #include "algos/router.h"
+#include "algos/tarjan.h"
 #include "base/country_code.h"
 #include "base/util.h"
 #include "graph/compact_graph.h"
@@ -15,32 +16,12 @@
 #include "osm/osm_helpers.h"
 #include "test/test_utils.h"
 
-uint32_t RouteOnCompactGraph(const Graph& g, uint32_t g_start,
-                             uint32_t g_target, const RoutingMetric& metric,
-                             const RoutingOptions& opt) {
-  LOG_S(INFO) << "Run query on compact graph";
-  constexpr uint32_t CG_START = 0;
-  constexpr uint32_t CG_TARGET = 1;
-  uint32_t num_nodes;
-  std::vector<CompactDirectedGraph::FullEdge> full_edges;
-  absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
-  CollectEdgesForCompactGraph(g, metric, opt, {g_start, g_target},
-                              /*undirected_expand=*/true, &num_nodes,
-                              &full_edges, &graph_to_compact_nodemap);
-  CHECK_S(graph_to_compact_nodemap.contains(g_start));
-  CHECK_S(graph_to_compact_nodemap.contains(g_target));
-  CHECK_EQ_S(graph_to_compact_nodemap.find(g_start)->second, CG_START);
-  CHECK_EQ_S(graph_to_compact_nodemap.find(g_target)->second, CG_TARGET);
-  CompactDirectedGraph cg(num_nodes, full_edges);
-  cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
-                               graph_to_compact_nodemap);
-
-  // Now route!
-  SingleSourceEdgeDijkstra edge_router;
-  edge_router.Route(cg, CG_START, {.handle_restricted_access = true});
-  std::vector<uint32_t> w =
-      edge_router.GetNodeWeightsFromVisitedEdges(cg, CG_START);
-  return w.at(CG_TARGET);
+RoutingResult RouteOnCompactGraph(const Graph& g, uint32_t g_start,
+                                  uint32_t g_target,
+                                  const RoutingMetric& metric,
+                                  const RoutingOptions& opt) {
+  return compact_dijkstra::RouteOnCompactGraph(g, g_start, g_target, metric,
+                                               opt, Verbosity::Trace);
 }
 
 // Create a compacted graph from 'g' which has the same node ordering and the
@@ -140,6 +121,78 @@ void TestCTRDeDuper() {
 }
 
 /*
+ * A Graph with two dead-ends a,b and e,f.
+ * Use to check the routing from/to dead-ends works as expected.
+ *
+ *                             [g]
+ *                             /  \
+ *                            /    \
+ *                           / 1  1 \
+ *                          /        \
+ *     [a] ----- [b] ----- [c] ----- [d] ----- [e] ----- [f]
+ *           1         1         1         1         1
+ */
+Graph CreateGraphWithDeadEnds(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D, E, F, G };  // Node names.
+  Graph g;
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
+  AddNode(g, A);
+  AddNode(g, B);
+  AddNode(g, C);
+  AddNode(g, D);
+  AddNode(g, E);
+  AddNode(g, F);
+  AddNode(g, G);
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(D, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, F, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, G, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(G, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+  g.large_components.push_back({.start_node = A, .size = 7});
+  ApplyTarjan(g);
+  return g;
+}
+
+void TestRouteDeadEnds() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F, G };  // Node names.
+  const Graph g = CreateGraphWithDeadEnds(/*both_dirs=*/true);
+  {
+    EdgeRouter router(g, 3);
+    RoutingOptions opt;
+    opt.MayFillBridgeNodeId(g, F);
+    auto res = router.Route(A, F, RoutingMetricDistance(), opt);
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 5000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 6);
+  }
+  {
+    CHECK_EQ_S(5000, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
+  }
+  {
+    CHECK_EQ_S(3000, RouteOnCompactGraph(g, B, E, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
+  }
+  {
+    CHECK_EQ_S(5000, RouteOnCompactGraph(g, F, A, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
+  }
+  {
+    CHECK_EQ_S(3000, RouteOnCompactGraph(g, E, B, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
+  }
+}
+
+/*
  * A typical graph with restricted areas. The restricted edge [a][b] should be
  * bypassed through [e] because this it is shorter.
  * This should be handled correctly by all routers, because the shortest way
@@ -193,7 +246,7 @@ void TestRouteRestrictedSimple() {
   }
   {
     CHECK_EQ_S(4000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -273,7 +326,7 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 7000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 4);
     CHECK_EQ_S(7000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -282,7 +335,7 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 8000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_EQ_S(8000, RouteOnCompactGraph(g, A, E, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -291,14 +344,14 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 6);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
     auto res = router.Route(A, I, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
     CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, A, I, RoutingMetricDistance(),
-                                           RoutingOptions()));
+                                           RoutingOptions()).found_distance);
   }
 
   {
@@ -308,7 +361,7 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 7000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 4);
     CHECK_EQ_S(7000, RouteOnCompactGraph(g, D, A, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -317,7 +370,7 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 8000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_EQ_S(8000, RouteOnCompactGraph(g, E, A, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -326,14 +379,14 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 6);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, F, A, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
     auto res = router.Route(I, A, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
     CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, I, A, RoutingMetricDistance(),
-                                           RoutingOptions()));
+                                           RoutingOptions()).found_distance);
   }
 }
 
@@ -400,7 +453,7 @@ void TestRouteRestrictedHard() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 7);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -409,7 +462,7 @@ void TestRouteRestrictedHard() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 7);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, F, A, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
 }
 
@@ -593,7 +646,7 @@ void TestRouteSimpleTurnRestriction() {
   }
   {
     CHECK_EQ_S(2000, RouteOnCompactGraph(g, B, E, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
   }
 
   // Add turn restriction to graph.
@@ -622,7 +675,83 @@ void TestRouteSimpleTurnRestriction() {
   {
     // Now check that running on the compact graph yields the same results.
     CHECK_EQ_S(4000, RouteOnCompactGraph(g, B, E, RoutingMetricDistance(),
-                                         RoutingOptions()));
+                                         RoutingOptions()).found_distance);
+  }
+}
+
+/*
+ * Most simple graph to the a complex turn restriction. Find the shortest way
+ * from [a] to [d].
+ *
+ * If w0-w1-w2 is forbidden, it is not possible.
+ *
+ *    [a] ------- [b] ------- [c] ------- [d]
+ *          1w0         1w1          1w2
+ *
+ */
+inline Graph CreateBasicComplexTurnRestrictionGraph(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3 };
+  Graph g;
+  AddDefaultWSA(g);
+
+  AddNode(g, A);
+  AddNode(g, B);
+  AddNode(g, C);
+  AddNode(g, D);
+
+  AddWay(g, /*way_idx=*/Way0, HW_TERTIARY, /*wsa_id=*/0, {A, B});
+  AddWay(g, /*way_idx=*/Way1, HW_TERTIARY, /*wsa_id=*/0, {B, C});
+  AddWay(g, /*way_idx=*/Way2, HW_TERTIARY, /*wsa_id=*/0, {C, D});
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
+  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
+  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+  return g;
+}
+
+void TestRouteBasicComplexTurnRestriction() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3 };
+  Graph g = CreateBasicComplexTurnRestrictionGraph(true);
+
+  {
+    // Test shortest way without turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 3000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 4);
+    CHECK_S(router.GetShortestPathNodeIndexes(res) ==
+            std::vector<uint32_t>({A, B, C, D}));
+    CHECK_EQ_S(3000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
+  }
+
+  // Add turn restriction to graph.
+  OsmWrapper w;
+  OSMPBF::Relation rel = CreateComplexTRRelation(
+      g, &w, /*id=*/1, {Way0, Way1, Way2}, "no_straight_on");
+  TRResult res;
+  ParseTurnRestriction(g, w.tagh, rel, Verbosity::Trace, &res);
+  g.complex_turn_restrictions = res.trs;
+  CHECK_EQ_S(g.complex_turn_restrictions.size(), 1);
+  g.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
+      Verbosity::Trace, g.complex_turn_restrictions);
+  CHECK_EQ_S(g.complex_turn_restriction_map.size(), 1);
+  MarkComplexTriggerEdges(&g);
+
+  {
+    // Test shortest way with turn restriction.
+    EdgeRouter router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(!res.found);
+    CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
+                                           RoutingOptions()).found_distance);
   }
 }
 
@@ -719,10 +848,12 @@ void TestRouteComplexTurnRestrictionNegative() {
     EdgeRouter router(g, 3);
     auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(res.found);
-    CHECK_EQ_S(res.found_distance, 12000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({A, B, C, F, D}));
+    CHECK_EQ_S(res.found_distance, 12000);
+    CHECK_EQ_S(12000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
+                                          RoutingOptions()).found_distance);
   }
   {
     // Test route without initial segment.
@@ -733,6 +864,8 @@ void TestRouteComplexTurnRestrictionNegative() {
     CHECK_EQ_S(res.num_shortest_route_nodes, 4);
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({E, B, C, D}));
+    CHECK_EQ_S(3000, RouteOnCompactGraph(g, E, D, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
   }
 }
 
@@ -764,6 +897,8 @@ void TestRouteComplexTurnRestrictionPositive() {
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({A, B, C, F, D}));
+    CHECK_EQ_S(12000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
+                                          RoutingOptions()).found_distance);
   }
 }
 
@@ -845,6 +980,8 @@ void TestRouteOverlappingTurnRestrictions() {
     EdgeRouter router(g, 3);
     auto res = router.Route(A, F, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
+    CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
+                                           RoutingOptions()).found_distance);
   }
   {
     // Test route without initial segment.
@@ -854,6 +991,8 @@ void TestRouteOverlappingTurnRestrictions() {
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({B, C, D, E, F}));
+    CHECK_EQ_S(4000, RouteOnCompactGraph(g, B, F, RoutingMetricDistance(),
+                                         RoutingOptions()).found_distance);
   }
 }
 
@@ -974,6 +1113,7 @@ int main(int argc, char* argv[]) {
   }
 
   TestGEdgeKey();
+  TestRouteDeadEnds();
   TestRouteRestrictedSimple();
   TestRouteRestricted();
   TestRouteRestrictedHard();
@@ -983,6 +1123,7 @@ int main(int argc, char* argv[]) {
   TestBitFunctions();
   TestRouteSimpleTurnRestriction();
   TestCTRDeDuper();
+  TestRouteBasicComplexTurnRestriction();
   TestRouteComplexTurnRestrictionNegative();
   TestRouteComplexTurnRestrictionPositive();
   TestRouteOverlappingTurnRestrictions();

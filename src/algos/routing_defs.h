@@ -79,59 +79,27 @@ struct RoutingOptions {
  private:
 };
 
-#if 0
-// Helper data for routers that want to protect a restricted-access area
-// ("access=destination" etc.) from being used wrongly during routing.
-struct RestrictedAccessArea {
-  bool active = false;
-  // This is true iff both start and target node are in a non-empty destination
-  // area and the two areas are the same. In this case, a special handling for
-  // edge keys is needed in Dijkstra.
-  bool start_equal_target = false;
-  Rectangle<int32_t> bounding_rect = {0, 0, 0, 0};
-  absl::flat_hash_set<uint32_t> transition_nodes;
-
-  void InitialiseTransitionNodes(const Graph& g, uint32_t start_idx,
-                                 uint32_t target_idx) {
-    transition_nodes = GetRestrictedAccessTransitionNodes(g, target_idx);
-    active = transition_nodes.size() > 0;
-    start_equal_target = false;
-    if (active) {
-      auto start_trans = GetRestrictedAccessTransitionNodes(g, start_idx);
-      start_equal_target = (start_trans.size() == transition_nodes.size() &&
-                            transition_nodes.contains(*start_trans.begin()));
-    }
-    if (active) {
-      // Compute bounding rectangle of all transition nodes.
-      const GNode& n1 = g.nodes.at(target_idx);
-      bounding_rect.Set({n1.lat, n1.lon});
-      for (uint32_t idx : transition_nodes) {
-        const GNode& n2 = g.nodes.at(idx);
-        bounding_rect.ExtendBound({n2.lat, n2.lon});
-      }
-    }
-  }
-};
-#endif
-
 struct RoutingResult {
   bool found = false;
   // If a route was found, the distance from start to target node.
   uint32_t found_distance = 0;
-  uint32_t num_visited = 0;  // edges or nodes, depending on router type.
   uint32_t num_shortest_route_nodes = 0;
+  std::vector<uint32_t> route_v_idx;  // Filled iff found == true.
+
+  // Internal stats.
+  uint32_t num_visited = 0;  // edges or nodes, depending on router type.
   uint32_t num_complex_turn_restriction_keys = 0;
   float complex_turn_restriction_keys_reduction_factor = 0;
-  std::vector<uint32_t> route_v_idx;  // Filled iff found == true.
 };
 
 // Check if the routing options 'opt' make us reject to follow 'edge'.
 inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
-                              const GNode& node, std::uint32_t node_idx,
-                              const GEdge& edge, const WaySharedAttrs& wsa,
+                              const GNode& from_node,
+                              std::uint32_t from_node_idx, const GEdge& edge,
+                              const WaySharedAttrs& wsa,
                               DIRECTION edge_direction) {
-  if (edge.bridge && opt.avoid_dead_end && !node.dead_end &&
-      node_idx != opt.allow_bridge_node_idx) {
+  if (edge.bridge && opt.avoid_dead_end && !from_node.dead_end &&
+      from_node_idx != opt.allow_bridge_node_idx) {
     // Node is in the non-dead-end side of the bridge, so ignore edge and
     // do not enter the dead end.
     return true;
@@ -150,18 +118,19 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
   // Hybrid search.
   // If we are in a dead-end (or entering one), then we must be in start or
   // target cluster. That's ok in all cases.
-  if (opt.hybrid.on && !node.dead_end && !other.dead_end) {
+  if (opt.hybrid.on && !from_node.dead_end && !other.dead_end) {
     bool to_start_or_end = (other.cluster_id == opt.hybrid.start_cluster_id) ||
                            (other.cluster_id == opt.hybrid.target_cluster_id);
     // Always ok if the edge goes to the start or to the end cluster.
     if (!to_start_or_end) {
       // A connection to outside start/target clusters must be - by construction
       // - from a border node (in any cluster).
-      CHECK_S(node.cluster_border_node) << node.node_id;
+      CHECK_S(from_node.cluster_border_node) << from_node.node_id;
       // Outside connections must be between border nodes in different clusters.
       // Same cluster is not ok because this would be an inner edge for this
       // cluster, even if it connects border nodes.
-      if (!other.cluster_border_node || node.cluster_id == other.cluster_id) {
+      if (!other.cluster_border_node ||
+          from_node.cluster_id == other.cluster_id) {
         return true;
       }
     }

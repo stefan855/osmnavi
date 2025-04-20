@@ -47,6 +47,7 @@ build/
 debug/
 release/
 opt/
+logs/
 
 # vim stuff
 *.swp

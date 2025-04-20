@@ -1,9 +1,11 @@
 #pragma once
 
+#include "algos/complex_turn_restriction.h"
 #include "base/constants.h"
 #include "base/deduper_with_ids.h"
 #include "graph/graph_def.h"
 
+#if 0
 // Complex turn restriction vector data structures.
 struct CTRPosition {
   // The referenced turn restriction is stored in
@@ -121,6 +123,8 @@ struct hash<ActiveCtrs> {
 };
 }  // namespace std
 
+#endif
+
 // TODO: Add information for turn restrictions.
 // GEdgeKey uniquely identifies an edge in a graph data structure. It works both
 // for graph edges (GEdge) and cluster edges. It encapsulates the index of the
@@ -225,23 +229,27 @@ class alignas(2) GEdgeKey final {
     return GEdgeKey(TURN_RESTRICTION, ctr_config_id, offset, bit);
   }
 
-  // Convert the data to a unique 64 bit key that can be used for indexing and
+  // Convert the data to a *unique* 64 bit key that can be used for indexing and
   // hashing.
-  // For cluster edges this returns (cluster_id, offset), which identifies the
-  // target node of the edge. This reflects that when using the key, we are not
-  // interested from which start node we're arriving at the target node.
+  // Note that for cluster edges this returns (cluster_id, offset), which
+  // identifies the target node of the edge. This reflects that when using the
+  // key, we are not interested from which start node we're arriving at the
+  // target node.
   uint64_t UInt64Key(const Graph& g, const CTRDeDuper& dd) {
     if (type_ == GRAPH) {
-      return (static_cast<uint64_t>(GetFromIdx(g, dd)) << 32) +
+      return (static_cast<uint64_t>(GetFromIdx(g, dd)) << 31) +
+             (static_cast<uint64_t>(GetFromIdx(g, dd)) << 13) +
              (static_cast<uint64_t>(GetOffset()) << 3) + (GetBit() << 2) +
              type_;
     } else if (type_ == CLUSTER) {
       CHECK_S(!GetBit());
-      return (static_cast<uint64_t>(FromNode(g, dd).cluster_id) << 32) +
+      return (static_cast<uint64_t>(FromNode(g, dd).cluster_id) << 31) +
+             (static_cast<uint64_t>(FromNode(g, dd).cluster_id) << 17) +
              (static_cast<uint64_t>(GetOffset()) << 3) + (GetBit() << 2) +
              type_;
     } else {
-      return (static_cast<uint64_t>(GetCtrConfigId()) << 32) +
+      return (static_cast<uint64_t>(GetCtrConfigId()) << 31) +
+             (static_cast<uint64_t>(GetCtrConfigId()) << 19) +
              (static_cast<uint64_t>(GetOffset()) << 3) + (GetBit() << 2) +
              type_;
     }

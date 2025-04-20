@@ -227,8 +227,8 @@ void SingleSourceEdgeDijkstraWorker(const GraphData& gd, uint32_t poi_c_idx,
     uint32_t e_idx = spanning_tree_edges.at(i);
     CHECK_LT_S(e_idx, edge_traffic.size());
     CHECK_LT_S(e_idx, vis.size());
-    if (edge_traffic.at(e_idx) > 0 && vis.at(e_idx).from_idx != INFU31) {
-      uint32_t prev_e_idx = vis.at(e_idx).from_idx;
+    if (edge_traffic.at(e_idx) > 0 && vis.at(e_idx).from_v_idx != INFU32) {
+      uint32_t prev_e_idx = vis.at(e_idx).from_v_idx;
       CHECK_LT_S(prev_e_idx, edge_traffic.size());
       // Add the traffic accumulated at the current edge to its predecessor
       // edge.

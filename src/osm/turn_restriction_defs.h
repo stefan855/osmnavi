@@ -113,7 +113,6 @@ inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
             });
 }
 
-
 // Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
 // first position in trs where that key occurs. Note that trs needs to be sorted
 // by SortTurnRestrictions() and must contain complex turn  restrictions only.
@@ -134,4 +133,3 @@ inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
   }
   return res;
 }
-

@@ -164,6 +164,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     n.edges_start_pos = curr_pos;
     curr_pos += count;
   }
+  // build_graph::MarkUTurnAllowedEdges(g);
 }
 
 inline OSMPBF::Relation CreateSimpleTRRelation(

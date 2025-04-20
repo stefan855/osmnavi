@@ -61,6 +61,7 @@ struct BuildGraphStats {
   int64_t num_noderefs_with_highway_tag = 0;
   int64_t num_ways_too_short = 0;
   int64_t num_ways_missing_nodes = 0;
+  int64_t num_ways_dup_segments = 0;
 
   // Graph building
   int64_t num_turn_restriction_success = 0;
@@ -145,6 +146,9 @@ struct GraphMetaData {
 // Read a pbf file from disk, build the road network and return it together with
 // auxiliary data.
 GraphMetaData BuildGraph(const BuildGraphOptions& opt);
+
+// Mark all edges if a u-turn after travelling the edge is allowed or not.
+void MarkUTurnAllowedEdges(Graph* g);
 
 // Way attributes country code, rural/urban and is_motorroad as extracted from
 // tags. Note that country code is only used for error reporting, since we

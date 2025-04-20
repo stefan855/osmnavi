@@ -114,11 +114,15 @@ struct LayerData {
 double ConvertToDouble(std::string_view numstr) {
   if (absl::StrContains(numstr, '.')) {
     double num;
-    absl::SimpleAtod(numstr, &num);
+    if (!absl::SimpleAtod(numstr, &num)) {
+      LOG_S(INFO) << "Can not convert string to double: <" << numstr << ">";
+    }
     return num;
   } else {
     int64_t num;
-    absl::SimpleAtoi(numstr, &num);
+    if (!absl::SimpleAtoi(numstr, &num)) {
+      LOG_S(INFO) << "Can not convert string to int64: <" << numstr << ">";
+    }
     return num / 10000000.0;
   }
 }

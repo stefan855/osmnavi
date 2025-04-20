@@ -3,6 +3,8 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "algos/routing_defs.h"
+#include "algos/routing_metric.h"
 #include "base/util.h"
 #include "graph/graph_def.h"
 #include "osm/turn_restriction_defs.h"
@@ -12,16 +14,17 @@
 // ids 0..num_nodes()-1.
 class CompactDirectedGraph {
  public:
+  // Edges that are used as input to build the compact graph.
   struct FullEdge {
     uint32_t from_c_idx;
     uint32_t to_c_idx;
     uint32_t weight;
     uint32_t way_idx : WAY_IDX_BITS;  // 31 bits.
-    // Edge has restricted car_label (LABEL_RESTRICTED or
-    // LABEL_RESTRICTED_SECONDARY) set.
     uint8_t restricted_access : 1;
+    uint8_t uturn_allowed : 1;
   };
 
+  // Edge type used for edges of the compact graph.
   struct PartialEdge {
     uint32_t to_c_idx;
     uint32_t weight;
@@ -29,12 +32,28 @@ class CompactDirectedGraph {
     // Edge has restricted car_label (LABEL_RESTRICTED or
     // LABEL_RESTRICTED_SECONDARY) set.
     uint8_t restricted_access : 1;
-    uint8_t simple_turn_restriction_trigger : 1;
-    uint8_t complex_turn_restriction_trigger : 1;
+    // If a u-turn (i.e. return from to_c_idx to the origin of this edge) is
+    // allowed or not.
+    uint8_t uturn_allowed : 1;
+    // '1' iff this edge a trigger for a simple turn restriction.
+    uint8_t simple_tr_trigger : 1;
+    // '1' iff this edge a trigger for a complex turn restriction.
+    uint8_t complex_tr_trigger : 1;
   };
 
-  using CompactSimpleTurnRestrictionMap =
-      absl::flat_hash_map<uint32_t, uint32_t>;
+  // A complex turn restriction.
+  struct ComplexTurnRestriction final {
+    // List of edge indexes. Contains at least 3 entries.
+    std::vector<uint32_t> path;
+    // True if the last edge in the path is forbidden, false if the last edge is
+    // mandatory.
+    bool forbidden;
+
+    uint32_t GetTriggerEdgeIdx() const {
+      CHECK_GE_S(path.size(), 3);
+      return path.front();
+    }
+  };
 
   // Create a graph with the given number of nodes and edges in 'full_edges'.
   // 'full_edges' must be sorted non-decreasing by (from_c_idx, to_c_idx,
@@ -112,89 +131,13 @@ class CompactDirectedGraph {
     return node_refs;
   }
 
-  // Log stats about the graph.
-  void LogStats() const {
-    uint32_t min_weight = std::numeric_limits<uint32_t>::max();
-    uint32_t max_weight = 0;
-    uint32_t restricted_access = 0;
-    for (const PartialEdge& e : edges_) {
-      if (e.weight < min_weight) min_weight = e.weight;
-      if (e.weight > max_weight) max_weight = e.weight;
-      restricted_access += e.restricted_access;
-    }
-    LOG_S(INFO) << absl::StrFormat(
-        "CompactGraph #nodes:%u #edges:%u restricted:%u mem:%u weight=[%u,%u]",
-        edges_start_.size() - 1, edges_.size(), restricted_access,
-        edges_start_.size() * sizeof(uint32_t) +
-            edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
-        min_weight, max_weight);
-  }
-
-  // Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
-  // first position in trs where that key occurs. Note that trs needs to be
-  // sorted by SortTurnRestrictions() and must contain complex turn restrictions
-  // only.
-  inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
-      Verbosity verbosity, const std::vector<TurnRestriction>& trs) {
-    ComplexTurnRestrictionMap res;
-    if (trs.empty()) {
-      return res;
-    }
-    size_t start = 0;
-    for (size_t i = 0; i < trs.size(); ++i) {
-      CHECK_S(!trs.at(i).via_is_node);
-      if (i == trs.size() - 1 ||
-          trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
-        res[trs.at(start).GetTriggerKey()] = start;
-        start = i + 1;
-      }
-    }
-    return res;
-  }
-
-  // After creating the compact graph, add complex turn restrictions from the
-  // standard Graph, which means that node references have to be converted to
-  // reference the compact_graph.
-  void AddComplexTurnRestrictions(
-      const std::vector<TurnRestriction>& graph_based_trs,
-      const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
-#if 0
-    for (const TurnRestriction& g_tr : graph_based_trs) {
-      ComplexTurnRestriction cg_tr = {.forbidden = g_tr.forbidden};
-
-      for (const TurnRestriction::TREdge& tr_edge : g_tr.path) {
-        TurnRestriction::TREdge cg_edge;
-        if (!ConvertGraphBasedTurnRestrictionEdge(
-                tr_edge, graph_to_compact_nodemap, &cg_edge)) {
-          break;
-        }
-        const int64_t cg_edge_idx = FindEdge(
-            cg_edge.from_node_idx, cg_edge.to_node_idx, cg_edge.way_idx);
-        if (cg_edge_idx < 0) {
-          break;
-        }
-        cg_tr.path.push_back(cg_edge_idx);
-      }
-      if (cg_tr.path.size() == g_tr.path.size()) {
-        // All references were resolved.
-        complex_turn_restrictions_.push_back(cg_tr);
-      }
-    }
-    SortTurnRestrictions(&complex_turn_restrictions_);
-    complex_turn_restriction_map_ = ComputeComplexTurnRestrictionMap(
-        Verbosity::Trace, complex_turn_restrictions_);
-    MarkComplexTriggerEdges();
-#endif
-  }
-
   // Add simple turn restrictions, transforming from Graph format to
   // CompactGraph format.
   void AddSimpleTurnRestrictions(
-      const Graph& g,
-      const SimpleTurnRestrictionMap& simple_turn_restriction_map,
+      const Graph& g, const SimpleTurnRestrictionMap& simple_tr_map,
       const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
-    CHECK_S(simple_turn_restriction_map_.empty());
-    for (const auto& [g_key, g_data] : simple_turn_restriction_map) {
+    CHECK_S(simple_tr_map_.empty());
+    for (const auto& [g_key, g_data] : simple_tr_map) {
       TurnRestriction::TREdge new_key;
       if (!ConvertGraphBasedTurnRestrictionEdge(g_key, graph_to_compact_nodemap,
                                                 &new_key)) {
@@ -235,32 +178,113 @@ class CompactDirectedGraph {
         allowed_edge_bits |= (1u << (to_edge_idx - cg_start));
       }
       if (!error) {
-        simple_turn_restriction_map_[static_cast<uint32_t>(key_edge_idx)] =
-            allowed_edge_bits;
-        edges_.at(key_edge_idx).simple_turn_restriction_trigger = 1;
+        simple_tr_map_[static_cast<uint32_t>(key_edge_idx)] = allowed_edge_bits;
+        edges_.at(key_edge_idx).simple_tr_trigger = 1;
       }
     }
   }
 
-  const CompactSimpleTurnRestrictionMap& GetCompactSimpleTurnRestrictionMap()
+  // Add complex turn restrictions from the standard Graph format, which means
+  // that node references have to be converted to reference within the
+  // compact_graph.
+  void AddComplexTurnRestrictions(
+      const std::vector<TurnRestriction>& graph_based_trs,
+      const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
+    // Fill complex_trs_.
+    for (const TurnRestriction& g_tr : graph_based_trs) {
+      ComplexTurnRestriction cg_tr = {.forbidden = g_tr.forbidden};
+
+      for (const TurnRestriction::TREdge& tr_edge : g_tr.path) {
+        TurnRestriction::TREdge cg_edge;
+        if (!ConvertGraphBasedTurnRestrictionEdge(
+                tr_edge, graph_to_compact_nodemap, &cg_edge)) {
+          break;
+        }
+        cg_tr.path.push_back(cg_edge.edge_idx);
+      }
+      if (cg_tr.path.size() == g_tr.path.size()) {
+        // All references were resolved.
+        complex_trs_.push_back(cg_tr);
+      }
+    }
+
+    // Sort complex_trs_ by trigger edge indexes.
+    std::sort(
+        complex_trs_.begin(), complex_trs_.end(),
+        [](const ComplexTurnRestriction& a, const ComplexTurnRestriction& b) {
+          return a.GetTriggerEdgeIdx() < b.GetTriggerEdgeIdx();
+        });
+
+    // Fill complex_tr_map_. It maps from trigger edge index to the position of
+    // the first complex turn restriction in complex_trs_.
+    size_t start = 0;
+    for (size_t i = 0; i < complex_trs_.size(); ++i) {
+      const ComplexTurnRestriction& tr = complex_trs_.at(i);
+      CHECK_GT_S(tr.path.size(), 2);
+      if (i == complex_trs_.size() - 1 ||
+          complex_trs_.at(i).GetTriggerEdgeIdx() !=
+              complex_trs_.at(i + 1).GetTriggerEdgeIdx()) {
+        complex_tr_map_[complex_trs_.at(start).GetTriggerEdgeIdx()] = start;
+        edges_.at(complex_trs_.at(start).GetTriggerEdgeIdx())
+            .complex_tr_trigger = 1;
+        start = i + 1;
+      }
+    }
+
+    LOG_S(INFO) << complex_trs_.size() << " of " << graph_based_trs.size()
+                << " complex turn restrictions added";
+  }
+
+  inline const absl::flat_hash_map<uint32_t, uint32_t>& GetSimpleTRMap() const {
+    return simple_tr_map_;
+  }
+
+  inline const std::vector<ComplexTurnRestriction>& GetComplexTRS() const {
+    return complex_trs_;
+  }
+
+  inline const absl::flat_hash_map<uint32_t, uint32_t>& GetComplexTRMap()
       const {
-    return simple_turn_restriction_map_;
+    return complex_tr_map_;
+  }
+
+  // Log stats about the graph.
+  void LogStats() const {
+    uint32_t min_weight = std::numeric_limits<uint32_t>::max();
+    uint32_t max_weight = 0;
+    uint32_t restricted_access = 0;
+    uint32_t uturn = 0;
+    for (const PartialEdge& e : edges_) {
+      if (e.weight < min_weight) min_weight = e.weight;
+      if (e.weight > max_weight) max_weight = e.weight;
+      restricted_access += e.restricted_access;
+      uturn += e.uturn_allowed;
+    }
+    LOG_S(INFO) << absl::StrFormat(
+        "CompactGraph #nodes:%u #edges:%u restricted:%u uturn:%u mem:%u "
+        "weight=[%u,%u]",
+        edges_start_.size() - 1, edges_.size(), restricted_access, uturn,
+        edges_start_.size() * sizeof(uint32_t) +
+            edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
+        min_weight, max_weight);
+  }
+
+  void DebugPrint() const {
+    LOG_S(INFO) << absl::StrFormat("Compact Graph %u nodes %u edges",
+                                   num_nodes_, edges_.size());
+    for (uint32_t node_idx = 0; node_idx < num_nodes_; ++node_idx) {
+      for (size_t i = edges_start_.at(node_idx);
+           i < edges_start_.at(node_idx + 1); ++i) {
+        const PartialEdge& e = edges_.at(i);
+        LOG_S(INFO) << absl::StrFormat(
+            "  Edge %u to %u way_idx:%u ra:%u str:%u ctr:%u", node_idx,
+            e.to_c_idx, e.way_idx, e.restricted_access, e.simple_tr_trigger,
+            e.complex_tr_trigger);
+      }
+    }
   }
 
  private:
-  struct ComplexTurnRestriction {
-    // List of edge indexes. Contains at least 3 entries.
-    std::vector<uint32_t> path;
-    // True if the last edge in the path is forbidden, false if the last edge is
-    // mandatory.
-    bool forbidden;
-
-    uint32_t GetTriggerEdgeIdx() {
-      CHECK_GE_S(path.size(), 3);
-      return path.front();
-    }
-  };
-
   // Nodes are numbered [0..num_nodes). For each one, we want to store
   // the start of its edges in the edge array.
   // In the end we add one more element with value full_edges.size(), to allow
@@ -296,7 +320,10 @@ class CompactDirectedGraph {
       edges_.push_back({.to_c_idx = e.to_c_idx,
                         .weight = e.weight,
                         .way_idx = e.way_idx,
-                        .restricted_access = e.restricted_access});
+                        .restricted_access = e.restricted_access,
+                        .uturn_allowed = e.uturn_allowed,
+                        .simple_tr_trigger = 0,
+                        .complex_tr_trigger = 0});
       full_restricted += e.restricted_access;
       partial_restricted += edges_.back().restricted_access;
     }
@@ -316,16 +343,14 @@ class CompactDirectedGraph {
     converted_edge->from_node_idx = iter_from->second,
     converted_edge->way_idx = tr_edge.way_idx,
     converted_edge->to_node_idx = iter_to->second;
-    return true;
-  }
-
-  void MarkComplexTriggerEdges() {
-#if 0
-    for (const auto& [key, pos] : g->complex_turn_restriction_map) {
-      gnode_find_edge(*g, key.from_node_idx, key.to_node_idx, key.way_idx)
-          .complex_turn_restriction_trigger = 1;
+    int64_t edge_idx =
+        FindEdge(converted_edge->from_node_idx, converted_edge->to_node_idx,
+                 converted_edge->way_idx);
+    if (edge_idx < 0) {
+      return false;
     }
-#endif
+    converted_edge->edge_idx = edge_idx;
+    return true;
   }
 
   // Number of nodes in the graph.
@@ -341,14 +366,13 @@ class CompactDirectedGraph {
   // Simple turn restrictions (3 nodes involved). Key is the edge index of
   // the trigger edge. Value is the allowed offsets of outgoing edges at the via
   // node.
-  CompactSimpleTurnRestrictionMap simple_turn_restriction_map_;
+  absl::flat_hash_map<uint32_t, uint32_t> simple_tr_map_;
 
   // Complex turn restrictions, involving more than 3 nodes.
-  // The map is indexed by the first trigger edge and contains an index to the
-  // first complex turn restriction in the vector below.
-  ComplexTurnRestrictionMap complex_turn_restriction_map_;
-  // std::vector<ComplexTurnRestriction> complex_turn_restrictions_;
-  std::vector<TurnRestriction> complex_turn_restrictions_;
+  // The map is indexed by the first trigger edge index and contains an index to
+  // the first complex turn restriction in the vector below.
+  absl::flat_hash_map<uint32_t, uint32_t> complex_tr_map_;
+  std::vector<ComplexTurnRestriction> complex_trs_;
 };
 
 inline bool operator<(const CompactDirectedGraph::FullEdge& a,
@@ -358,9 +382,13 @@ inline bool operator<(const CompactDirectedGraph::FullEdge& a,
 }
 
 // Visit all reachable nodes using a BFS, starting from the nodes in
-// 'start_nodes', using 'opt' to limit expansion. Assigns a serial id=0..N-1 to
-// each node. The start nodes are mapped to indices [0..start_node.size()-1] in
-// the given order.
+// 'routing_nodes', using 'opt' to limit expansion. Assigns a serial id=0..N-1
+// to each node. The routing nodes are mapped to indices
+// [0..start_node.size()-1] in the given order.
+//
+// Note: If a routing node is in a dead end (and opt.avoid_dead_end is true),
+// then the bridge is allowed to be traversed in both directions. This way, the
+// resulting graph contains all dead ends with routing nodes in them.
 //
 // 'undirected_expand': If 'false', then only forward edges are followed, i.e.
 // only nodes reachable by forward routing from one of the start nodes will be
@@ -373,12 +401,13 @@ inline bool operator<(const CompactDirectedGraph::FullEdge& a,
 // If 'graph_to_compact_nodemap' is not nullptr, then it will contain a mapping
 // from indexes in graph.nodes to indexes in the compact graph [0..num_nodes-1].
 inline void CollectEdgesForCompactGraph(
-    const Graph& g, const RoutingMetric& metric, const RoutingOptions& opt,
-    const std::vector<std::uint32_t>& start_nodes, bool undirected_expand,
+    const Graph& g, const RoutingMetric& metric, RoutingOptions opt,
+    const std::vector<std::uint32_t>& routing_nodes, bool undirected_expand,
     uint32_t* num_nodes,
     std::vector<CompactDirectedGraph::FullEdge>* full_edges,
     absl::flat_hash_map<uint32_t, uint32_t>* graph_to_compact_nodemap =
         nullptr) {
+  CHECK_S(!routing_nodes.empty());
   // Map from node index in g.nodes to the node index in the compact graph.
   absl::flat_hash_map<uint32_t, uint32_t> internal_nodemap;
   if (graph_to_compact_nodemap == nullptr) {
@@ -389,12 +418,28 @@ inline void CollectEdgesForCompactGraph(
   // FIFO queue for bfs, containing node indices in g.nodes.
   std::queue<uint32_t> q;
 
-  // Preallocate ids for all start nodes.
-  for (uint32_t pos = 0; pos < start_nodes.size(); ++pos) {
-    uint32_t node_idx = start_nodes.at(pos);
+  // Preallocate ids for all nodes in routing_nodes.
+  for (uint32_t pos = 0; pos < routing_nodes.size(); ++pos) {
+    uint32_t node_idx = routing_nodes.at(pos);
     (*graph_to_compact_nodemap)[node_idx] = pos;
     q.push(node_idx);
   }
+
+  // Find dead end bridge nodes for routing nodes, and preallocate them.
+  // This way they have c_idx values in a defined range, which allows fast
+  // checks (see max_bridge_c_idx below).
+  if (opt.avoid_dead_end) {
+    for (uint32_t pos = 0; pos < routing_nodes.size(); ++pos) {
+      if (!g.nodes.at(routing_nodes.at(pos)).dead_end) {
+        continue;
+      }
+      uint32_t node_idx;
+      FindBridge(g, routing_nodes.at(pos), nullptr, &node_idx);
+      (*graph_to_compact_nodemap)[node_idx] = graph_to_compact_nodemap->size();
+      q.push(node_idx);
+    }
+  }
+  const uint32_t max_bridge_c_idx = graph_to_compact_nodemap->size() - 1;
 
   // Do a BFS.
   uint32_t check_idx = 0;
@@ -408,15 +453,37 @@ inline void CollectEdgesForCompactGraph(
     CHECK_EQ_S(c_idx, check_idx);
     check_idx++;
 
+    // Check if this node is at a bridge that is allowed to traverse into the
+    // dead end.
+    if (c_idx <= max_bridge_c_idx && c_idx >= routing_nodes.size()) {
+      // This allows RoutingRejectEdge() below to traverse the bridge.
+      opt.allow_bridge_node_idx = node_idx;
+    }
+
     // Examine neighbours.
     for (const GEdge& edge : gnode_forward_edges(g, node_idx)) {
-      // for (size_t i = 0; i < node.num_edges_out; ++i) {
-      // const GEdge& edge = node.edges[i];
       const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
       if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
+#if 0
+        if (GetGNodeIdSafe(g, node_idx) == 3108533807 ||
+            GetGNodeIdSafe(g, node_idx) == 10679042406) {
+          LOG_S(INFO) << absl::StrFormat(
+              "Disallow travel ifrom %lld to node %lld",
+              GetGNodeIdSafe(g, node_idx),
+              GetGNodeIdSafe(g, edge.other_node_idx));
+        }
+#endif
         continue;
       }
+#if 0
+      if (GetGNodeIdSafe(g, node_idx) == 3108533807 ||
+          GetGNodeIdSafe(g, node_idx) == 10679042406) {
+        LOG_S(INFO) << absl::StrFormat("Allow travel from %lld to node %lld",
+                                       GetGNodeIdSafe(g, node_idx),
+                                       GetGNodeIdSafe(g, edge.other_node_idx));
+      }
+#endif
 
       uint32_t other_c_idx;
       auto iter = graph_to_compact_nodemap->find(edge.other_node_idx);
@@ -437,7 +504,8 @@ inline void CollectEdgesForCompactGraph(
            .to_c_idx = other_c_idx,
            .weight = metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge),
            .way_idx = edge.way_idx,
-           .restricted_access = edge.car_label != GEdge::LABEL_FREE});
+           .restricted_access = edge.car_label != GEdge::LABEL_FREE,
+           .uturn_allowed = edge.car_uturn_allowed});
     }
 
     if (undirected_expand) {
@@ -467,4 +535,6 @@ inline void CollectEdgesForCompactGraph(
   // done on the undirected graph.
   *num_nodes = graph_to_compact_nodemap->size();
   CHECK_LT_S(*num_nodes, 1 << 31) << "Not supported, Internal data has 31 bits";
+
+  // Add all bridges for routing nodes.
 }
