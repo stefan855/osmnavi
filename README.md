@@ -28,15 +28,20 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
    * Varbyte encoding of numbers, strings and lists of node ids ([varbyte.h](./src/base/varbyte.h))
    * Line clipping on viewports, using [Cohen-Sutherland algorithm](https://en.wikipedia.org/wiki/Cohen-Sutherland_algorithm), see [line_clipping.h](./src/geometry/line_clipping.h).
    * Distance between points on the earth, using the [haversine formula](https://en.wikipedia.org/wiki/Haversine_formula), see [distance.h](./src/geometry/distance.h).
-
+1. Cluster the routing graph at the lowest level and for each cluster, precompute the cluster-internal routes between outside-connecting nodes. The user routing then runs on the much smaller graph induced by the clusters and the cluster-connecting edges. Precomputation of routes within clusters is done whenever needed and preferably on the user-device. To create good clusters, the [Louvain method](https://en.wikipedia.org/wiki/Louvain_method) is used, see  code in [louvain.h](./src/algos/louvain.h).
+1. Support turn restrictions, including turn restrictions havin multiple via-ways.
+1. Support access=destination and other kinds of restrictions.
+1. Support interactive routing in the browser.
+  
 ## Current Tasks
-* Cluster the routing graph at the lowest level and for each cluster, precompute the cluster-internal routes between outside-connecting nodes. The user routing then runs on the much smaller graph induced by the clusters and the cluster-connecting edges. Precomputation of routes within clusters is done whenever needed and preferably on the user-device. Experimentation starts with the [Louvain method](https://en.wikipedia.org/wiki/Louvain_method), see  code in [louvain.h](./src/algos/louvain.h). 
+* Handle Pollards and similar obstacles on ways.
+* Compute angles for edges. Needed for display in interactive routing, and to later for computing turn costs.
 
 ## Tasks ahead
-1. Store the routing graph in a file. Currently, the import of OSM data is re-done from scratch every time the routing graph is needed (see [build_graph_main.cpp](./src/bin/build_graph_main.cpp)).
+1. Compute turn costs and add to routing.
+2. Store the routing graph in a file. Currently, the import of OSM data is re-done from scratch every time the routing graph is needed (see [build_graph_main.cpp](./src/bin/build_graph_main.cpp)).
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 1. Add routing configs for more countries (see [routing.cfg](config/routing.cfg)).
-1. Support turn restrictions.
 1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
 1. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
@@ -46,4 +51,4 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 ## Installation hints
 1. Code is developed on a 64-bit PC (AMD64) using Ubuntu Linux. I haven't tried compiling or running it on any other operating system or platform.
 1. The libraries abseil-cpp and cpp-httplib are imported as submodules. Run submodule update --init --recursive after cloning.
-1. The libraries libgd-dev, libosmpbf-dev and zlib1g-dev have to be installed.
+1. The libraries libgd-dev, libosmpbf-dev, zlib1g-dev and nlohmann-json3-dev have to be installed on the system.
