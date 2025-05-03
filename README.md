@@ -29,7 +29,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
    * Line clipping on viewports, using [Cohen-Sutherland algorithm](https://en.wikipedia.org/wiki/Cohen-Sutherland_algorithm), see [line_clipping.h](./src/geometry/line_clipping.h).
    * Distance between points on the earth, using the [haversine formula](https://en.wikipedia.org/wiki/Haversine_formula), see [distance.h](./src/geometry/distance.h).
 1. Cluster the routing graph at the lowest level and for each cluster, precompute the cluster-internal routes between outside-connecting nodes. The user routing then runs on the much smaller graph induced by the clusters and the cluster-connecting edges. Precomputation of routes within clusters is done whenever needed and preferably on the user-device. To create good clusters, the [Louvain method](https://en.wikipedia.org/wiki/Louvain_method) is used, see  code in [louvain.h](./src/algos/louvain.h).
-1. Support turn restrictions, including turn restrictions havin multiple via-ways.
+1. Support turn restrictions, including turn restrictions having multiple via-ways.
 1. Support access=destination and other kinds of restrictions.
 1. Support interactive routing in the browser.
   
