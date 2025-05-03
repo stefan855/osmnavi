@@ -20,8 +20,16 @@ RoutingResult RouteOnCompactGraph(const Graph& g, uint32_t g_start,
                                   uint32_t g_target,
                                   const RoutingMetric& metric,
                                   const RoutingOptions& opt) {
+  g.DebugPrint();
+  const CompactDijkstraRoutingData data = CreateCompactDijkstraRoutingData(
+      g, {g_start, g_target}, metric, opt, Verbosity::Brief);
+  return RouteOnCompactGraph(data, g_start, g_target, Verbosity::Brief);
+
+  /*
   return compact_dijkstra::RouteOnCompactGraph(g, g_start, g_target, metric,
                                                opt, Verbosity::Trace);
+  */
+
 }
 
 // Create a compacted graph from 'g' which has the same node ordering and the
@@ -176,19 +184,23 @@ void TestRouteDeadEnds() {
   }
   {
     CHECK_EQ_S(5000, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     CHECK_EQ_S(3000, RouteOnCompactGraph(g, B, E, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     CHECK_EQ_S(5000, RouteOnCompactGraph(g, F, A, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     CHECK_EQ_S(3000, RouteOnCompactGraph(g, E, B, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 }
 
@@ -246,7 +258,8 @@ void TestRouteRestrictedSimple() {
   }
   {
     CHECK_EQ_S(4000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -326,7 +339,8 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 7000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 4);
     CHECK_EQ_S(7000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -335,7 +349,8 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 8000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_EQ_S(8000, RouteOnCompactGraph(g, A, E, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -344,14 +359,16 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 6);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
     auto res = router.Route(A, I, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
     CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, A, I, RoutingMetricDistance(),
-                                           RoutingOptions()).found_distance);
+                                           RoutingOptions())
+                           .found_distance);
   }
 
   {
@@ -361,7 +378,8 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 7000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 4);
     CHECK_EQ_S(7000, RouteOnCompactGraph(g, D, A, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -370,7 +388,8 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 8000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 5);
     CHECK_EQ_S(8000, RouteOnCompactGraph(g, E, A, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -379,14 +398,16 @@ void TestRouteRestricted() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 6);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, F, A, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
     auto res = router.Route(I, A, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
     CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, I, A, RoutingMetricDistance(),
-                                           RoutingOptions()).found_distance);
+                                           RoutingOptions())
+                           .found_distance);
   }
 }
 
@@ -453,7 +474,8 @@ void TestRouteRestrictedHard() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 7);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
   {
     EdgeRouter router(g, 3);
@@ -462,7 +484,8 @@ void TestRouteRestrictedHard() {
     CHECK_EQ_S(res.found_distance, 9000);
     CHECK_EQ_S(res.num_shortest_route_nodes, 7);
     CHECK_EQ_S(9000, RouteOnCompactGraph(g, F, A, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 }
 
@@ -646,7 +669,8 @@ void TestRouteSimpleTurnRestriction() {
   }
   {
     CHECK_EQ_S(2000, RouteOnCompactGraph(g, B, E, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 
   // Add turn restriction to graph.
@@ -675,7 +699,8 @@ void TestRouteSimpleTurnRestriction() {
   {
     // Now check that running on the compact graph yields the same results.
     CHECK_EQ_S(4000, RouteOnCompactGraph(g, B, E, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 }
 
@@ -729,7 +754,8 @@ void TestRouteBasicComplexTurnRestriction() {
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({A, B, C, D}));
     CHECK_EQ_S(3000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 
   // Add turn restriction to graph.
@@ -751,7 +777,8 @@ void TestRouteBasicComplexTurnRestriction() {
     auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
     CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                           RoutingOptions()).found_distance);
+                                           RoutingOptions())
+                           .found_distance);
   }
 }
 
@@ -853,7 +880,8 @@ void TestRouteComplexTurnRestrictionNegative() {
             std::vector<uint32_t>({A, B, C, F, D}));
     CHECK_EQ_S(res.found_distance, 12000);
     CHECK_EQ_S(12000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                          RoutingOptions()).found_distance);
+                                          RoutingOptions())
+                          .found_distance);
   }
   {
     // Test route without initial segment.
@@ -865,7 +893,8 @@ void TestRouteComplexTurnRestrictionNegative() {
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({E, B, C, D}));
     CHECK_EQ_S(3000, RouteOnCompactGraph(g, E, D, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 }
 
@@ -898,7 +927,8 @@ void TestRouteComplexTurnRestrictionPositive() {
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({A, B, C, F, D}));
     CHECK_EQ_S(12000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                          RoutingOptions()).found_distance);
+                                          RoutingOptions())
+                          .found_distance);
   }
 }
 
@@ -981,7 +1011,8 @@ void TestRouteOverlappingTurnRestrictions() {
     auto res = router.Route(A, F, RoutingMetricDistance(), RoutingOptions());
     CHECK_S(!res.found);
     CHECK_EQ_S(INFU32, RouteOnCompactGraph(g, A, F, RoutingMetricDistance(),
-                                           RoutingOptions()).found_distance);
+                                           RoutingOptions())
+                           .found_distance);
   }
   {
     // Test route without initial segment.
@@ -992,7 +1023,8 @@ void TestRouteOverlappingTurnRestrictions() {
     CHECK_S(router.GetShortestPathNodeIndexes(res) ==
             std::vector<uint32_t>({B, C, D, E, F}));
     CHECK_EQ_S(4000, RouteOnCompactGraph(g, B, F, RoutingMetricDistance(),
-                                         RoutingOptions()).found_distance);
+                                         RoutingOptions())
+                         .found_distance);
   }
 }
 

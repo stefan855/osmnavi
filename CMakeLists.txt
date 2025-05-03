@@ -89,3 +89,7 @@ add_executable(poi_traffic src/bin/poi_traffic.cpp)
 target_include_directories(poi_traffic SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
 target_link_libraries(poi_traffic PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
 
+add_executable(routing_server src/bin/routing_server.cpp)
+target_include_directories(routing_server SYSTEM PRIVATE)
+target_link_libraries(routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_format loguru_lib absl::time absl::time build_graph_lib)
+

@@ -164,6 +164,9 @@ class EdgeRouter {
     return visited_edges_.at(v_idx);
   }
 
+  // Ugly but currently needed when accessing data in an edge key.
+  const CTRDeDuper& GetCTRDeDuper() const { return ctr_deduper_; }
+
   std::vector<uint32_t> GetShortestPathNodeIndexes(const RoutingResult& res) {
     std::vector<uint32_t> v;
     if (!res.route_v_idx.empty()) {
@@ -632,7 +635,7 @@ class EdgeRouter {
 
   const Graph& g_;
   CTRDeDuper ctr_deduper_;
-  std::deque<VisitedEdge> visited_edges_;
+  std::vector<VisitedEdge> visited_edges_;
 
   typedef absl::flat_hash_map<uint64_t, uint32_t> EdgeIdMap;
   EdgeIdMap edgekey_to_v_idx_;

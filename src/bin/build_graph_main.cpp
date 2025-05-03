@@ -95,8 +95,38 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
       num_len_gt_1, router.Name(metric, opt));
 }
 
-void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
-               const std::string& start_name, const std::string& target_name,
+void DoCompactRoute(const CompactDijkstraRoutingData& comp_data,
+                    uint32_t g_start, uint32_t g_target,
+                    std::string_view csv_prefix) {
+  const absl::Time start = absl::Now();
+  auto res =
+      RouteOnCompactGraph(comp_data, g_start, g_target, Verbosity::Quiet);
+  const double elapsed = ToDoubleSeconds(absl::Now() - start);
+
+  /*
+  if (!csv_prefix.empty()) {
+    router.SaveSpanningTreeSegments(absl::StrFormat(
+        "/tmp/%s_%s_%s%s.csv", csv_prefix, router.AlgoName(opt).substr(0, 5),
+        backward ? "backward" : "forward", hybrid ? "_hybrid" : ""));
+  }
+  */
+
+  uint32_t num_len_gt_1 = 0;
+  uint32_t max_len = 0;
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Metr:%u %s secs:%6.3f #n:%5u vis:%9u cTR:%4u(%3.0f%% max:%u lgt1:%u) "
+      "%s",
+      res.found_distance, res.found ? "SUC" : "ERR", elapsed,
+      res.num_shortest_route_nodes, res.num_visited,
+      res.num_complex_turn_restriction_keys,
+      res.complex_turn_restriction_keys_reduction_factor * 100.0, max_len,
+      num_len_gt_1, "compact edge dijkstra ");
+}
+
+void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
+               int64_t start_node_id, int64_t target_node_id,
+               std::string_view start_name, std::string_view target_name,
                std::string_view csv_prefix = "") {
   std::uint32_t start_idx = g.FindNodeIndex(start_node_id);
   std::uint32_t target_idx = g.FindNodeIndex(target_node_id);
@@ -121,9 +151,8 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
                          RoutingMetricTime(),
                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
 
-  compact_dijkstra::RouteOnCompactGraph(g, start_idx, target_idx,
-                                        RoutingMetricTime(), RoutingOptions(),
-                                        Verbosity::Brief);
+  DoCompactRoute(comp_data, start_idx, target_idx, csv_prefix);
+  // RouteOnCompactGraph(comp_data, start_idx, target_idx, Verbosity::Brief);
 
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
                      RoutingMetricTime(),
@@ -154,6 +183,7 @@ void TestRoute(const Graph& g, int64_t start_node_id, int64_t target_node_id,
                          /*backward=*/false, /*hybrid=*/true, csv_prefix);
 }
 
+#if 0
 void TestRouteLatLong(const Graph& g, double start_lat, double start_lon,
                       double target_lat, double target_lon,
                       std::string_view csv_prefix = "") {
@@ -177,6 +207,7 @@ void TestRouteLatLong(const Graph& g, double start_lat, double start_lon,
 
   TestRoute(g, sn.node_id, tn.node_id, "start=", "target=", csv_prefix);
 }
+#endif
 
 void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
   FuncTimer timer(absl::StrFormat("Write graph to %s", filename.c_str()),
@@ -500,14 +531,53 @@ int main(int argc, char* argv[]) {
   WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
                     "/tmp/experimental4.csv");
 
+  struct RoutingDef {
+    int64_t start_id;
+    int64_t target_id;
+    std::string_view from_name;
+    std::string_view to_name;
+    std::string_view file_prefix;
+  };
+
+  std::vector<RoutingDef> defs = {
+      {49973500, 805904068, "Pfäffikon ZH", "Bern", "pb"},
+      {805904068, 49973500, "Bern", "Pfäffikon ZH", "bp"},
+      {3108534441, 3019156898, "Uster", "Weesen", "uw"},
+      {3019156898, 3108534441, "Weesen", "Uster", "wu"},
+      {26895904, 300327675, "Augsburg", "Stralsund", "as"},
+      {300327675, 26895904, "Stralsund", "Augsburg", "sa"},
+      {1131001345, 899297768, "Lissabon", "Nordkapp", "ln"},
+      {899297768, 1131001345, "Nordkapp", "Lissabon", ""},
+      {654083753, 3582774151, "Ulisbach SG", "Ricken SG", "ur"},
+      {32511837, 3582774151, "Ulisbach restricted SG", "Ricken SG", "ur2"},
+  };
+  std::vector<uint32_t> routing_nodes;
+  for (const auto& def : defs) {
+    std::uint32_t idx = g.FindNodeIndex(def.start_id);
+    if (idx < g.nodes.size()) routing_nodes.push_back(idx);
+    idx = g.FindNodeIndex(def.target_id);
+    if (idx < g.nodes.size()) routing_nodes.push_back(idx);
+  }
+  if (routing_nodes.size() >= 2) {
+    const CompactDijkstraRoutingData comp_data =
+        CreateCompactDijkstraRoutingData(g, routing_nodes, RoutingMetricTime(),
+                                         RoutingOptions());
+
+    for (const auto& def : defs) {
+      TestRoute(g, comp_data, def.start_id, def.target_id, def.from_name,
+                def.to_name, def.file_prefix);
+    }
+  }
+
+#if 0
   TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern",
             /*csv_prefix=*/"pb");
   TestRoute(g, 805904068, 49973500, "Bern", "Pfäffikon ZH",
             /*csv_prefix=*/"bp");
 
-  TestRoute(g, 3108534441, 3019156898, "Uster ZH", "Weesen",
+  TestRoute(g, 3108534441, 3019156898, "Uster", "Weesen",
             /*csv_prefix=*/"uw");
-  TestRoute(g, 3019156898, 3108534441, "Weesen", "Uster ZH",
+  TestRoute(g, 3019156898, 3108534441, "Weesen", "Uster",
             /*csv_prefix=*/"wu");
 
   TestRoute(g, 26895904, 300327675, "Augsburg", "Stralsund",
@@ -515,10 +585,9 @@ int main(int argc, char* argv[]) {
   TestRoute(g, 300327675, 26895904, "Stralsund", "Augsburg",
             /*csv_prefix=*/"sa");
 
-  TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp-Norwegen",
+  TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp",
             /*csv_prefix=*/"ln");
-  return 0;
-  TestRoute(g, 899297768, 1131001345, "Nordkapp-Norwegen", "Lissabon",
+  TestRoute(g, 899297768, 1131001345, "Nordkapp", "Lissabon",
             /*csv_prefix=*/"");
 
   // TestRouteLatLong(g, 47.36275428, 8.07097094, 47.38663149, 8.13231129,
@@ -528,6 +597,7 @@ int main(int argc, char* argv[]) {
             /*csv_prefix=*/"ur");
   TestRoute(g, 32511837, 3582774151, "Ulisbach restricted SG", "Ricken SG",
             /*csv_prefix=*/"ur2");
+#endif
 
   LOG_S(INFO) << "Finished.";
   return 0;

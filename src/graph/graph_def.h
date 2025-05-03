@@ -71,8 +71,8 @@ struct GWay {
   // Some ways have loops. This is some information about them.
   std::uint8_t head_loop : 1 = 0;   // First node appears multiple times.
   std::uint8_t tail_loop : 1 = 0;   // Last node appears multiple times.
-  std::uint8_t inner_loop : 1 = 0;    // Some inner node appears multiple times.
-  std::uint8_t closed_way : 1 = 0;    // First node == Last node.
+  std::uint8_t inner_loop : 1 = 0;  // Some inner node appears multiple times.
+  std::uint8_t closed_way : 1 = 0;  // First node == Last node.
   // Country of the first node in the way.
   // If uniform_country==1, then this value is the country of all the nodes.
   std::uint16_t ncc : 10 = INVALID_NCC;
@@ -329,6 +329,30 @@ struct Graph {
       }
     }
     return node_idx;
+  }
+
+  inline size_t gnode_edge_stop(uint32_t node_idx) const {
+    return node_idx + 1 < nodes.size() ? nodes.at(node_idx + 1).edges_start_pos
+                                       : edges.size();
+  }
+
+  void DebugPrint() const {
+    LOG_S(INFO) << "=============== Graph with " << nodes.size()
+                << " nodes and " << edges.size() << " edges ================";
+    for (uint32_t n_idx = 0; n_idx < nodes.size(); ++n_idx) {
+      const GNode& n = nodes.at(n_idx);
+      LOG_S(INFO) << absl::StrFormat(
+          "Node:%i id:%lld cl:%u e_start:%u #forw:%u #tot:%u", n_idx, n.node_id,
+          n.cluster_id, n.edges_start_pos, n.num_edges_forward,
+          gnode_edge_stop(n_idx) - n.edges_start_pos);
+      for (uint32_t e_idx = n.edges_start_pos; e_idx < gnode_edge_stop(n_idx);
+           ++e_idx) {
+        const GEdge& e = edges.at(e_idx);
+        LOG_S(INFO) << absl::StrFormat("    Edge to:%u w:%u contra:%u inv:%u",
+                                       e.other_node_idx, e.way_idx,
+                                       e.contra_way, e.inverted);
+      }
+    }
   }
 };
 

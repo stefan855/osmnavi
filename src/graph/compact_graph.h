@@ -384,7 +384,8 @@ inline bool operator<(const CompactDirectedGraph::FullEdge& a,
 // Visit all reachable nodes using a BFS, starting from the nodes in
 // 'routing_nodes', using 'opt' to limit expansion. Assigns a serial id=0..N-1
 // to each node. The routing nodes are mapped to indices
-// [0..start_node.size()-1] in the given order.
+// [0..deduped_routing_nodes_size-1] in the given order, ignoring duplicate
+// nodes.
 //
 // Note: If a routing node is in a dead end (and opt.avoid_dead_end is true),
 // then the bridge is allowed to be traversed in both directions. This way, the
@@ -418,27 +419,34 @@ inline void CollectEdgesForCompactGraph(
   // FIFO queue for bfs, containing node indices in g.nodes.
   std::queue<uint32_t> q;
 
-  // Preallocate ids for all nodes in routing_nodes.
-  for (uint32_t pos = 0; pos < routing_nodes.size(); ++pos) {
-    uint32_t node_idx = routing_nodes.at(pos);
-    (*graph_to_compact_nodemap)[node_idx] = pos;
-    q.push(node_idx);
+  // Preallocate ids for all (non-duplicate) nodes in routing_nodes.
+  for (uint32_t node_idx : routing_nodes) {
+    // Check for duplicates.
+    if (!graph_to_compact_nodemap->contains(node_idx)) {
+      (*graph_to_compact_nodemap)[node_idx] = graph_to_compact_nodemap->size();
+      q.push(node_idx);
+    }
   }
+  const uint32_t deduped_routing_nodes_size = graph_to_compact_nodemap->size();
 
   // Find dead end bridge nodes for routing nodes, and preallocate them.
   // This way they have c_idx values in a defined range, which allows fast
   // checks (see max_bridge_c_idx below).
   if (opt.avoid_dead_end) {
-    for (uint32_t pos = 0; pos < routing_nodes.size(); ++pos) {
-      if (!g.nodes.at(routing_nodes.at(pos)).dead_end) {
-        continue;
+    for (uint32_t node_idx : routing_nodes) {
+      if (g.nodes.at(node_idx).dead_end) {
+        uint32_t bridge_idx;
+        FindBridge(g, node_idx, nullptr, &bridge_idx);
+        if (!graph_to_compact_nodemap->contains(bridge_idx)) {
+          (*graph_to_compact_nodemap)[bridge_idx] =
+              graph_to_compact_nodemap->size();
+          q.push(bridge_idx);
+        }
       }
-      uint32_t node_idx;
-      FindBridge(g, routing_nodes.at(pos), nullptr, &node_idx);
-      (*graph_to_compact_nodemap)[node_idx] = graph_to_compact_nodemap->size();
-      q.push(node_idx);
     }
   }
+  // The nodes in range [deduped_routing_nodes_size, max_bridge_c_idx] are
+  // allowed bridges.
   const uint32_t max_bridge_c_idx = graph_to_compact_nodemap->size() - 1;
 
   // Do a BFS.
@@ -455,7 +463,7 @@ inline void CollectEdgesForCompactGraph(
 
     // Check if this node is at a bridge that is allowed to traverse into the
     // dead end.
-    if (c_idx <= max_bridge_c_idx && c_idx >= routing_nodes.size()) {
+    if (c_idx <= max_bridge_c_idx && c_idx >= deduped_routing_nodes_size) {
       // This allows RoutingRejectEdge() below to traverse the bridge.
       opt.allow_bridge_node_idx = node_idx;
     }
@@ -465,6 +473,10 @@ inline void CollectEdgesForCompactGraph(
       const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
       if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
+#if 0
+        LOG_S(INFO) << "Reject edge from " << GetGNodeIdSafe(g, node_idx)
+                    << " to " << GetGNodeIdSafe(g, edge.other_node_idx);
+#endif
 #if 0
         if (GetGNodeIdSafe(g, node_idx) == 3108533807 ||
             GetGNodeIdSafe(g, node_idx) == 10679042406) {
@@ -499,6 +511,10 @@ inline void CollectEdgesForCompactGraph(
         other_c_idx = iter->second;
       }
 
+#if 0
+      LOG_S(INFO) << "Add edge from " << GetGNodeIdSafe(g, node_idx) << " to "
+                  << GetGNodeIdSafe(g, edge.other_node_idx);
+#endif
       full_edges->push_back(
           {.from_c_idx = c_idx,
            .to_c_idx = other_c_idx,

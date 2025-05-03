@@ -299,8 +299,8 @@ class SingleSourceEdgeDijkstra {
     return w;
   }
 
-  inline CompactDirectedGraph::PartialEdge GetEdge(CompactDirectedGraph& cg,
-                                                   uint32_t v_idx) const {
+  inline CompactDirectedGraph::PartialEdge GetEdge(
+      const CompactDirectedGraph& cg, uint32_t v_idx) const {
     return cg.edges().at(GetBaseIdx(cg.edges().size(), v_idx));
   }
 
@@ -698,8 +698,113 @@ inline RoutingResult RouteOnCompactGraph(const Graph& g, uint32_t g_start,
   }
 
   return res;
-
-  // return w.at(CG_TARGET);
 }
 
 }  // namespace compact_dijkstra
+
+struct CompactDijkstraRoutingData {
+  const Graph& g;
+  const absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
+  const CompactDirectedGraph cg;
+};
+
+// Important: Unless opt.avoid_dead_end==false, all start/end nodes need to be
+// provided in routing_nodes. This will load the individual dead-ends of each
+// node in routing_nodes, but ignore all independent dead-ends.
+inline CompactDijkstraRoutingData CreateCompactDijkstraRoutingData(
+    const Graph& g, const std::vector<uint32_t> routing_nodes,
+    const RoutingMetric& metric, RoutingOptions opt,
+    Verbosity verb = Verbosity::Brief) {
+  if (verb >= Verbosity::Brief) {
+    LOG_S(INFO) << "Create compact routing data";
+  }
+  uint32_t num_nodes;
+  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
+  CollectEdgesForCompactGraph(g, metric, opt, routing_nodes,
+                              /*undirected_expand=*/true, &num_nodes,
+                              &full_edges, &graph_to_compact_nodemap);
+  if (verb >= Verbosity::Brief) {
+    LOG_S(INFO) << "Collected " << graph_to_compact_nodemap.size()
+                << " nodes and " << full_edges.size() << " edges";
+    ;
+  }
+  CompactDirectedGraph cg(num_nodes, full_edges);
+  cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
+                               graph_to_compact_nodemap);
+  cg.AddComplexTurnRestrictions(g.complex_turn_restrictions,
+                                graph_to_compact_nodemap);
+  cg.LogStats();
+  if (verb >= Verbosity::Debug) {
+    cg.DebugPrint();
+  }
+  if (verb >= Verbosity::Brief) {
+    LOG_S(INFO) << "Compact routing data built (nodes:" << num_nodes
+                << " edges:" << cg.edges().size() << ")";
+  }
+  return {
+      .g = g, .graph_to_compact_nodemap = graph_to_compact_nodemap, .cg = cg};
+}
+
+// Use a compact graph instead of routing on the graph data structure directly.
+inline RoutingResult RouteOnCompactGraph(const CompactDijkstraRoutingData data,
+                                         uint32_t g_start, uint32_t g_target,
+                                         Verbosity verb = Verbosity::Brief) {
+  if (verb >= Verbosity::Brief) {
+    LOG_S(INFO) << "Route using compact routing data";
+    // LOG_S(INFO) << "AA g_start:" << g_start;
+    // LOG_S(INFO) << "AA g_target:" << g_target;
+    // LOG_S(INFO) << "AA map size:" << data.graph_to_compact_nodemap.size();
+    // for (const auto& [key, val] : data.graph_to_compact_nodemap) {
+    //   LOG_S(INFO) << "map entry:" << key << ":" << val;
+    // }
+  }
+
+  CHECK_S(data.graph_to_compact_nodemap.contains(g_start));
+  CHECK_S(data.graph_to_compact_nodemap.contains(g_target));
+  const uint32_t cg_start_idx =
+      data.graph_to_compact_nodemap.find(g_start)->second;
+  const uint32_t cg_target_idx =
+      data.graph_to_compact_nodemap.find(g_target)->second;
+
+  SingleSourceEdgeDijkstra compact_router;
+  compact_router.Route(data.cg, cg_start_idx,
+                       {.handle_restricted_access = true});
+  if (verb >= Verbosity::Brief) {
+    LOG_S(INFO) << "Finished routing";
+  }
+
+  const auto& vis = compact_router.GetVisitedEdges();
+  RoutingResult res;
+  res.route_v_idx =
+      compact_router.GetShortestPathToTargetSlow(data.cg, cg_target_idx);
+  res.found = !res.route_v_idx.empty();
+  res.found_distance = res.route_v_idx.empty()
+                           ? INFU32
+                           : vis.at(res.route_v_idx.back()).min_weight;
+  res.num_shortest_route_nodes =
+      res.route_v_idx.empty() ? 0 : res.route_v_idx.size() + 1;
+  res.num_visited = vis.size();
+
+  if (verb >= Verbosity::Brief) {
+    LOG_S(INFO) << "Result metric:" << res.found_distance;
+  }
+
+  // Print path.
+  if (verb >= Verbosity::Verbose) {
+    uint32_t from_idx = cg_start_idx;
+    uint32_t pos = 1;
+    LOG_S(INFO) << "CompactDijkstra: Shortest path";
+    for (uint32_t v_idx : res.route_v_idx) {
+      const auto& ve = vis.at(v_idx);
+      const auto& e = compact_router.GetEdge(data.cg, v_idx);
+      LOG_S(INFO) << absl::StrFormat(
+          "  %u. Edge %u to %u minw:%u ctrid:%llu target_ra:%u done:%u", pos++,
+          from_idx, e.to_c_idx, ve.min_weight, ve.active_ctr_id,
+          ve.in_target_restricted_access_area, ve.done);
+      from_idx = e.to_c_idx;
+    }
+  }
+
+  return res;
+}
