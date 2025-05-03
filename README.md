@@ -34,7 +34,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Support interactive routing in the browser.
   
 ## Current Tasks
-* Handle Pollards and similar obstacles on ways.
+* Handle gates, bollards and similar obstacles.
 * Compute angles for edges. Needed for display in interactive routing, and to later for computing turn costs.
 
 ## Tasks ahead
