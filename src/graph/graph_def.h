@@ -12,6 +12,14 @@
 #include "graph/routing_attrs.h"
 #include "osm/turn_restriction_defs.h"
 
+// Attributes extracted from node key-val pairs.
+// Currently, only barrier based access restrictions are extracted.
+struct NodeAttributes {
+  int64_t node_id : 40;
+  // Access for each individual vehicle type.
+  ACCESS vh_acc[VH_MAX];
+};
+
 // Number of bits at least needed when storing way_idx.
 // TODO: create and use the same for other fundamental data types, including
 // node_idx, edge_idx and all kinds of osm-ids.
@@ -24,8 +32,7 @@ constexpr uint64_t WAY_IDX_BITS = 31;
 // Also see base/deduper_with_ids.h.
 struct WaySharedAttrs final {
   // Vehicles types used in the ra array.
-  static constexpr VEHICLE RA_VEHICLES[] = {VH_MOTOR_VEHICLE, VH_BICYCLE,
-                                            VH_FOOT};
+  static constexpr VEHICLE RA_VEHICLES[] = {VH_MOTORCAR, VH_BICYCLE, VH_FOOT};
   static constexpr uint32_t RA_MAX =
       2 * sizeof(RA_VEHICLES) / sizeof(RA_VEHICLES[0]);
   // Routing info in forward and backward direction.
@@ -91,8 +98,12 @@ struct GWay {
   uint8_t* node_ids = nullptr;
 };
 
-constexpr std::uint32_t INVALID_CLUSTER_ID = (1 << 22) - 1;
-constexpr std::uint32_t MAX_NUM_EDGES_OUT = (1 << 5) - 1;
+constexpr std::uint32_t NUM_CLUSTER_BITS = 22;
+constexpr std::uint32_t INVALID_CLUSTER_ID = (1 << NUM_CLUSTER_BITS) - 1;
+constexpr std::uint32_t MAX_CLUSTER_ID = INVALID_CLUSTER_ID - 1;
+
+constexpr std::uint32_t NUM_EDGES_OUT_BITS = 5;
+constexpr std::uint32_t MAX_NUM_EDGES_OUT = (1 << NUM_EDGES_OUT_BITS) - 1;
 
 struct GEdge;
 struct GNode {
@@ -101,7 +112,7 @@ struct GNode {
   std::uint32_t large_component : 1;
   // Cluster id number. It is expected (and checked during construction)
   // that there are less than 2^22 clusters in the planet graph.
-  std::uint32_t cluster_id : 22 = INVALID_CLUSTER_ID;
+  std::uint32_t cluster_id : NUM_CLUSTER_BITS = INVALID_CLUSTER_ID;
   // 1 iff the node connects to different clusters.
   std::uint32_t cluster_border_node : 1 = 0;
   // Position of the first edge of this node in g.edges. The last edge is given
@@ -114,7 +125,7 @@ struct GNode {
   // [edges_start_pos, edges_start_pos + num_edges_forward). All other edges are
   // "inverted", e.g. point to another node that has an forward edge to the
   // current node.
-  std::uint32_t num_edges_forward : 5;
+  std::uint32_t num_edges_forward : NUM_EDGES_OUT_BITS;
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
   // node outside of this dead end have to pass through the bridge edge.
@@ -241,6 +252,7 @@ struct Graph {
 
   static constexpr uint32_t kLargeComponentMinSize = 20000;
 
+  std::vector<NodeAttributes> node_attrs;
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
@@ -488,7 +500,7 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
 }
 
 // Returns the position of routing attrs for vehicle type 'vt' and direction
-// 'dir'. The allowed values for 'vt' are VH_MOTOR_VEHICLE, VH_BICYCLE,
+// 'dir'. The allowed values for 'vt' are VH_MOTORCAR, VH_BICYCLE,
 // VH_FOOT, for 'dir' they are DIR_FORWARD, DIR_BACKWARD. Check-fails if an
 // attribute is not valid.
 inline uint32_t RAinWSAIndex(VEHICLE vt, DIRECTION dir) {
@@ -525,12 +537,12 @@ inline bool RoutableAccess(ACCESS acc) {
 }
 
 inline bool FreeAccess(ACCESS acc) {
-  return acc >= ACC_PERMISSIVE && acc < ACC_MAX;
+  return acc >= ACC_DISMOUNT && acc < ACC_MAX;
 }
 
 // Access is allowed but restricted.
 inline bool RestrictedAccess(ACCESS acc) {
-  return acc >= ACC_CUSTOMERS && acc < ACC_PERMISSIVE;
+  return acc >= ACC_CUSTOMERS && acc <= ACC_DESTINATION;
 }
 
 // Access is allowed but restricted.

@@ -100,26 +100,6 @@ inline bool TurnRestrictionCollectIds(const OSMTagHelper& tagh,
   return true;
 }
 
-#if 0
-inline uint32_t FindConnectedNodeIdx(const Graph& g, uint32_t way_idx,
-                                     uint32_t node_idx, bool dir_forward) {
-  LOG_S(INFO) << absl::StrFormat("KK0 way:%lld node:%lld forward:%d",
-                                 GetGWayIdSafe(g, way_idx),
-                                 GetGNodeIdSafe(g, node_idx), dir_forward);
-  for (const GEdge& e : gnode_all_edges(g, node_idx)) {
-    if (e.way_idx == way_idx) {
-      // TODO: make vehicle type a parameter.
-      if ((dir_forward && RoutableForward(g, e, VH_MOTOR_VEHICLE)) ||
-          (!dir_forward && RoutableBackward(g, e, VH_MOTOR_VEHICLE))) {
-        return e.other_node_idx;
-      }
-    }
-  }
-  LOG_S(INFO) << "KK1";
-  return INFU32;
-}
-#endif
-
 inline uint32_t CountIncoming(const Graph& g, uint32_t node_idx) {
   uint32_t count = 0;
   for (const GEdge& e : gnode_all_edges(g, node_idx)) {

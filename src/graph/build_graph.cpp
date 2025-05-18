@@ -43,11 +43,16 @@ void ValidateGraph(const Graph& g) {
   CHECK_LT_S(g.ways.size(), 1ull << WAY_IDX_BITS);
   CHECK_LT_S(g.nodes.size(), 1ull << 32);
   CHECK_LT_S(g.edges.size(), 1ull << 32);
+  CHECK_LE_S(g.clusters.size(), MAX_CLUSTER_ID);
 
   // Check that we don't have duplicate edges (from, to, way_idx) between two
   // nodes.
   for (uint32_t node_idx = 0; node_idx < g.nodes.size() - 1; ++node_idx) {
     const GNode& node = g.nodes.at(node_idx);
+    if (node_idx > 0) {
+      // nodes are sorted by increasing OSM node_id.
+      CHECK_GT_S(node.node_id, g.nodes.at(node_idx - 1).node_id) << node_idx;
+    }
     for (uint32_t off1 = 0; off1 < node.num_edges_forward; ++off1) {
       const GEdge& e1 = g.edges.at(node.edges_start_pos + off1);
       for (uint32_t off2 = off1 + 1; off2 < node.num_edges_forward; ++off2) {
@@ -95,24 +100,191 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
   }
 }
 
+namespace {
+// Extract access information stored with node.
+// Returns false if there is no access restriction.
+// Returns true if the node has some access restrictions. The per vehicle access
+// is returned in node_attrs.
+bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
+                     const google::protobuf::RepeatedField<int>& keys_vals,
+                     int kv_start, int kv_stop, NodeAttributes* node_attrs) {
+  node_attrs->node_id = -1;
+  if (kv_start >= kv_stop) {
+    return false;
+  }
+
+  // We apply access tags are in the following order:
+  //   1) "barrier=" type sets the default.
+  //   2) "access=" overrides everything that barrier type might have set.
+  //   3) "motor_vehicle=" sets access for all motorized traffic.
+  //   4) "bicycle=", "foot=", "horse=" etc. set access for individual vehicle
+  //      types.
+  ACCESS access = ACC_MAX;
+  ACCESS motor_vehicle_access = ACC_MAX;
+  std::string_view barrier;
+  std::string_view locked;
+
+  // Parse global tags: "access", "barrier", "motor_vehicle", "locked".
+  for (int i = kv_start; i < kv_stop; i += 2) {
+    const std::string_view key = tagh.ToString(keys_vals.at(i));
+    if (key == "access") {
+      access = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
+      if (access == ACC_MAX) {
+        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
+                                       tagh.ToString(keys_vals.at(i + 1)),
+                                       node_id);
+      }
+    } else if (key == "motor_vehicle") {
+      motor_vehicle_access = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
+      if (motor_vehicle_access == ACC_MAX) {
+        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
+                                       tagh.ToString(keys_vals.at(i + 1)),
+                                       node_id);
+      }
+    } else if (key == "barrier") {
+      barrier = tagh.ToString(keys_vals.at(i + 1));
+    } else if (key == "locked") {
+      locked = tagh.ToString(keys_vals.at(i + 1));
+    }
+  }
+
+  if (barrier.empty()) {
+    return false;
+  }
+
+  /*
+  These attributes are assumed to block passage through the node for all vehicle
+  types. Since this is the default also for unknown barrier types, the list
+  isn't actually needed.
+
+  static const std::string_view full_blocks[] = {
+      "debris",    "chain",        "barrier_board", "jersey_barrier",
+      "log",       "rope",         "yes",           "hampshire_gate",
+      "lift_gate", "sliding_beam", "sliding_gate",  "spikes",
+      "wedge",     "wicket_gate",
+  };
+  */
+  // Barrier types that don't block passage for any vehicle by default.
+  static const std::string_view no_blocks[] = {
+      "border_control", "bump_gate",  "cattle_grid", "coupure",
+      "entrance",       "sally_port", "toll_booth"};
+
+  auto& vh_acc = node_attrs->vh_acc;
+
+  if (access != ACC_MAX) {
+    // The barrier type doesn't matter, use access.
+    std::fill_n(vh_acc, VH_MAX, access);
+  } else {
+    // There was no all-overriding "access" tag, set access based on barrier.
+    std::fill_n(vh_acc, VH_MAX, ACC_NO);
+    if (barrier == "stile" || barrier == "turnstile" ||
+        barrier == "full-height_turnstile" || barrier == "kerb" ||
+        barrier == "kissing_gate") {
+      vh_acc[VH_FOOT] = ACC_YES;
+    } else if (barrier == "cycle_barrier" || barrier == "bar" ||
+               barrier == "swing_gate") {
+      vh_acc[VH_FOOT] = ACC_YES;
+      vh_acc[VH_BICYCLE] = ACC_YES;
+    } else if (barrier == "bollard" || barrier == "block" ||
+               barrier == "motorcycle_barrier" || barrier == "planter") {
+      vh_acc[VH_FOOT] = ACC_YES;
+      vh_acc[VH_BICYCLE] = ACC_YES;
+      vh_acc[VH_MOPED] = ACC_YES;
+    } else if (barrier == "gate") {
+      if (locked == "no") {
+        std::fill_n(vh_acc, VH_MAX, ACC_YES);
+      }
+    } else if (barrier == "horse_stile") {
+      vh_acc[VH_FOOT] = ACC_YES;
+      vh_acc[VH_HORSE] = ACC_YES;
+    } else if (barrier == "bus_trap") {
+      vh_acc[VH_FOOT] = ACC_YES;
+      vh_acc[VH_BICYCLE] = ACC_YES;
+      vh_acc[VH_MOPED] = ACC_YES;
+      vh_acc[VH_PSV] = ACC_YES;
+      vh_acc[VH_HGV] = ACC_YES;
+      vh_acc[VH_BUS] = ACC_YES;
+    } else if (SpanContains(no_blocks, barrier)) {
+      std::fill_n(vh_acc, VH_MAX, ACC_YES);  // blocks no traffic by default.
+    } else {
+      ;  // Assume everything else is blocking. This includes full_blocks.
+    }
+  }
+
+  if (motor_vehicle_access != ACC_MAX) {
+    for (uint8_t vh = VH_MOTORCAR; vh < VH_MAX; ++vh) {
+      if (VehicleIsMotorized((VEHICLE)vh)) {
+        vh_acc[(VEHICLE)vh] = motor_vehicle_access;
+      }
+    }
+  }
+
+  // Now apply all more specific access tags such as bicycle=yes.
+  for (int i = kv_start; i < kv_stop; i += 2) {
+    VEHICLE vh = VehicleToEnum(tagh.ToString(keys_vals.at(i)));
+    if (vh != VH_MAX) {
+      ACCESS acc = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
+      if (acc != ACC_MAX) {
+        vh_acc[vh] = acc;
+      } else {
+        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
+                                       tagh.ToString(keys_vals.at(i + 1)),
+                                       node_id);
+      }
+    }
+  }
+
+  for (const ACCESS acc : node_attrs->vh_acc) {
+    if (acc != ACC_YES) {
+      node_attrs->node_id = node_id;
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
                      const HugeBitset& touched_nodes_ids,
-                     DataBlockTable* node_table) {
+                     DataBlockTable* node_table, GraphMetaData* meta) {
   NodeBuilder builder;
+  NodeAttributes node_attrs;
+
   for (const OSMPBF::PrimitiveGroup& pg : prim_block.primitivegroup()) {
+    const auto& keys_vals = pg.dense().keys_vals();
     NodeBuilder::VNode node = {.id = 0, .lat = 0, .lon = 0};
+
+    // kv_start points to terminating 0-element of previous node. Before the
+    // loop it is therefore on position -1.
+    int kv_start = -1;
     for (int i = 0; i < pg.dense().id_size(); ++i) {
       node.id += pg.dense().id(i);
       node.lat += pg.dense().lat(i);
       node.lon += pg.dense().lon(i);
+
+      int kv_stop = ++kv_start;
+      while (kv_stop < keys_vals.size() && keys_vals.at(kv_stop) != 0) {
+        kv_stop++;
+      }
+      // Difference is even.
+      CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
+
       if (touched_nodes_ids.GetBit(node.id)) {
+        if (ConsumeNodeTags(tagh, node.id, keys_vals, kv_start, kv_stop,
+                            &node_attrs)) {
+          // Store node_attrs for this node.
+          std::unique_lock<std::mutex> l(mut);
+          meta->graph.node_attrs.push_back(node_attrs);
+        }
         builder.AddNode(node);
         if (builder.pending_nodes() >= 128) {
           std::unique_lock<std::mutex> l(mut);
           builder.AddBlockToTable(node_table);
         }
       }
+      kv_start = kv_stop;
     }
   }
   if (builder.pending_nodes() > 0) {
@@ -178,9 +350,9 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
 }
 
 namespace {
-// String that contains the tags relevant for routing in readable form. This is
-// used to log tag-signatures and frequencies, for instance to find interesting
-// cases of usage of tags.
+// String that contains the tags relevant for routing in readable form. This
+// is used to log tag-signatures and frequencies, for instance to find
+// interesting cases of usage of tags.
 std::string CreateWayTagSignature(const OSMTagHelper& tagh,
                                   const OSMPBF::Way& osm_way) {
   std::vector<std::string> tagvals;
@@ -251,7 +423,7 @@ std::vector<NodeCountry> ExtractNodeCountries(const GraphMetaData& meta,
           // The current node was seen before in the same way.
           // Check if adding running_id would create a duplicate segment.
           // The segment that is added is
-          //     node_countries.back().id ----> running_id. 
+          //     node_countries.back().id ----> running_id.
           if (node_countries.at(i + 1).id == node_countries.back().id) {
             dup_segment = true;
             break;
@@ -426,11 +598,11 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
 
   // Store final routing attributes.
   if (acc_forw && IsDirForward(direction) && ra_forw.maxspeed > 0) {
-    wsa->ra[RAinWSAIndex(VH_MOTOR_VEHICLE, DIR_FORWARD)] = ra_forw;
+    wsa->ra[RAinWSAIndex(VH_MOTORCAR, DIR_FORWARD)] = ra_forw;
   }
 
   if (acc_backw && IsDirBackward(direction) && ra_backw.maxspeed > 0) {
-    wsa->ra[RAinWSAIndex(VH_MOTOR_VEHICLE, DIR_BACKWARD)] = ra_backw;
+    wsa->ra[RAinWSAIndex(VH_MOTORCAR, DIR_BACKWARD)] = ra_backw;
   }
 }
 
@@ -568,7 +740,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
         /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, rural.et_backw,
         rural.im_backw);
 
-    if (vt == VH_MOTOR_VEHICLE) {
+    if (vt == VH_MOTORCAR) {
       ComputeCarWayRoutingData(tagh, wc, &wsa);
     } else if (vt == VH_BICYCLE) {
       // ComputeBicycleWayRoutingData(tagh, wc, &wsa);
@@ -660,22 +832,6 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.complex_turn_restriction_trigger = 0;
 }
 
-#if 0
-void MarkUniqueOther(GNode* n) {
-  GEdge* edges = n->edges;
-  for (size_t i = 0; i < gnode_total_edges(*n); ++i) {
-    size_t k = 0;
-    while (k < i) {
-      if (edges[i].other_node_idx == edges[k].other_node_idx) {
-        break;
-      }
-      k++;
-    }
-    edges[i].unique_other = (i == k);
-  }
-}
-#endif
-
 void MarkUniqueOther(std::span<GEdge> edges) {
   for (size_t i = 0; i < edges.size(); ++i) {
     size_t k = 0;
@@ -696,37 +852,6 @@ void FindLargeComponents(Graph* g) {
   ComponentAnalyzer::MarkLargeComponents(g);
 }
 
-#if 0
-void ApplyTarjan(Graph& g, GraphMetaData* meta) {
-  FUNC_TIMER();
-  if (g.large_components.empty()) {
-    ABORT_S() << "g.large_components is empty";
-  }
-  Tarjan t(g);
-  std::vector<Tarjan::BridgeInfo> bridges;
-  for (const Graph::Component& comp : g.large_components) {
-    bridges.clear();
-    t.FindBridges(comp, &bridges);
-    // Sort bridges in descending order of subtrees. If a dead-end contains
-    // other, smaller dead-ends, then only the dead-end with the largest subtree
-    // is actually used.
-    std::sort(bridges.begin(), bridges.end(),
-              [](const Tarjan::BridgeInfo& a, const Tarjan::BridgeInfo& b) {
-                return a.subtree_size > b.subtree_size;
-              });
-    for (const Tarjan::BridgeInfo& bridge : bridges) {
-      MarkBridgeEdge(g, bridge.from_node_idx, bridge.to_node_idx);
-      MarkBridgeEdge(g, bridge.to_node_idx, bridge.from_node_idx);
-      meta->stats.num_dead_end_nodes +=
-          MarkDeadEndNodes(g, bridge.to_node_idx, bridge.subtree_size);
-    }
-  }
-  LOG_S(INFO) << absl::StrFormat(
-      "Graph has %u (%.2f%%) dead end nodes.", meta->stats.num_dead_end_nodes,
-      (100.0 * meta->stats.num_dead_end_nodes) / g.nodes.size());
-}
-#endif
-
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
                      GraphMetaData* meta, TRResult* result) {
   ParseTurnRestriction(meta->graph, tagh, osm_rel,
@@ -734,27 +859,33 @@ void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
 }
 
 // Read the ways that might useful for routing, remember the nodes ids touched
-// by these ways, then read the node coordinates and store them in 'node_table'.
+// by these ways, then read the node coordinates and store them in
+// 'node_table'.
 void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
-                         BuildGraphStats* stats) {
+                         GraphMetaData* meta) {
   HugeBitset touched_nodes_ids;
   // Read ways and remember the touched nodes in 'touched_nodes_ids'.
-  reader->ReadWays([&touched_nodes_ids, stats](
-                       const OSMTagHelper& tagh, const OSMPBF::Way& way,
-                       int thread_idx, std::mutex& mut) {
-    ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids, stats);
+  reader->ReadWays([&touched_nodes_ids, meta](const OSMTagHelper& tagh,
+                                              const OSMPBF::Way& way,
+                                              int thread_idx, std::mutex& mut) {
+    ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids,
+                                   &meta->stats);
   });
 
   // Read all the node coordinates for nodes in 'touched_nodes_ids'.
   reader->ReadBlobs(
       OsmPbfReader::ContentNodes,
-      [&touched_nodes_ids, node_table](const OSMTagHelper& tagh,
-                                       const OSMPBF::PrimitiveBlock& prim_block,
-                                       int thread_idx, std::mutex& mut) {
-        ConsumeNodeBlob(tagh, prim_block, mut, touched_nodes_ids, node_table);
+      [&touched_nodes_ids, node_table, meta](
+          const OSMTagHelper& tagh, const OSMPBF::PrimitiveBlock& prim_block,
+          int thread_idx, std::mutex& mut) {
+        ConsumeNodeBlob(tagh, prim_block, mut, touched_nodes_ids, node_table,
+                        meta);
       });
   // Make node table searchable, so we can look up lat/lon by node_id.
   node_table->Sort();
+  // Sort graph.node_attrs.
+  std::sort(meta->graph.node_attrs.begin(), meta->graph.node_attrs.end(),
+            [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
 }
 
 void SortGWays(GraphMetaData* meta) {
@@ -764,9 +895,19 @@ void SortGWays(GraphMetaData* meta) {
             [](const GWay& a, const GWay& b) { return a.id < b.id; });
 }
 
+void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
+  FUNC_TIMER();
+  for (const NodeAttributes& na : meta->graph.node_attrs) {
+    if (meta->way_nodes_seen->GetBit(na.node_id)) {
+      meta->way_nodes_needed->SetBit(na.node_id, true);
+    }
+  }
+}
+
 void AllocateGNodes(GraphMetaData* meta) {
   FUNC_TIMER();
-  meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits());
+  meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits() +
+                            meta->graph.node_attrs.size());
   NodeBuilder::GlobalNodeIter iter(*meta->node_table);
   const NodeBuilder::VNode* node;
   while ((node = iter.Next()) != nullptr) {
@@ -826,22 +967,6 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
 
           // TODO: self edges?
           // CHECK_NE_S(idx1, idx2) << way.id;
-
-#if 0
-
-          if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
-              WSAAnyRoutable(wsa, DIR_BACKWARD)) {
-            graph.nodes.at(prev_idx).num_edges_forward++;
-            graph.nodes.at(idx).num_edges_forward++;
-          } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
-            graph.nodes.at(prev_idx).num_edges_forward++;
-            graph.nodes.at(idx).num_edges_inverted++;
-          } else {
-            CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
-            graph.nodes.at(prev_idx).num_edges_inverted++;
-            graph.nodes.at(idx).num_edges_forward++;
-          }
-#endif
         }
         prev_idx = idx;
       }
@@ -875,21 +1000,10 @@ void AllocateEdgeArrays(GraphMetaData* meta) {
     edge_start += num_edges;
   }
   CHECK_S(meta->graph.edges.empty());
-  meta->graph.edges.resize(edge_start, {.other_node_idx = INFU32});
 
-#if 0
-    for (GNode& n : meta->graph.nodes) {
-      const std::uint32_t num_edges = gnode_total_edges(n);
-      CHECK_GT_S(num_edges, 0u);
-      if (num_edges > 0) {
-        n.edges = (GEdge*)meta->graph.aligned_pool_.AllocBytes(num_edges *
-                                                               sizeof(GEdge));
-        for (size_t k = 0; k < num_edges; ++k) {
-          n.edges[k].other_node_idx = INFU32;
-        }
-      }
-    }
-#endif
+  // Expect up to node_attrs.size() additional edges for capacity of vector.
+  meta->graph.edges.reserve(edge_start + meta->graph.node_attrs.size());
+  meta->graph.edges.resize(edge_start, {.other_node_idx = INFU32});
 }
 
 void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
@@ -946,9 +1060,9 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
     {
       const WaySharedAttrs& wsa = GetWSA(graph, way);
       const ACCESS acc_car_f =
-          GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_FORWARD).access;
+          GetRAFromWSA(wsa, VH_MOTORCAR, DIR_FORWARD).access;
       const ACCESS acc_car_b =
-          GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_BACKWARD).access;
+          GetRAFromWSA(wsa, VH_MOTORCAR, DIR_BACKWARD).access;
       const bool restr_car_f = RestrictedAccess(acc_car_f);
       const bool restr_car_b = RestrictedAccess(acc_car_b);
 
@@ -1019,23 +1133,42 @@ void PopulateEdgeArrays(GraphMetaData* meta) {
   pool.WaitAllFinished();
 }
 
+// Iterate through all nodes and for each check if it has a barrier which blocks
+// traffic. If it does, then add a shadow node and modify the linkage of the
+// existing node.
+// Scenario:
+//   Node (b) blocks traffic and has exactly two connected nodes a != c.
+//   Make sure that a.id < c.id.
+//   (a) ---- (b) ---- (c)
+//   This is transformed into the following
+//   (a) ---- (b')  (b) ---- (c)
+//   This means that a new shadow node b' is added and the link between (b') and
+//   (b) is omitted, to indicate the blocked connection.
+void ModifyNodeBarriers(GraphMetaData* meta) {
+  FUNC_TIMER();
+
+  // Step 1:
+  //   * Find candidate nodes (b).
+  //   * Add shadow node (b') with an edge (b') -> (a).
+  //   * Change the edge (a) to (b) to point to the new node (b').
+  //   * Store the index of edge (b)->(a) for later deletion.
+
+  // Step 2:
+  //   * Delete the edges that were stored for later deletion.
+}
+
 void MarkUniqueEdges(GraphMetaData* meta) {
   FUNC_TIMER();
-  /*
-  for (GNode& n : meta->graph.nodes) {
-    MarkUniqueOther(&n);
-  }
-  */
   for (uint32_t i = 0; i < meta->graph.nodes.size(); ++i) {
     MarkUniqueOther(gnode_all_edges(meta->graph, i));
   }
 }
 
-// Given a node and an outgoing edge 'out_edge', is it allowed to make a u-turn
-// at out_edge.other_node_idx and return to node_idx?
-// The code checks for situations where a vehicle would be trapped at
-// out_edge.other_node_idx with no way to continue the travel, which is true at
-// the end of a street or when facing a restricted access area.
+// Given a node and an outgoing edge 'out_edge', is it allowed to make a
+// u-turn at out_edge.other_node_idx and return to node_idx? The code checks
+// for situations where a vehicle would be trapped at out_edge.other_node_idx
+// with no way to continue the travel, which is true at the end of a street or
+// when facing a restricted access area.
 // TODO: handle vehicle types properly.
 inline bool IsUTurnAllowedEdge(const Graph& g, uint32_t node_idx,
                                const GEdge& out_edge) {
@@ -1113,7 +1246,7 @@ void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
       pool.AddWork([meta, &metric, &cluster](int) {
         // TODO: support the other vehicle types.
         build_clusters::ComputeShortestClusterPaths(meta->graph, metric,
-                                                    VH_MOTOR_VEHICLE, &cluster);
+                                                    VH_MOTORCAR, &cluster);
       });
     }
     // Faster with few threads only.
@@ -1159,10 +1292,8 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
 
   for (const GWay& w : g.ways) {
     const WaySharedAttrs& wsa = GetWSA(g, w);
-    const RoutingAttrs ra_forw =
-        GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_FORWARD);
-    const RoutingAttrs ra_backw =
-        GetRAFromWSA(wsa, VH_MOTOR_VEHICLE, DIR_BACKWARD);
+    const RoutingAttrs ra_forw = GetRAFromWSA(wsa, VH_MOTORCAR, DIR_FORWARD);
+    const RoutingAttrs ra_backw = GetRAFromWSA(wsa, VH_MOTORCAR, DIR_BACKWARD);
 
     if (RoutableAccess(ra_forw.access) && RoutableAccess(ra_backw.access) &&
         ra_forw.maxspeed != ra_backw.maxspeed) {
@@ -1230,7 +1361,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
                 e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
         CHECK_NE_S(e.car_label, GEdge::LABEL_TEMPORARY);
         stats.num_edges_forward_car_forbidden +=
-            !RoutableAccess(GetRAFromWSA(g, e, VH_MOTOR_VEHICLE).access);
+            !RoutableAccess(GetRAFromWSA(g, e, VH_MOTORCAR).access);
       }
       stats.num_cross_country_edges += (e.contra_way && e.cross_country);
       stats.num_cross_country_restricted +=
@@ -1308,6 +1439,8 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.max_turn_restriction_via_ways);
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
                                  stats.num_turn_restriction_error_connection);
+  LOG_S(INFO) << absl::StrFormat("Num node barrier attrs:%9lld",
+                                 meta.graph.node_attrs.size());
 
   LOG_S(INFO) << "========= Graph Stats ============";
   std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
@@ -1502,7 +1635,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     pool.WaitAllFinished();
   }
 
-  LoadNodeCoordinates(&reader, meta.node_table.get(), &meta.stats);
+  LoadNodeCoordinates(&reader, meta.node_table.get(), &meta);
 
   {
     DeDuperWithIds<WaySharedAttrs> deduper;
@@ -1526,6 +1659,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     }
   }
   SortGWays(&meta);
+  MarkNodesWithAttributesAsNeeded(&meta);
 
   AllocateGNodes(&meta);
   SetCountryInGNodes(&meta);
@@ -1535,13 +1669,15 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   ComputeEdgeCounts(&meta);
   AllocateEdgeArrays(&meta);
   PopulateEdgeArrays(&meta);
-  MarkUniqueEdges(&meta);
   for (const GEdge& e : meta.graph.edges) {
     CHECK_S(e.other_node_idx != INFU32);
   }
+  ModifyNodeBarriers(&meta);
+  MarkUniqueEdges(&meta);
 
   // =========================================================================
 
+#if 0
   {
     NodeBuilder::VNode n;
     bool found = NodeBuilder::FindNode(*meta.node_table, 207718684, &n);
@@ -1550,6 +1686,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
                                    207718684, found ? n.lat : 0,
                                    found ? n.lon : 0);
   }
+#endif
 
   LoadTurnRestrictions(&reader, &meta);
   FindLargeComponents(&meta.graph);

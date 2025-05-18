@@ -43,6 +43,8 @@ void PrintStructSizes() {
                                  sizeof(EdgeRouter::VisitedEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
+  LOG_S(INFO) << absl::StrFormat("sizeof(NodeAttributes):         %4u",
+                                 sizeof(NodeAttributes));
   LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):           %4u",
                                  sizeof(RoutingAttrs));
   LOG_S(INFO) << absl::StrFormat("sizeof(WayTaggedZones):         %4u",
@@ -499,7 +501,7 @@ int main(int argc, char* argv[]) {
       });
 
   // TODO: Pass vehicle types from command line.
-  opt.vehicle_types = {VH_MOTOR_VEHICLE};
+  opt.vehicle_types = {VH_MOTORCAR};
   opt.pbf = argli.GetString("pbf");
   opt.admin_filepattern = argli.GetString("admin_filepattern");
   opt.routing_config = argli.GetString("routing_config");
@@ -519,11 +521,11 @@ int main(int argc, char* argv[]) {
 
   PrintStructSizes();
 
-  WriteGraphToCSV(g, VH_MOTOR_VEHICLE, "/tmp/graph_motor_vehicle.csv");
+  WriteGraphToCSV(g, VH_MOTORCAR, "/tmp/graph_motorcar.csv");
   WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
   WriteLouvainGraph(g, "/tmp/louvain.csv");
   WriteCrossCountryEdges(meta, "/tmp/cross.csv");
-  WriteRestrictedRoadsToCSV(g, VH_MOTOR_VEHICLE, "/tmp/experimental1.csv");
+  WriteRestrictedRoadsToCSV(g, VH_MOTORCAR, "/tmp/experimental1.csv");
   WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED, false, "mag",
                     "/tmp/experimental2.csv");
   WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED_SECONDARY, false, "red",

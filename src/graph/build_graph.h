@@ -21,10 +21,10 @@
 namespace build_graph {
 
 struct BuildGraphOptions {
-  // Support the following vehicle types. Possible values are {VH_MOTOR_VEHICLE,
+  // Support the following vehicle types. Possible values are {VH_MOTORCAR,
   // VH_BICYCLE, VH_FOOT}. Note that currently only cars and partially bicycle
   // are supported.
-  std::vector<VEHICLE> vehicle_types = {VH_MOTOR_VEHICLE};
+  std::vector<VEHICLE> vehicle_types = {VH_MOTORCAR};
   // Path to input OSM pbf file. Must not be empty.
   std::string pbf;
   // File pattern for admin files (country polygons).

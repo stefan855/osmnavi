@@ -389,7 +389,7 @@ int main(int argc, char* argv[]) {
   LOG_S(INFO) << "sizeof(LineSegment):" << sizeof(LineSegment);
 
   std::map<std::string, LayerData> layers;
-  AddLayer("graph_motor_vehicle", root + "/graph_motor_vehicle.csv", &layers);
+  AddLayer("graph_motorcar", root + "/graph_motorcar.csv", &layers);
   AddLayer("graph_bicycle", root + "/graph_bicycle.csv", &layers);
 
   AddLayer("pb_dijks_forward", root + "/pb_dijks_forward.csv", &layers);
@@ -438,56 +438,6 @@ int main(int argc, char* argv[]) {
   AddLayer("experimental9", root + "/experimental9.csv", &layers);
 
   LoadLayers(&layers);
-
-#if 0
-  LoadFiles(root + "/graph_motor_vehicle.csv", &layers["graph_motor_vehicle"]);
-  LoadFiles(root + "/graph_bicycle.csv", &layers["graph_bicycle"]);
-
-  LoadFiles(root + "/pb_dijks_forward.csv", &layers["pb_dijks_forward"]);
-  LoadFiles(root + "/pb_dijks_backward.csv", &layers["pb_dijks_backward"]);
-  LoadFiles(root + "/pb_dijks_forward_hybrid.csv",
-            &layers["pb_dijks_forward_hybrid"]);
-  LoadFiles(root + "/pb_astar_forward.csv", &layers["pb_astar_forward"]);
-  LoadFiles(root + "/pb_astar_backward.csv", &layers["pb_astar_backward"]);
-  LoadFiles(root + "/pb_astar_forward_hybrid.csv",
-            &layers["pb_astar_forward_hybrid"]);
-
-  LoadFiles(root + "/uw_dijks_forward_hybrid.csv",
-            &layers["uw_dijks_forward_hybrid"]);
-  LoadFiles(root + "/uw_astar_forward_hybrid.csv",
-            &layers["uw_astar_forward_hybrid"]);
-  LoadFiles(root + "/as_dijks_forward_hybrid.csv",
-            &layers["as_dijks_forward_hybrid"]);
-  LoadFiles(root + "/as_astar_forward_hybrid.csv",
-            &layers["as_astar_forward_hybrid"]);
-  LoadFiles(root + "/ln_dijks_forward_hybrid.csv",
-            &layers["ln_dijks_forward_hybrid"]);
-  LoadFiles(root + "/ln_astar_forward_hybrid.csv",
-            &layers["ln_astar_forward_hybrid"]);
-
-  LoadFiles(admin_root + "/admin/??_*.csv", &layers["ALL"]);
-  LoadFiles(admin_root + "/admin/CH_756_*.csv", &layers["CH"]);
-  LoadFiles(admin_root + "/admin/DE_276_*.csv", &layers["DE"]);
-
-  LoadFiles(admin_root + "/admin/IL_376_*.csv", &layers["IL"]);
-  LoadFiles(admin_root + "/admin/JO_400_*.csv", &layers["JO"]);
-  LoadFiles(admin_root + "/admin/UA_804_*.csv", &layers["UA"]);
-  LoadFiles(admin_root + "/admin/RU_643_*.csv", &layers["RU"]);
-
-  LoadFiles(root + "/louvain.csv", &layers["louvain"]);
-  LoadFiles(root + "/cross.csv", &layers["cross"]);
-
-  LoadFiles(root + "/traffic.csv", &layers["traffic"]);
-  LoadFiles(root + "/experimental1.csv", &layers["experimental1"]);
-  LoadFiles(root + "/experimental2.csv", &layers["experimental2"]);
-  LoadFiles(root + "/experimental3.csv", &layers["experimental3"]);
-  LoadFiles(root + "/experimental4.csv", &layers["experimental4"]);
-  LoadFiles(root + "/experimental5.csv", &layers["experimental5"]);
-  LoadFiles(root + "/experimental6.csv", &layers["experimental6"]);
-  LoadFiles(root + "/experimental7.csv", &layers["experimental7"]);
-  LoadFiles(root + "/experimental8.csv", &layers["experimental8"]);
-  LoadFiles(root + "/experimental9.csv", &layers["experimental9"]);
-#endif
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");

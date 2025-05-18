@@ -150,7 +150,7 @@ inline bool IsDirBackward(DIRECTION dir) {
 }
 
 enum VEHICLE : uint8_t {
-  VH_MOTOR_VEHICLE = 0,
+  VH_MOTORCAR = 0,
   VH_BICYCLE = 1,
   VH_FOOT = 2,
   VH_MOPED = 3,
@@ -170,7 +170,7 @@ enum VEHICLE : uint8_t {
 namespace {
 std::vector<std::string_view> VehicleStringVector() {
   std::vector<std::string_view> v((size_t)VH_MAX);
-  v[(size_t)VH_MOTOR_VEHICLE] = "motor_vehicle";
+  v[(size_t)VH_MOTORCAR] = "motorcar";
   v[(size_t)VH_BICYCLE] = "bicycle";
   v[(size_t)VH_FOOT] = "foot";
   v[(size_t)VH_MOPED] = "moped";
@@ -192,7 +192,7 @@ inline VEHICLE VehicleToEnum(std::string_view vh_str) {
   if (vh_str.empty()) {
     return VH_MAX;
   }
-  for (VEHICLE vh = VH_MOTOR_VEHICLE; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
+  for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
     if (vh_str == VehicleToString(vh)) {
       return vh;
     }
@@ -209,7 +209,7 @@ inline VEHICLE PrefixedVehicleToEnum(std::string_view vh_str) {
 
 inline bool VehicleIsMotorized(VEHICLE vh) {
   switch (vh) {
-    case VH_MOTOR_VEHICLE:
+    case VH_MOTORCAR:
     case VH_MOTORCYCLE:
     case VH_PSV:
     case VH_BUS:
@@ -220,12 +220,13 @@ inline bool VehicleIsMotorized(VEHICLE vh) {
   }
 }
 
-enum ACCESS : uint16_t {
+enum ACCESS : uint8_t {
   ACC_NO = 0,
   ACC_PRIVATE,
   ACC_CUSTOMERS,
   ACC_DELIVERY,     // mostly for vehicles transporting goods.
   ACC_DESTINATION,  // == no transit
+  ACC_DISMOUNT,     // for bicycles, mopeds, horses, ...
   ACC_PERMISSIVE,
   ACC_YES,
   ACC_DESIGNATED,
@@ -240,6 +241,7 @@ std::vector<std::string_view> AccessStringVector() {
   v[(size_t)ACC_CUSTOMERS] = "customers";
   v[(size_t)ACC_DELIVERY] = "delivery";
   v[(size_t)ACC_DESTINATION] = "destination";
+  v[(size_t)ACC_DISMOUNT] = "dismount";
   v[(size_t)ACC_PERMISSIVE] = "permissive";
   v[(size_t)ACC_YES] = "yes";
   v[(size_t)ACC_DESIGNATED] = "designated";

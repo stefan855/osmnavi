@@ -117,7 +117,7 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
           gd.g.nodes.at(gd.compact_to_graph_nodemap.at(from_node));
       uint32_t n2_idx = gd.compact_to_graph_nodemap.at(edges.at(i).to_c_idx);
       const GEdge* edge =
-          FindEdgeBetweenNodes(gd.g, n1, n2_idx, VH_MOTOR_VEHICLE);
+          FindEdgeBetweenNodes(gd.g, n1, n2_idx, VH_MOTORCAR);
       const GNode& n2 = gd.g.nodes.at(n2_idx);
       CHECK_NE_S(edge, nullptr);
       int64_t way_id = gd.g.ways.at(edge->way_idx).id;
@@ -323,7 +323,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   // Create a compact graph for the largest component in the graph.
   CollectEdgesForCompactGraph(g, metric,
                               {
-                                  .vt = VH_MOTOR_VEHICLE,
+                                  .vt = VH_MOTORCAR,
                                   .avoid_dead_end = false,
                                   .avoid_restricted_access_edges = false,
                                   .restrict_to_cluster = false,

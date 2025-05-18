@@ -431,12 +431,12 @@ void TestRoutingConfig() {
     for (HIGHWAY_LABEL hw : AllHws()) {
       PerCountryConfig::ConfigValue cv;
 
-      cv = config.GetDefault(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_NO);
+      cv = config.GetDefault(NCC_CH, hw, VH_MOTORCAR, ET_ANY, IM_NO);
       LOG_S(INFO) << absl::StrFormat("hw_%s:\n%s", HighwayLabelToString(hw),
                                      config.ConfigValueDebugString(cv));
       CHECK_EQ_S(cv.dflt.maxspeed, 50) << HighwayLabelToString(hw);
 
-      cv = config.GetDefault(NCC_DE, hw, VH_MOTOR_VEHICLE, ET_ANY, IM_YES);
+      cv = config.GetDefault(NCC_DE, hw, VH_MOTORCAR, ET_ANY, IM_YES);
       LOG_S(INFO) << absl::StrFormat("hw_%s:\n%s", HighwayLabelToString(hw),
                                      config.ConfigValueDebugString(cv));
       CHECK_EQ_S(cv.dflt.maxspeed, 10) << HighwayLabelToString(hw);
@@ -445,10 +445,10 @@ void TestRoutingConfig() {
   {
     PerCountryConfig config;
     config.ReadConfig("../config/routing.cfg");
-    LOG_S(INFO) << "*** " << VehicleToString(VH_MOTOR_VEHICLE);
+    LOG_S(INFO) << "*** " << VehicleToString(VH_MOTORCAR);
     for (HIGHWAY_LABEL hw : AllHws()) {
-      LogRoutingAttrs(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_URBAN, IM_NO, config);
-      LogRoutingAttrs(NCC_CH, hw, VH_MOTOR_VEHICLE, ET_RURAL, IM_NO, config);
+      LogRoutingAttrs(NCC_CH, hw, VH_MOTORCAR, ET_URBAN, IM_NO, config);
+      LogRoutingAttrs(NCC_CH, hw, VH_MOTORCAR, ET_RURAL, IM_NO, config);
     }
   }
   LOG_S(INFO) << "TestRoutingConfig() finished";

@@ -102,6 +102,16 @@ inline bool ConsumePrefixIf(std::string_view prefix, std::string_view* str) {
   return true;
 }
 
+template <typename ContainerT, typename T>
+bool SpanContains(const ContainerT& container, const T& search) {
+  for (const auto& x : container) {
+    if (x == search) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Add space characters to the right or the left of a string to make it 'width'
 // characters wide.
 inline std::string PadString(std::string_view str, size_t width,

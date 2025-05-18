@@ -182,6 +182,7 @@ void AddClustersAndClusterIds(
   const size_t num_new = gvec.back()->clusters.size();
 
   g->clusters.resize(offset + num_new);
+  CHECK_LT_S(g->clusters.size(), INVALID_CLUSTER_ID);
   for (uint32_t cluster_id = offset; cluster_id < g->clusters.size();
        ++cluster_id) {
     g->clusters.at(cluster_id).ncc = ncc;

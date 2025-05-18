@@ -24,7 +24,7 @@ inline uint32_t FindClusterOfNode(const Graph& g, std::uint32_t node_idx) {
 }
 
 struct RoutingOptions {
-  VEHICLE vt = VH_MOTOR_VEHICLE;
+  VEHICLE vt = VH_MOTORCAR;
   // Avoid travelling *into* a dead-end over a bridge. Note that the other
   // direction (from dead-end over a bridge) is always allowed. This way, the
   // start node can be in a dead end.
@@ -105,7 +105,7 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
     return true;
   }
 
-  if (opt.avoid_restricted_access_edges && opt.vt == VH_MOTOR_VEHICLE &&
+  if (opt.avoid_restricted_access_edges && opt.vt == VH_MOTORCAR &&
       edge.car_label != GEdge::LABEL_FREE) {
     return true;
   }

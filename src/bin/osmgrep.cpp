@@ -121,10 +121,13 @@ void PrintStats(std::string_view name, const FreqStats& stats) {
       for (size_t i = 0; i < vals.size(); ++i) {
         if (i >= stats.n_values) break;
         const FrequencyTable::Entry& vale = vals.at(i);
-        RAW_LOG_F(INFO, absl::StrFormat("    %s %7d (id:%d)",
-                                        PadString(vale.key, max_valkey_size),
-                                        vale.ref_count, vale.example_id)
-                            .c_str());
+        // Use (INFO, "%s", data_str) instead of (INFO, data_str). The latter
+        // might fail when data_str contains formatting characters such as '%'.
+        RAW_LOG_F(INFO, "%s",
+                  absl::StrFormat("    %s %7d (id:%d)",
+                                  PadString(vale.key, max_valkey_size),
+                                  vale.ref_count, vale.example_id)
+                      .c_str());
       }
     }
   }
@@ -244,8 +247,7 @@ int main(int argc, char* argv[]) {
     reader.ReadNodes([&node_filter, &num_nodes, print_raw, print_one_line,
                       &stats](const OSMTagHelper& tagh,
                               const OsmPbfReader::NodeWithTags& node,
-                              int thread_idx,
-                              std::mutex& mut) {
+                              int thread_idx, std::mutex& mut) {
       /*
         LOG_S(INFO) << "Node:" << node.id();
         for (size_t i = 0; i < node.keys().size(); ++i) {

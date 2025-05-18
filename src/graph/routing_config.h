@@ -144,7 +144,7 @@ class PerCountryConfig {
     /*
     for (HIGHWAY_LABEL hw = HW_MOTORWAY; hw < HW_MAX;
          hw = (HIGHWAY_LABEL)(hw + 1)) {
-      for (VEHICLE vh = VH_MOTOR_VEHICLE; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
+      for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
         for (ENVIRONMENT_TYPE et = ET_ANY; et < ET_MAX;
              et = (ENVIRONMENT_TYPE)(et + 1)) {
           for (IS_MOTORROAD im = IM_NO; im < IM_MAX;
@@ -189,7 +189,7 @@ class PerCountryConfig {
         }
       }
       if (keys[i] == "vh_motorized" && sel.vts.empty()) {
-        for (VEHICLE vh = VH_MOTOR_VEHICLE; vh < VH_MAX;
+        for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX;
              vh = (VEHICLE)(vh + 1)) {
           if (VehicleIsMotorized(vh)) {
             sel.vts.push_back(vh);
@@ -198,7 +198,7 @@ class PerCountryConfig {
         continue;
       }
       if (keys[i] == "vh_not_motorized" && sel.vts.empty()) {
-        for (VEHICLE vh = VH_MOTOR_VEHICLE; vh < VH_MAX;
+        for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX;
              vh = (VEHICLE)(vh + 1)) {
           if (!VehicleIsMotorized(vh)) {
             sel.vts.push_back(vh);
@@ -238,7 +238,7 @@ class PerCountryConfig {
     }
     // Fill all vehicle types if they haven't been restricted.
     if (sel.vts.empty()) {
-      for (VEHICLE vh = VH_MOTOR_VEHICLE; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
+      for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
         sel.vts.push_back(vh);
       }
     }
