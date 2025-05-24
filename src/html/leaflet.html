@@ -266,27 +266,28 @@
           // L.latLng(47.3476881, 8.7201210),
           // L.latLng(47.3476057, 8.7204095)
         ],
-        autoResize: false,
-            createMarker: function(i, wp, nWps) {
-                if (i === 0) {
-                    // Start marker
-                    return L.marker(wp.latLng, {
-                        icon: startIcon,
-                        draggable: true
-                    });
-                } else if (i === nWps - 1) {
-                    // Stop marker
-                    return L.marker(wp.latLng, {
-                        icon: targetIcon,
-                        draggable: true
-                    });
-                } else {
-                    // Waypoint marker
-                    return L.marker(wp.latLng, {
-                        draggable: true
-                    });
-                }
-            },
+        createMarker: function(i, wp, nWps) {
+            if (i === 0) {
+                // Start marker
+                return L.marker(wp.latLng, {
+                    icon: startIcon,
+                    draggable: true
+                });
+            } else if (i === nWps - 1) {
+                // Stop marker
+                return L.marker(wp.latLng, {
+                    icon: targetIcon,
+                    draggable: true
+                });
+            } else {
+                // Waypoint marker
+                return L.marker(wp.latLng, {
+                    draggable: true
+                });
+            }
+        },
+        autoZoom: false,
+        fitSelectedRoutes: false,
         routeWhileDragging: false,
         position: 'bottomleft',
         serviceUrl: 'http://localhost:8081/route/v1',

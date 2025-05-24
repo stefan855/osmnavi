@@ -8,10 +8,9 @@
 #include "osm/access.h"
 #include "osm/osm_helpers.h"
 
-// Extract access information stored with node.
-// Returns false if there is no access restriction.
-// Returns true if the node has some access restrictions. The per vehicle access
-// is returned in node_attrs.
+// Extract barrier information stored with some nodes.
+// Returns false if there is no data, true if it has.
+// Per vehicle access is returned in node_attrs.
 bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
                      const google::protobuf::RepeatedField<int>& keys_vals,
                      int kv_start, int kv_stop, NodeAttributes* node_attrs) {
