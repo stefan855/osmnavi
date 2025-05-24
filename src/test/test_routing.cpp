@@ -29,7 +29,6 @@ RoutingResult RouteOnCompactGraph(const Graph& g, uint32_t g_start,
   return compact_dijkstra::RouteOnCompactGraph(g, g_start, g_target, metric,
                                                opt, Verbosity::Trace);
   */
-
 }
 
 // Create a compacted graph from 'g' which has the same node ordering and the

@@ -27,6 +27,30 @@
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
 
+void PrintDebugInfoForNode(const Graph& g, int64_t node_id) {
+  LOG_S(INFO) << "\n ******************** Data for node " << node_id;
+  for (const auto& [key, data] : g.simple_turn_restriction_map) {
+    if (GetGNodeIdSafe(g, key.from_node_idx) == node_id ||
+        GetGNodeIdSafe(g, key.to_node_idx) == node_id) {
+      LOG_S(INFO) << absl::StrFormat("STR key:(%lld -> %lld  way:%lld)",
+                                     GetGNodeIdSafe(g, key.from_node_idx),
+                                     GetGNodeIdSafe(g, key.to_node_idx),
+                                     GetGWayIdSafe(g, key.way_idx));
+      const GNode& n = g.nodes.at(key.to_node_idx);
+      for (uint32_t offset = 0; offset < gnode_num_edges(g, key.to_node_idx);
+           ++offset) {
+        if (data.allowed_edge_bits & (1u << offset)) {
+          const GEdge& e = g.edges.at(n.edges_start_pos + offset);
+          LOG_S(INFO) << absl::StrFormat(
+              "  SELECTED EDGE %lld -> %lld way:%lld %s", n.node_id,
+              GetGNodeIdSafe(g, e.other_node_idx), GetGWayIdSafe(g, e.way_idx),
+              e.inverted ? "inv" : "out");
+        }
+      }
+    }
+  }
+}
+
 void PrintStructSizes() {
   LOG_S(INFO) << "----------- Struct Sizes ---------";
   LOG_S(INFO) << absl::StrFormat("Dijkstra: sizeof(VisitedNode):  %4u",
@@ -446,59 +470,62 @@ int main(int argc, char* argv[]) {
   build_graph::BuildGraphOptions opt;
   Argli argli(
       argc, argv,
-      {
-          {.name = "pbf",
-           .type = "string",
-           .positional = true,
-           .required = true,
-           .desc = "Input OSM pbf file (such as planet file)."},
+      {{.name = "pbf",
+        .type = "string",
+        .positional = true,
+        .required = true,
+        .desc = "Input OSM pbf file (such as planet file)."},
 
-          {.name = "admin_filepattern",
-           .type = "string",
-           .dflt = opt.admin_filepattern,
-           .desc = "Location of country boundary files."},
+       {.name = "admin_filepattern",
+        .type = "string",
+        .dflt = opt.admin_filepattern,
+        .desc = "Location of country boundary files."},
 
-          {.name = "routing_config",
-           .type = "string",
-           .dflt = opt.routing_config,
-           .desc = "Location of routing config file."},
+       {.name = "routing_config",
+        .type = "string",
+        .dflt = opt.routing_config,
+        .desc = "Location of routing config file."},
 
-          {.name = "align_clusters_to_ncc",
-           .type = "bool",
-           .dflt = opt.align_clusters_to_ncc ? "true" : "false",
-           .desc = "Align cluster borders and country border. If set to false "
-                   "then merge_tiny_clusters is set to false too."},
+       {.name = "align_clusters_to_ncc",
+        .type = "bool",
+        .dflt = opt.align_clusters_to_ncc ? "true" : "false",
+        .desc = "Align cluster borders and country border. If set to false "
+                "then merge_tiny_clusters is set to false too."},
 
-          {.name = "merge_tiny_clusters",
-           .type = "bool",
-           .dflt = opt.merge_tiny_clusters ? "true" : "false",
-           .desc = "Merge tiny clusters at country borders."},
+       {.name = "merge_tiny_clusters",
+        .type = "bool",
+        .dflt = opt.merge_tiny_clusters ? "true" : "false",
+        .desc = "Merge tiny clusters at country borders."},
 
-          {.name = "n_threads",
-           .type = "int",
-           .dflt = absl::StrCat(opt.n_threads),
-           .desc = " Max . number of threads to use for parallel processing."},
+       {.name = "n_threads",
+        .type = "int",
+        .dflt = absl::StrCat(opt.n_threads),
+        .desc = "Max . number of threads to use for parallel processing."},
 
-          {.name = "log_way_tag_stats",
-           .type = "bool",
-           .desc = "Collect and print the way-tag-stats found in the data, "
-                   "sorted by decreasing frequency."},
+       {.name = "log_way_tag_stats",
+        .type = "bool",
+        .desc = "Collect and print the way-tag-stats found in the data, "
+                "sorted by decreasing frequency."},
 
-          {.name = "verb_turn_restrictions",
-           .type = "string",
-           .dflt = "brief",
-           .desc = "Verbosity level for turn restrictions reading"},
+       {.name = "verb_turn_restrictions",
+        .type = "string",
+        .dflt = "brief",
+        .desc = "Verbosity level for turn restrictions reading"},
 
-          {.name = "check_shortest_cluster_paths",
-           .type = "bool",
-           .desc = "Compute all cluster shortest paths a second time with A* "
-                   "and compare to the results of single source Dijkstra. This "
-                   "is extremely time consuming."},
-          {.name = "keep_all_nodes",
-           .type = "bool",
-           .desc = "Keep all nodes instead of pruning nodes that are needed "
-                   "for geometry only."},
-      });
+       {.name = "check_shortest_cluster_paths",
+        .type = "bool",
+        .desc = "Compute all cluster shortest paths a second time with A* "
+                "and compare to the results of single source Dijkstra. This "
+                "is extremely time consuming."},
+
+       {.name = "keep_all_nodes",
+        .type = "bool",
+        .desc = "Keep all nodes instead of pruning nodes that are needed "
+                "for geometry only."},
+
+       {.name = "debug_node",
+        .type = "int",
+        .desc = "Print debug information for this node_id."}});
 
   // TODO: Pass vehicle types from command line.
   opt.vehicle_types = {VH_MOTORCAR};
@@ -602,5 +629,8 @@ int main(int argc, char* argv[]) {
 #endif
 
   LOG_S(INFO) << "Finished.";
+  if (argli.ArgIsSet("debug_node")) {
+    PrintDebugInfoForNode(meta.graph, argli.GetInt("debug_node"));
+  }
   return 0;
 }

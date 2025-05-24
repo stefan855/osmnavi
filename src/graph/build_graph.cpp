@@ -12,6 +12,7 @@
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
+#include "graph/node_barriers.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
 #include "osm/access.h"
@@ -100,6 +101,7 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
   }
 }
 
+#if 0
 namespace {
 // Extract access information stored with node.
 // Returns false if there is no access restriction.
@@ -160,14 +162,14 @@ bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
   static const std::string_view full_blocks[] = {
       "debris",    "chain",        "barrier_board", "jersey_barrier",
       "log",       "rope",         "yes",           "hampshire_gate",
-      "lift_gate", "sliding_beam", "sliding_gate",  "spikes",
+      "sliding_beam", "sliding_gate",  "spikes",
       "wedge",     "wicket_gate",
   };
   */
   // Barrier types that don't block passage for any vehicle by default.
   static const std::string_view no_blocks[] = {
-      "border_control", "bump_gate",  "cattle_grid", "coupure",
-      "entrance",       "sally_port", "toll_booth"};
+      "border_control", "bump_gate", "cattle_grid", "coupure",
+      "entrance",       "lift_gate", "sally_port",  "toll_booth"};
 
   auto& vh_acc = node_attrs->vh_acc;
 
@@ -191,7 +193,7 @@ bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
       vh_acc[VH_BICYCLE] = ACC_YES;
       vh_acc[VH_MOPED] = ACC_YES;
     } else if (barrier == "gate") {
-      if (locked == "no") {
+      if (locked != "yes") {
         std::fill_n(vh_acc, VH_MAX, ACC_YES);
       }
     } else if (barrier == "horse_stile") {
@@ -244,6 +246,7 @@ bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
 }
 
 }  // namespace
+#endif
 
 void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
@@ -711,6 +714,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   WayContext wc = {.osm_way = osm_way, .ptags = ParseTags(tagh, osm_way)};
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
+  wc.way.area = tagh.GetValue(osm_way, "area") == "yes";
   CHECK_LT_S(wc.way.highway_label, HW_MAX);
 
   bool missing_nodes = false;
@@ -724,6 +728,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   }
   // Sets way.ncc and way.uniform_country.
   SetWayCountryCode(node_countries, &wc.way);
+  wc.way.closed_way = (node_countries.front().id == node_countries.back().id);
   const WayTaggedZones rural = ExtractWayZones(tagh, wc.ptags);
   LogCountryConflict(rural, wc.way);
 
@@ -906,8 +911,7 @@ void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
 
 void AllocateGNodes(GraphMetaData* meta) {
   FUNC_TIMER();
-  meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits() +
-                            meta->graph.node_attrs.size());
+  meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits());
   NodeBuilder::GlobalNodeIter iter(*meta->node_table);
   const NodeBuilder::VNode* node;
   while ((node = iter.Next()) != nullptr) {
@@ -1001,8 +1005,7 @@ void AllocateEdgeArrays(GraphMetaData* meta) {
   }
   CHECK_S(meta->graph.edges.empty());
 
-  // Expect up to node_attrs.size() additional edges for capacity of vector.
-  meta->graph.edges.reserve(edge_start + meta->graph.node_attrs.size());
+  meta->graph.edges.reserve(edge_start);
   meta->graph.edges.resize(edge_start, {.other_node_idx = INFU32});
 }
 
@@ -1133,29 +1136,153 @@ void PopulateEdgeArrays(GraphMetaData* meta) {
   pool.WaitAllFinished();
 }
 
+#if 0
 // Iterate through all nodes and for each check if it has a barrier which blocks
-// traffic. If it does, then add a shadow node and modify the linkage of the
-// existing node.
-// Scenario:
-//   Node (b) blocks traffic and has exactly two connected nodes a != c.
-//   Make sure that a.id < c.id.
-//   (a) ---- (b) ---- (c)
-//   This is transformed into the following
-//   (a) ---- (b')  (b) ---- (c)
-//   This means that a new shadow node b' is added and the link between (b') and
-//   (b) is omitted, to indicate the blocked connection.
-void ModifyNodeBarriers(GraphMetaData* meta) {
+// traffic. If it does, then add a simple turn restriction that forbids passing
+// the obstacle.
+//
+// Note that traffic within ways having the attribute area=yes is not blocked,
+// i.e. it is always possible to continue within the area, even if a border node
+// of the area has a blocking barrier.
+void StoreNodeBarrierData(GraphMetaData* meta) {
   FUNC_TIMER();
 
-  // Step 1:
-  //   * Find candidate nodes (b).
-  //   * Add shadow node (b') with an edge (b') -> (a).
-  //   * Change the edge (a) to (b) to point to the new node (b').
-  //   * Store the index of edge (b)->(a) for later deletion.
+  Graph& g = meta->graph;
+  const std::vector<NodeAttributes>& attrs = g.node_attrs;
+  size_t attr_idx = 0;
+  std::set<uint32_t> way_set;
+  std::set<uint32_t> way_with_area_set;
 
-  // Step 2:
-  //   * Delete the edges that were stored for later deletion.
+  for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
+    while (attr_idx < attrs.size() &&
+           attrs.at(attr_idx).node_id < g.nodes.at(node_idx).node_id) {
+      attr_idx++;
+    }
+    if (attr_idx >= attrs.size()) {
+      break;
+    }
+
+    // LOG_S(INFO) << "Compare " << attrs.at(attr_idx).node_id << " to "
+    //             << g.nodes.at(node_idx).node_id;
+    if (attrs.at(attr_idx).node_id == g.nodes.at(node_idx).node_id) {
+      const GNode& n = g.nodes.at(node_idx);
+      const NodeAttributes na = attrs.at(attr_idx++);
+      LOG_S(INFO) << "Examine node " << n.node_id;
+      const uint32_t num_edges = gnode_num_edges(g, node_idx);
+      bool same_target = false;
+      bool self_edge = false;
+      if (num_edges == 2) {
+        uint32_t other1 = g.edges.at(n.edges_start_pos).other_node_idx;
+        uint32_t other2 = g.edges.at(n.edges_start_pos + 1).other_node_idx;
+        self_edge = (other1 == node_idx || other2 == node_idx);
+        same_target = (other1 == other2);
+      }
+      way_set.clear();
+      way_with_area_set.clear();
+      for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+        const GWay& w = g.ways.at(e.way_idx);
+        if (w.area) {
+          way_with_area_set.insert(e.way_idx);
+        } else {
+          way_set.insert(e.way_idx);
+        }
+        if (w.area && !w.closed_way) {
+          LOG_S(INFO) << "Way with area but not closed " << w.id;
+        }
+      }
+
+      bool access_allowed = (na.vh_acc[VH_MOTORCAR] > ACC_PRIVATE &&
+                             na.vh_acc[VH_MOTORCAR] < ACC_MAX);
+      LOG_S(INFO) << absl::StrFormat(
+          "Node barrier on node %lld forward:%u all:%u #w-norm:%llu "
+          "#w-area:%llu same-target:%u self-edge:%d acc:%d",
+          n.node_id, n.num_edges_forward, num_edges, way_set.size(),
+          way_with_area_set.size(), same_target, self_edge,
+          (int)access_allowed);
+
+      if (access_allowed) {
+        meta->stats.num_node_barrier_free++;
+        continue;  // Nothing to do.
+      }
+
+      // Iterate overall all incoming edges.
+      LOG_S(INFO) << "AA1";
+      for (const FullGEdge& in_ge : gnode_incoming_edges(g, node_idx)) {
+        LOG_S(INFO) << "AA2";
+        const GNode other = g.nodes.at(in_ge.start_idx);
+        GEdge& in = g.edges.at(other.edges_start_pos + in_ge.offset);
+        CHECK_EQ_S(in.other_node_idx, node_idx);  // Is it really incoming?
+        const bool in_way_area = g.ways.at(in.way_idx).area;
+        uint32_t allowed_edge_bits = 0;
+        for (uint32_t offset = 0; offset < n.num_edges_forward; ++offset) {
+          const GEdge& out = g.edges.at(n.edges_start_pos + offset);
+          // If the out-edge stays on the same way as the in-edge then there are
+          // two cases when the turn is allowed:
+          //   * the way is an area.
+          //   * out-edge is a u-turn on the same way.
+          //
+          // Consider the following, complicated case. There are several bollard
+          // nodes that are part of two ways marked as areas:
+          // https://www.openstreetmap.org/node/8680967810
+          // Note that there are parallel edges from both ways between the
+          // common bollard nodes. Because of this, allowing only u-turns on the
+          // same way is important, otherwise one could easily change ways at
+          // every bollard node by doing a u-turn on the other way.
+          if ((in.way_idx == out.way_idx) &&
+              (in_way_area ||
+               (out.other_node_idx == in_ge.start_idx))) {  // u-turn
+            // Allowed to stay within area, set bit.
+            allowed_edge_bits = (allowed_edge_bits | (1u << offset));
+          }
+        }
+        if (allowed_edge_bits == 0) {
+          // There is even no u-turn possible (might be a data error).
+          LOG_S(INFO) << "AA3";
+          meta->stats.num_edge_barrier_no_uturn++;
+        } else {
+          LOG_S(INFO) << "AA4";
+          // Add/merge a pseudo turn restriction.
+          const TurnRestriction::TREdge tr_key = {
+              .from_node_idx = in_ge.start_idx,
+              .way_idx = in.way_idx,
+              .to_node_idx = in.other_node_idx,
+              .edge_idx = 0};
+          auto iter = g.simple_turn_restriction_map.find(tr_key);
+          if (iter != g.simple_turn_restriction_map.end()) {
+            SimpleTurnRestrictionData& data = iter->second;
+            if (num_edges == 2) {
+              data.allowed_edge_bits =
+                  data.allowed_edge_bits & allowed_edge_bits;
+              data.from_node = 1;
+              in.car_uturn_allowed = 1;
+              meta->stats.num_edge_barrier_merged++;
+              LOG_S(INFO) << absl::StrFormat(
+                  "Preexisting TR for barrier (merged), rel:%lld node:%lld "
+                  "#edges:%u",
+                  data.id, n.node_id, num_edges);
+            } else {
+              LOG_S(INFO) << absl::StrFormat(
+                  "Preexisting TR for barrier (ignored), rel:%lld node:%lld "
+                  "#edges:%u",
+                  data.id, n.node_id, num_edges);
+            }
+          } else {
+            // Create a pseudo turn-restriction for this edge+barrier
+            g.simple_turn_restriction_map[tr_key] = {
+                .allowed_edge_bits = allowed_edge_bits,
+                .from_relation = 0,
+                .from_node = 1,
+                .id = n.node_id};
+            g.nodes.at(node_idx).simple_turn_restriction_via_node = 1;
+            in.car_uturn_allowed = 1;
+            meta->stats.num_edge_barrier_block++;
+          }
+        }
+      }
+    }
+  }
 }
+#endif
 
 void MarkUniqueEdges(GraphMetaData* meta) {
   FUNC_TIMER();
@@ -1441,6 +1568,14 @@ void PrintStats(const GraphMetaData& meta) {
                                  stats.num_turn_restriction_error_connection);
   LOG_S(INFO) << absl::StrFormat("Num node barrier attrs:%9lld",
                                  meta.graph.node_attrs.size());
+  LOG_S(INFO) << absl::StrFormat("Num node barrier free:%10lld",
+                                 stats.num_node_barrier_free);
+  LOG_S(INFO) << absl::StrFormat("Num edge barrier block:%9lld",
+                                 stats.num_edge_barrier_block);
+  LOG_S(INFO) << absl::StrFormat("Num edge barrier merged:%8lld",
+                                 stats.num_edge_barrier_merged);
+  LOG_S(INFO) << absl::StrFormat("Num edge barrier no-uturn:%6lld",
+                                 stats.num_edge_barrier_no_uturn);
 
   LOG_S(INFO) << "========= Graph Stats ============";
   std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
@@ -1672,7 +1807,6 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   for (const GEdge& e : meta.graph.edges) {
     CHECK_S(e.other_node_idx != INFU32);
   }
-  ModifyNodeBarriers(&meta);
   MarkUniqueEdges(&meta);
 
   // =========================================================================
@@ -1689,6 +1823,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 #endif
 
   LoadTurnRestrictions(&reader, &meta);
+  StoreNodeBarrierData(&meta);
   FindLargeComponents(&meta.graph);
   meta.stats.num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);

@@ -69,6 +69,12 @@ struct BuildGraphStats {
   int64_t num_turn_restriction_error = 0;
   int64_t num_turn_restriction_error_connection = 0;
 
+  int64_t num_node_barrier_free = 0;
+  int64_t num_edge_barrier_block = 0;
+  int64_t num_edge_barrier_merged = 0;
+  int64_t num_edge_barrier_no_uturn = 0;
+
+
   // Graph
   int64_t num_ways_closed = 0;
 

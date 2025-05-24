@@ -152,9 +152,10 @@ std::string GetEdgeName(const Graph& g, const CTRDeDuper& dd,
     return "cluster edge";
   }
   const GWay& way = g.ways.at(ve.key.GetEdge(g, dd).way_idx);
-  return absl::StrFormat("%s (w:%lld)",
+  return absl::StrFormat("%s (w:%lld %lld->%lld)",
                          way.streetname == nullptr ? "<null>" : way.streetname,
-                         way.id);
+                         way.id, ve.key.FromNode(g, dd).node_id,
+                         ve.key.ToNode(g, dd).node_id);
 }
 
 double Round1(double val) { return std::round(val * 10.0) / 10.0; }

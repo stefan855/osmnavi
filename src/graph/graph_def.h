@@ -75,11 +75,14 @@ struct GWay {
   // 'uniform_country' is 0 if more than one country_num exists for the nodes in
   // the way, 1 if all the nodes belong to the same country.
   std::uint8_t uniform_country : 1 = 0;
+#if 0
   // Some ways have loops. This is some information about them.
   std::uint8_t head_loop : 1 = 0;   // First node appears multiple times.
   std::uint8_t tail_loop : 1 = 0;   // Last node appears multiple times.
   std::uint8_t inner_loop : 1 = 0;  // Some inner node appears multiple times.
+#endif
   std::uint8_t closed_way : 1 = 0;  // First node == Last node.
+  std::uint8_t area : 1 = 0;        // Has tag area=yes.
   // Country of the first node in the way.
   // If uniform_country==1, then this value is the country of all the nodes.
   std::uint16_t ncc : 10 = INVALID_NCC;
@@ -204,7 +207,7 @@ struct GEdge {
   // it is allowed to do a u-turn if the edge is non-restricted and one would
   // have to enter a restricted access area if not doing a u-turn.
   std::uint8_t car_uturn_allowed : 1;
-  std::uint64_t complex_turn_restriction_trigger : 1;
+  std::uint8_t complex_turn_restriction_trigger : 1;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -392,6 +395,10 @@ inline size_t gnode_edge_stop(const Graph& g, uint32_t node_idx) {
              : g.edges.size();
 }
 
+inline uint32_t gnode_num_edges(const Graph& g, uint32_t node_idx) {
+  return gnode_edge_stop(g, node_idx) - g.nodes.at(node_idx).edges_start_pos;
+}
+
 inline std::span<GEdge> gnode_all_edges(Graph& g, uint32_t node_idx) {
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
   uint32_t e_stop = gnode_edge_stop(g, node_idx);
@@ -416,6 +423,30 @@ inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
   uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
   return std::span<const GEdge>(&(g.edges[e_start]),
                                 g.nodes.at(node_idx).num_edges_forward);
+}
+
+// Note, this returns a new vector, not a span.
+struct FullGEdge {
+  uint32_t start_idx;
+  uint32_t offset : NUM_EDGES_OUT_BITS;
+};
+inline std::vector<FullGEdge> gnode_incoming_edges(const Graph& g,
+                                                   uint32_t node_idx) {
+  std::vector<FullGEdge> res;
+  for (const GEdge& out : gnode_all_edges(g, node_idx)) {
+    if (!out.unique_other || out.other_node_idx == node_idx) {
+      continue;
+    }
+
+    const GNode& other = g.nodes.at(out.other_node_idx);
+    for (uint32_t offset = 0; offset < other.num_edges_forward; ++offset) {
+      const GEdge& incoming = g.edges.at(other.edges_start_pos + offset);
+      if (incoming.other_node_idx == node_idx) {
+        res.emplace_back(out.other_node_idx, offset);
+      }
+    }
+  }
+  return res;
 }
 
 inline const uint32_t gnode_find_forward_edge_idx(const Graph& g,

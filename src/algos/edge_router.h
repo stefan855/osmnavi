@@ -374,6 +374,14 @@ class EdgeRouter {
                   << " cluster:" << expansion_node.cluster_id;
     }
 
+    /*
+     * Doesn't work, need enable u-turns.
+    if (expansion_node.car_no_traffic && ctx.opt.vt == VH_MOTORCAR &&
+        prev.v_idx != INFU32) {
+      return;
+    }
+    */
+
     // The node with 'uturn_node_idx' represents a forbidden u-turn.
     uint32_t uturn_forbidden_node_idx = INFU32;
     // Compute a bitset that has bits for all the allowed edge offsets.
@@ -389,8 +397,9 @@ class EdgeRouter {
                .to_node_idx = prev.other_idx});
           if (iter != g_.simple_turn_restriction_map.end()) {
             if (verbosity_ >= 3) {
-              LOG_S(INFO) << "*** TR found relation_id="
-                          << iter->second.osm_relation_id;
+              LOG_S(INFO) << absl::StrFormat(
+                  "*** TR found %s id:%lld",
+                  iter->second.id_name(), iter->second.id);
             }
             allowed_offset_bits = iter->second.allowed_edge_bits;
           }

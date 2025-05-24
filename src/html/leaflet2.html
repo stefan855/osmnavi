@@ -38,7 +38,7 @@
         attribution: '&copy; Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community</a>'
       });
 
-      var graph_motor_vehicle = L.tileLayer('http://localhost:8080/tiles/graph_motor_vehicle/{z}/{x}/{y}.png', {
+      var graph_motorcar = L.tileLayer('http://localhost:8080/tiles/graph_motorcar/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -191,7 +191,7 @@
       var map = L.map('map', {
         center: [46.78566, 8.1596],
         zoom: 9,
-        layers: [osm, graph_motor_vehicle]
+        layers: [osm, graph_motorcar]
       });
 
       var baseMaps = {
@@ -200,7 +200,7 @@
       var overlayMaps = {
         "OpenStreetMap": osm,
         "ArcGis": arcgis,
-        "Graph Cars": graph_motor_vehicle,
+        "Graph Cars": graph_motorcar,
         "Graph Bicycles": graph_bicycle,
         "Louvain": louvain,
         "Cross-Country Edges": cross,
@@ -263,9 +263,10 @@
         waypoints: [
           // L.latLng(47.34790, 8.71825),
           // L.latLng(46.94719, 7.43749)
-          L.latLng(47.3476881, 8.7201210),
-          L.latLng(47.3476057, 8.7204095)
+          // L.latLng(47.3476881, 8.7201210),
+          // L.latLng(47.3476057, 8.7204095)
         ],
+        autoResize: false,
             createMarker: function(i, wp, nWps) {
                 if (i === 0) {
                     // Start marker

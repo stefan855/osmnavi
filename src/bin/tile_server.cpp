@@ -10,6 +10,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
+#include "base/argli.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
@@ -375,6 +376,24 @@ void LoadLayers(std::map<std::string, LayerData>* layers) {
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
 
+  Argli argli(argc, argv,
+              {
+                  {.name = "root_dir",
+                   .type = "string",
+                   .positional = true,
+                   .dflt = "/tmp",
+                   .desc = "Location of edge data files."},
+
+                  {.name = "admin_dir",
+                   .type = "string",
+                   .positional = true,
+                   .dflt = "../../data",
+                   .desc = "Location of country boundary files."},
+              });
+
+  const std::string root_dir = argli.GetString("root_dir");
+  const std::string admin_dir = argli.GetString("admin_dir");
+#if 0
   if (argc > 2) {
     LOG_S(FATAL) << absl::StrFormat("usage: %s [<dir>]", argv[0]);
   }
@@ -386,56 +405,57 @@ int main(int argc, char* argv[]) {
     root = argv[1];
     admin_root = argv[1];
   }
+#endif
   LOG_S(INFO) << "sizeof(LineSegment):" << sizeof(LineSegment);
 
   std::map<std::string, LayerData> layers;
-  AddLayer("graph_motorcar", root + "/graph_motorcar.csv", &layers);
-  AddLayer("graph_bicycle", root + "/graph_bicycle.csv", &layers);
+  AddLayer("graph_motorcar", root_dir + "/graph_motorcar.csv", &layers);
+  AddLayer("graph_bicycle", root_dir + "/graph_bicycle.csv", &layers);
 
-  AddLayer("pb_dijks_forward", root + "/pb_dijks_forward.csv", &layers);
-  AddLayer("pb_dijks_backward", root + "/pb_dijks_backward.csv", &layers);
-  AddLayer("pb_dijks_forward_hybrid", root + "/pb_dijks_forward_hybrid.csv",
+  AddLayer("pb_dijks_forward", root_dir + "/pb_dijks_forward.csv", &layers);
+  AddLayer("pb_dijks_backward", root_dir + "/pb_dijks_backward.csv", &layers);
+  AddLayer("pb_dijks_forward_hybrid", root_dir + "/pb_dijks_forward_hybrid.csv",
            &layers);
-  AddLayer("pb_astar_forward", root + "/pb_astar_forward.csv", &layers);
-  AddLayer("pb_astar_backward", root + "/pb_astar_backward.csv", &layers);
-  AddLayer("pb_astar_forward_hybrid", root + "/pb_astar_forward_hybrid.csv",
-           &layers);
-
-  AddLayer("uw_dijks_forward_hybrid", root + "/uw_dijks_forward_hybrid.csv",
-           &layers);
-  AddLayer("uw_astar_forward_hybrid", root + "/uw_astar_forward_hybrid.csv",
-           &layers);
-  AddLayer("as_dijks_forward_hybrid", root + "/as_dijks_forward_hybrid.csv",
-           &layers);
-  AddLayer("as_astar_forward_hybrid", root + "/as_astar_forward_hybrid.csv",
-           &layers);
-  AddLayer("ln_dijks_forward_hybrid", root + "/ln_dijks_forward_hybrid.csv",
-           &layers);
-  AddLayer("ln_astar_forward_hybrid", root + "/ln_astar_forward_hybrid.csv",
+  AddLayer("pb_astar_forward", root_dir + "/pb_astar_forward.csv", &layers);
+  AddLayer("pb_astar_backward", root_dir + "/pb_astar_backward.csv", &layers);
+  AddLayer("pb_astar_forward_hybrid", root_dir + "/pb_astar_forward_hybrid.csv",
            &layers);
 
-  AddLayer("ALL", admin_root + "/admin/??_*.csv", &layers);
-  AddLayer("CH", admin_root + "/admin/CH_756_*.csv", &layers);
-  AddLayer("DE", admin_root + "/admin/DE_276_*.csv", &layers);
+  AddLayer("uw_dijks_forward_hybrid", root_dir + "/uw_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("uw_astar_forward_hybrid", root_dir + "/uw_astar_forward_hybrid.csv",
+           &layers);
+  AddLayer("as_dijks_forward_hybrid", root_dir + "/as_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("as_astar_forward_hybrid", root_dir + "/as_astar_forward_hybrid.csv",
+           &layers);
+  AddLayer("ln_dijks_forward_hybrid", root_dir + "/ln_dijks_forward_hybrid.csv",
+           &layers);
+  AddLayer("ln_astar_forward_hybrid", root_dir + "/ln_astar_forward_hybrid.csv",
+           &layers);
 
-  AddLayer("IL", admin_root + "/admin/IL_376_*.csv", &layers);
-  AddLayer("JO", admin_root + "/admin/JO_400_*.csv", &layers);
-  AddLayer("UA", admin_root + "/admin/UA_804_*.csv", &layers);
-  AddLayer("RU", admin_root + "/admin/RU_643_*.csv", &layers);
+  AddLayer("ALL", admin_dir + "/admin/??_*.csv", &layers);
+  AddLayer("CH", admin_dir + "/admin/CH_756_*.csv", &layers);
+  AddLayer("DE", admin_dir + "/admin/DE_276_*.csv", &layers);
 
-  AddLayer("louvain", root + "/louvain.csv", &layers);
-  AddLayer("cross", root + "/cross.csv", &layers);
+  AddLayer("IL", admin_dir + "/admin/IL_376_*.csv", &layers);
+  AddLayer("JO", admin_dir + "/admin/JO_400_*.csv", &layers);
+  AddLayer("UA", admin_dir + "/admin/UA_804_*.csv", &layers);
+  AddLayer("RU", admin_dir + "/admin/RU_643_*.csv", &layers);
 
-  AddLayer("traffic", root + "/traffic.csv", &layers);
-  AddLayer("experimental1", root + "/experimental1.csv", &layers);
-  AddLayer("experimental2", root + "/experimental2.csv", &layers);
-  AddLayer("experimental3", root + "/experimental3.csv", &layers);
-  AddLayer("experimental4", root + "/experimental4.csv", &layers);
-  AddLayer("experimental5", root + "/experimental5.csv", &layers);
-  AddLayer("experimental6", root + "/experimental6.csv", &layers);
-  AddLayer("experimental7", root + "/experimental7.csv", &layers);
-  AddLayer("experimental8", root + "/experimental8.csv", &layers);
-  AddLayer("experimental9", root + "/experimental9.csv", &layers);
+  AddLayer("louvain", root_dir + "/louvain.csv", &layers);
+  AddLayer("cross", root_dir + "/cross.csv", &layers);
+
+  AddLayer("traffic", root_dir + "/traffic.csv", &layers);
+  AddLayer("experimental1", root_dir + "/experimental1.csv", &layers);
+  AddLayer("experimental2", root_dir + "/experimental2.csv", &layers);
+  AddLayer("experimental3", root_dir + "/experimental3.csv", &layers);
+  AddLayer("experimental4", root_dir + "/experimental4.csv", &layers);
+  AddLayer("experimental5", root_dir + "/experimental5.csv", &layers);
+  AddLayer("experimental6", root_dir + "/experimental6.csv", &layers);
+  AddLayer("experimental7", root_dir + "/experimental7.csv", &layers);
+  AddLayer("experimental8", root_dir + "/experimental8.csv", &layers);
+  AddLayer("experimental9", root_dir + "/experimental9.csv", &layers);
 
   LoadLayers(&layers);
 

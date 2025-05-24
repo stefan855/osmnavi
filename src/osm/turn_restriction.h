@@ -302,7 +302,8 @@ inline bool CreateSimpleTurnRestrictionData(
 
   // Set the 'num_edges' lowest bits.
   d->allowed_edge_bits = (1u << num_edges) - 1;
-  d->osm_relation_id = first_tr.relation_id;
+  d->from_relation = 1;
+  d->id = first_tr.relation_id;
 
   bool found = false;
   for (const TurnRestriction& tr : trs) {
@@ -354,7 +355,7 @@ inline bool CreateSimpleTurnRestrictionData(
         "TR: No matching edges from_node:%lld via_node:%lld to "
         "node:%lld, example relation:%lld",
         g.nodes.at(from_node_idx).node_id, via_node.node_id, via_node.node_id,
-        d->osm_relation_id);
+        d->id);
   }
   return found;
 }

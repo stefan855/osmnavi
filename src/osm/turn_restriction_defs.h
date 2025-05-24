@@ -73,8 +73,16 @@ struct TurnRestriction {
 
 struct SimpleTurnRestrictionData {
   // 32 bits that select the allowed outgoing edges at the via node.
-  uint32_t allowed_edge_bits;
-  int64_t osm_relation_id;
+  uint32_t allowed_edge_bits = 0;
+  // Set bit if this comes from a relation (i.e. a turn restriction) or from a
+  // node (i.e. a node with a barrier).
+  uint32_t from_relation : 1 = 0;
+  uint32_t from_node : 1 = 0;
+  // An OSM relation id (if from_relation==1) or a node id.
+  int64_t id = 0;
+
+  // Name of the data in the 'id' attribute.
+  std::string_view id_name() const { return from_relation ? "rel" : "node"; }
 };
 
 // Make sure there are no filler bytes, because we hash the whole thing.

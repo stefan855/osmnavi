@@ -290,6 +290,6 @@ inline std::string SimpleTurnRestrictionDebugString(
     tmp += absl::StrFormat(",%c", id);
   }
   return absl::StrFormat(
-      "from=%c via=%c to=[%s] rel=%lld", GetGNodeId(g, key.from_node_idx),
-      GetGNodeId(g, key.to_node_idx), tmp.substr(1), data.osm_relation_id);
+      "from=%c via=%c to=[%s] %s=%lld", GetGNodeId(g, key.from_node_idx),
+      GetGNodeId(g, key.to_node_idx), tmp.substr(1), data.id_name(), data.id);
 }
