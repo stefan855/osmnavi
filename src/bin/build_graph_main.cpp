@@ -67,8 +67,8 @@ void PrintStructSizes() {
                                  sizeof(EdgeRouter::VisitedEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
-  LOG_S(INFO) << absl::StrFormat("sizeof(NodeAttributes):         %4u",
-                                 sizeof(NodeAttributes));
+  LOG_S(INFO) << absl::StrFormat("sizeof(NodeAttribute):         %4u",
+                                 sizeof(NodeAttribute));
   LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):           %4u",
                                  sizeof(RoutingAttrs));
   LOG_S(INFO) << absl::StrFormat("sizeof(WayTaggedZones):         %4u",
@@ -523,6 +523,10 @@ int main(int argc, char* argv[]) {
         .desc = "Keep all nodes instead of pruning nodes that are needed "
                 "for geometry only."},
 
+       {.name = "do_routes",
+        .type = "bool",
+        .desc = "Run a few test routes and output data."},
+
        {.name = "debug_node",
         .type = "int",
         .desc = "Print debug information for this node_id."}});
@@ -548,53 +552,90 @@ int main(int argc, char* argv[]) {
 
   PrintStructSizes();
 
-  WriteGraphToCSV(g, VH_MOTORCAR, "/tmp/graph_motorcar.csv");
-  WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
-  WriteLouvainGraph(g, "/tmp/louvain.csv");
-  WriteCrossCountryEdges(meta, "/tmp/cross.csv");
-  WriteRestrictedRoadsToCSV(g, VH_MOTORCAR, "/tmp/experimental1.csv");
-  WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED, false, "mag",
-                    "/tmp/experimental2.csv");
-  WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED_SECONDARY, false, "red",
-                    "/tmp/experimental3.csv");
-  WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
-                    "/tmp/experimental4.csv");
+  {
+    // Write files in parallel.
+    ThreadPool pool;
+    pool.AddWork([&g](int thread_idx) {
+      WriteGraphToCSV(g, VH_MOTORCAR, "/tmp/graph_motorcar.csv");
+    });
 
-  struct RoutingDef {
-    int64_t start_id;
-    int64_t target_id;
-    std::string_view from_name;
-    std::string_view to_name;
-    std::string_view file_prefix;
-  };
-
-  std::vector<RoutingDef> defs = {
-      {49973500, 805904068, "Pfäffikon ZH", "Bern", "pb"},
-      {805904068, 49973500, "Bern", "Pfäffikon ZH", "bp"},
-      {3108534441, 3019156898, "Uster", "Weesen", "uw"},
-      {3019156898, 3108534441, "Weesen", "Uster", "wu"},
-      {26895904, 300327675, "Augsburg", "Stralsund", "as"},
-      {300327675, 26895904, "Stralsund", "Augsburg", "sa"},
-      {1131001345, 899297768, "Lissabon", "Nordkapp", "ln"},
-      {899297768, 1131001345, "Nordkapp", "Lissabon", ""},
-      {654083753, 3582774151, "Ulisbach SG", "Ricken SG", "ur"},
-      {32511837, 3582774151, "Ulisbach restricted SG", "Ricken SG", "ur2"},
-  };
-  std::vector<uint32_t> routing_nodes;
-  for (const auto& def : defs) {
-    std::uint32_t idx = g.FindNodeIndex(def.start_id);
-    if (idx < g.nodes.size()) routing_nodes.push_back(idx);
-    idx = g.FindNodeIndex(def.target_id);
-    if (idx < g.nodes.size()) routing_nodes.push_back(idx);
+    pool.AddWork([&g](int thread_idx) {
+      WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
+    });
+    pool.AddWork(
+        [&g](int thread_idx) { WriteLouvainGraph(g, "/tmp/louvain.csv"); });
+    pool.AddWork([&meta](int thread_idx) {
+      WriteCrossCountryEdges(meta, "/tmp/cross.csv");
+    });
+    pool.AddWork([&g](int thread_idx) {
+      WriteRestrictedRoadsToCSV(g, VH_MOTORCAR, "/tmp/experimental1.csv");
+    });
+    pool.AddWork([&g](int thread_idx) {
+      WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED, false, "mag",
+                        "/tmp/experimental2.csv");
+    });
+    pool.AddWork([&g](int thread_idx) {
+      WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED_SECONDARY, false, "red",
+                        "/tmp/experimental3.csv");
+    });
+    pool.AddWork([&g](int thread_idx) {
+      WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
+                        "/tmp/experimental4.csv");
+    });
+    pool.Start(std::min(meta.opt.n_threads, std::min(8, opt.n_threads)));
+    pool.WaitAllFinished();
+#if 0
+    WriteGraphToCSV(g, VH_MOTORCAR, "/tmp/graph_motorcar.csv");
+    WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
+    WriteLouvainGraph(g, "/tmp/louvain.csv");
+    WriteCrossCountryEdges(meta, "/tmp/cross.csv");
+    WriteRestrictedRoadsToCSV(g, VH_MOTORCAR, "/tmp/experimental1.csv");
+    WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED, false, "mag",
+                      "/tmp/experimental2.csv");
+    WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED_SECONDARY, false, "red",
+                      "/tmp/experimental3.csv");
+    WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
+                      "/tmp/experimental4.csv");
+#endif
   }
-  if (routing_nodes.size() >= 2) {
-    const CompactDijkstraRoutingData comp_data =
-        CreateCompactDijkstraRoutingData(g, routing_nodes, RoutingMetricTime(),
-                                         RoutingOptions());
 
+  if (argli.GetBool("do_routes")) {
+    struct RoutingDef {
+      int64_t start_id;
+      int64_t target_id;
+      std::string_view from_name;
+      std::string_view to_name;
+      std::string_view file_prefix;
+    };
+
+    std::vector<RoutingDef> defs = {
+        {49973500, 805904068, "Pfäffikon ZH", "Bern", "pb"},
+        {805904068, 49973500, "Bern", "Pfäffikon ZH", "bp"},
+        {3108534441, 3019156898, "Uster", "Weesen", "uw"},
+        {3019156898, 3108534441, "Weesen", "Uster", "wu"},
+        {26895904, 300327675, "Augsburg", "Stralsund", "as"},
+        {300327675, 26895904, "Stralsund", "Augsburg", "sa"},
+        {1131001345, 899297768, "Lissabon", "Nordkapp", "ln"},
+        {899297768, 1131001345, "Nordkapp", "Lissabon", ""},
+        {654083753, 3582774151, "Ulisbach SG", "Ricken SG", "ur"},
+        {32511837, 3582774151, "Ulisbach restricted SG", "Ricken SG", "ur2"},
+    };
+    std::vector<uint32_t> routing_nodes;
     for (const auto& def : defs) {
-      TestRoute(g, comp_data, def.start_id, def.target_id, def.from_name,
-                def.to_name, def.file_prefix);
+      std::uint32_t idx = g.FindNodeIndex(def.start_id);
+      if (idx < g.nodes.size()) routing_nodes.push_back(idx);
+      idx = g.FindNodeIndex(def.target_id);
+      if (idx < g.nodes.size()) routing_nodes.push_back(idx);
+    }
+    if (routing_nodes.size() >= 2) {
+      const CompactDijkstraRoutingData comp_data =
+          CreateCompactDijkstraRoutingData(
+              g, routing_nodes, RoutingMetricTime(), RoutingOptions());
+
+      for (const auto& def : defs) {
+        TestRoute(g, comp_data, def.start_id, def.target_id, def.from_name,
+                  def.to_name, def.file_prefix);
+      }
     }
   }
 

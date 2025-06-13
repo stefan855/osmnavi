@@ -74,7 +74,6 @@ struct BuildGraphStats {
   int64_t num_edge_barrier_merged = 0;
   int64_t num_edge_barrier_no_uturn = 0;
 
-
   // Graph
   int64_t num_ways_closed = 0;
 
@@ -118,9 +117,82 @@ struct BuildGraphStats {
   int64_t num_dead_end_nodes = 0;
 
   FrequencyTable way_tag_stats;
+
+  void AddStats(const BuildGraphStats& other) {
+    num_nodes_in_pbf += other.num_nodes_in_pbf;
+    num_ways_in_pbf += other.num_ways_in_pbf;
+    num_relations_in_pbf += other.num_relations_in_pbf;
+    num_ways_with_highway_tag += other.num_ways_with_highway_tag;
+    num_edges_with_highway_tag += other.num_edges_with_highway_tag;
+    num_noderefs_with_highway_tag += other.num_noderefs_with_highway_tag;
+    num_ways_too_short += other.num_ways_too_short;
+    num_ways_missing_nodes += other.num_ways_missing_nodes;
+    num_ways_dup_segments += other.num_ways_dup_segments;
+
+    num_turn_restriction_success += other.num_turn_restriction_success;
+    max_turn_restriction_via_ways = std::max(
+        max_turn_restriction_via_ways, other.max_turn_restriction_via_ways);
+    num_turn_restriction_error += other.num_turn_restriction_error;
+    num_turn_restriction_error_connection +=
+        other.num_turn_restriction_error_connection;
+
+    num_node_barrier_free += other.num_node_barrier_free;
+    num_edge_barrier_block += other.num_edge_barrier_block;
+    num_edge_barrier_merged += other.num_edge_barrier_merged;
+    num_edge_barrier_no_uturn += other.num_edge_barrier_no_uturn;
+
+    num_ways_closed += other.num_ways_closed;
+
+    num_ways_no_maxspeed += other.num_ways_no_maxspeed;
+    num_ways_diff_maxspeed += other.num_ways_diff_maxspeed;
+    num_ways_has_country += other.num_ways_has_country;
+    num_ways_has_streetname += other.num_ways_has_streetname;
+    num_ways_oneway_car += other.num_ways_oneway_car;
+    num_ways_mixed_restricted_car += other.num_ways_mixed_restricted_car;
+
+    num_cross_country_edges += other.num_cross_country_edges;
+    num_cross_country_restricted += other.num_cross_country_restricted;
+    num_cross_cluster_edges += other.num_cross_cluster_edges;
+    num_cross_cluster_restricted += other.num_cross_cluster_restricted;
+
+    num_nodes_in_cluster += other.num_nodes_in_cluster;
+    num_nodes_in_small_component += other.num_nodes_in_small_component;
+    num_nodes_no_country += other.num_nodes_no_country;
+    num_nodes_simple_tr_via += other.num_nodes_simple_tr_via;
+    num_edges_inverted += other.num_edges_inverted;
+    num_edges_forward += other.num_edges_forward;
+    num_edges_forward_car_restr_unset +=
+        other.num_edges_forward_car_restr_unset;
+    num_edges_forward_car_restr_free += other.num_edges_forward_car_restr_free;
+    num_edges_forward_car_restricted += other.num_edges_forward_car_restricted;
+    num_edges_forward_car_restricted2 +=
+        other.num_edges_forward_car_restricted2;
+    num_edges_forward_car_strange += other.num_edges_forward_car_strange;
+    num_edges_forward_car_forbidden += other.num_edges_forward_car_forbidden;
+    num_edges_non_unique += other.num_edges_non_unique;
+    num_edges_at_simple_tr_via += other.num_edges_at_simple_tr_via;
+    max_edges = std::max(max_edges, other.max_edges);
+    max_edges_out = std::max(max_edges_out, other.max_edges_out);
+    max_edges_inverted +=
+        std::max(max_edges_inverted, other.max_edges_inverted);
+    min_edge_length_cm = std::min(min_edge_length_cm, other.min_edge_length_cm);
+    max_edge_length_cm +=
+        std::max(max_edge_length_cm, other.max_edge_length_cm);
+    sum_edge_length_cm += other.sum_edge_length_cm;
+
+    num_dead_end_nodes += other.num_dead_end_nodes;
+
+    way_tag_stats.AddTable(other.way_tag_stats);
+  }
 };
 
-struct GraphMetaData {
+struct GraphMetaData final {
+  GraphMetaData()
+      : way_nodes_seen(new HugeBitset),
+        way_nodes_needed(new HugeBitset),
+        thread_stats(new std::vector<BuildGraphStats>(32)) {
+    ;
+  }
   BuildGraphOptions opt;
 
   // Assigns country codes to lon/lat positions. Used to assign countries to
@@ -134,11 +206,6 @@ struct GraphMetaData {
   // file. All nodes in 'way_nodes_seen' are present.
   std::unique_ptr<DataBlockTable> node_table;
 
-  // Nodes that are referenced by a way potentially used for routing. Currently
-  // this is all ways that have a non-empty 'highway' tag.
-  std::unique_ptr<HugeBitset> way_nodes_seen;
-  // Nodes that are needed for routing, i.e. start/end of a way, crossings etc.
-  std::unique_ptr<HugeBitset> way_nodes_needed;
   // Resulting graph data structure used for routing.
   Graph graph;
 
@@ -146,7 +213,30 @@ struct GraphMetaData {
   // construction of the graph.
   std::vector<TurnRestriction> simple_turn_restrictions;
 
-  BuildGraphStats stats;
+  // Finalized stats containing all thread stats and more.
+  BuildGraphStats global_stats;
+
+  // =========================================
+  // Temporary objects needed during building.
+  // =========================================
+
+  // Nodes that are referenced by a way potentially used for routing. Currently
+  // this is all ways that have a non-empty 'highway' tag.
+  std::unique_ptr<HugeBitset> way_nodes_seen;
+  // Nodes that are needed for routing, i.e. start/end of a way, crossings etc.
+  std::unique_ptr<HugeBitset> way_nodes_needed;
+  // Per thread statistics not requiring locks.
+  std::unique_ptr<std::vector<BuildGraphStats>> thread_stats;
+
+  BuildGraphStats& Stats(int thread_idx = 0) {
+    return thread_stats->at(thread_idx);
+  }
+
+  void ClearTempData() {
+    way_nodes_seen.reset(nullptr);
+    way_nodes_needed.reset(nullptr);
+    thread_stats.reset(nullptr);
+  }
 };
 
 // Read a pbf file from disk, build the road network and return it together with
@@ -214,6 +304,6 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
 
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
-                      GraphMetaData* meta);
+                      GraphMetaData* meta, BuildGraphStats* stats);
 
 }  // namespace build_graph

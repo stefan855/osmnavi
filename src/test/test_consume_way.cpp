@@ -107,8 +107,6 @@ TiledCountryLookup* InitCountryTiler(int16_t country) {
 build_graph::GraphMetaData CreateMeta() {
   build_graph::GraphMetaData meta;
 
-  meta.way_nodes_seen.reset(new HugeBitset);
-  meta.way_nodes_needed.reset(new HugeBitset);
   meta.node_table.reset(new DataBlockTable(/*alloc_unit*/ 1024));
   meta.tiler.reset(InitCountryTiler(NCC_CH));
   meta.per_country_config.reset(new PerCountryConfig);
@@ -170,7 +168,7 @@ void TestWay1() {
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
   std::mutex mut;
 
-  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta);
+  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta, &meta.Stats());
   CHECK_EQ_S(meta.graph.ways.size(), 1);
   CHECK_EQ_S(deduper.num_added(), 1);
 }
@@ -205,7 +203,7 @@ void TestWay2() {
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
   std::mutex mut;
 
-  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta);
+  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta, &meta.Stats());
   CHECK_EQ_S(meta.graph.ways.size(), 1);
   CHECK_EQ_S(deduper.num_added(), 1);
   const WaySharedAttrs& wsa = deduper.GetObj(0);

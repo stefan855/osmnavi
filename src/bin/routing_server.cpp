@@ -267,16 +267,16 @@ nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
 }
 
 nlohmann::json ComputeRoute(const Graph& g,
-                            const std::vector<uint32_t>& find_node_indexes,
+                            const std::vector<uint32_t>& sorted_node_indexes,
                             bool hybrid, double lon1, double lat1, double lon2,
                             double lat2) {
   FUNC_TIMER();
-  const ClosestNodeResult n1 =
-      FindClosestNodeFast(g, find_node_indexes, std::llround(lat1 * TEN_POW_7),
-                          std::llround(lon1 * TEN_POW_7));
-  const ClosestNodeResult n2 =
-      FindClosestNodeFast(g, find_node_indexes, std::llround(lat2 * TEN_POW_7),
-                          std::llround(lon2 * TEN_POW_7));
+  const ClosestNodeResult n1 = FindClosestNodeFast(
+      g, sorted_node_indexes, std::llround(lat1 * TEN_POW_7),
+      std::llround(lon1 * TEN_POW_7));
+  const ClosestNodeResult n2 = FindClosestNodeFast(
+      g, sorted_node_indexes, std::llround(lat2 * TEN_POW_7),
+      std::llround(lon2 * TEN_POW_7));
 
   if (n1.node_pos == INFU32 || n2.node_pos == INFU32) {
     LOG_S(INFO) << "Can't find endpoints";
@@ -347,7 +347,14 @@ int main(int argc, char* argv[]) {
   build_graph::BuildGraphOptions opt = {.pbf = pbf, .n_threads = n_threads};
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
-  const std::vector<uint32_t> find_node_indexes = SortNodeIndexesByLon(g);
+  std::vector<uint32_t> sorted_node_indexes = SortNodeIndexesByLon(g);
+  // Remove all nodes that aren't in a large component.
+  sorted_node_indexes.erase(
+      std::remove_if(begin(sorted_node_indexes), end(sorted_node_indexes),
+                     [&g](uint32_t node_idx) {
+                       return g.nodes.at(node_idx).large_component == 0;
+                     }),
+      end(sorted_node_indexes));
 
   std::string root("/tmp");
   std::string admin_root("../../data");
@@ -376,8 +383,10 @@ int main(int argc, char* argv[]) {
 
   svr.Get(
       "/route/(v1[hybrid]*)/driving/([0-9.]+),([0-9.]+);([0-9.]+),([0-9.]+)",
-      [&g, &find_node_indexes](const httplib::Request& req,
-                               httplib::Response& res) {
+      [&g, &sorted_node_indexes](const httplib::Request& req,
+                                 httplib::Response& res) {
+        const absl::Time start = absl::Now();
+
         nlohmann::json result;
         std::string_view comp = req.matches.str(1);
         if (comp != "v1" && comp != "v1hybrid") {
@@ -396,19 +405,21 @@ int main(int argc, char* argv[]) {
               !absl::SimpleAtod(req.matches.str(5), &lat2)) {
             result = {{"code", "InvalidQuery"}};
           } else {
-            result = ComputeRoute(g, find_node_indexes, hybrid, lon1, lat1,
+            result = ComputeRoute(g, sorted_node_indexes, hybrid, lon1, lat1,
                                   lon2, lat2);
           }
         }
         res.set_header("Access-Control-Allow-Origin", "*");
-        LOG_S(INFO) << result.dump(2);
         res.set_content(result.dump(), "application/json");
+        LOG_S(INFO) << result.dump(2);
+        LOG_S(INFO) << absl::StrFormat("**** elapsed: %.2f secs",
+                                       ToDoubleSeconds(absl::Now() - start));
       });
 
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
-  LOG_S(INFO) << ComputeRoute(g, find_node_indexes, /*hybrid=*/false, 8.720121,
-                              47.3476881, 8.7204095, 47.3476057)
+  LOG_S(INFO) << ComputeRoute(g, sorted_node_indexes, /*hybrid=*/false,
+                              8.720121, 47.3476881, 8.7204095, 47.3476057)
                      .dump(2);
 
   LOG_S(INFO) << CalculateAngle(0, 0, 1, 0);

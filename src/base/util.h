@@ -112,6 +112,11 @@ bool SpanContains(const ContainerT& container, const T& search) {
   return false;
 }
 
+inline bool StrSpanContains(const std::vector<std::string_view>& v,
+                            std::string_view search) {
+  return SpanContains(v, search);
+}
+
 // Add space characters to the right or the left of a string to make it 'width'
 // characters wide.
 inline std::string PadString(std::string_view str, size_t width,

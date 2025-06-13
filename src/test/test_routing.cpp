@@ -1137,6 +1137,12 @@ void TestBitFunctions() {
   CHECK_EQ_S(__builtin_ctzll(1llu << 63), 63);
 }
 
+void TestBoost() {
+
+
+}
+
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1158,6 +1164,7 @@ int main(int argc, char* argv[]) {
   TestRouteComplexTurnRestrictionNegative();
   TestRouteComplexTurnRestrictionPositive();
   TestRouteOverlappingTurnRestrictions();
+  TestBoost();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

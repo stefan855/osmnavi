@@ -12,7 +12,7 @@
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
-#include "graph/node_barriers.h"
+#include "graph/node_attributes.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
 #include "osm/access.h"
@@ -85,14 +85,16 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
   if (HighwayLabelToEnum(tagh.GetValue(osm_way, "highway")) == HW_MAX) {
     return;
   }
+
+  stats->num_ways_with_highway_tag++;
+  const size_t ref_size = osm_way.refs().size();
+  if (ref_size > 0) {
+    stats->num_edges_with_highway_tag += (osm_way.refs().size() - 1);
+    stats->num_noderefs_with_highway_tag += osm_way.refs().size();
+  }
+
   {
     std::unique_lock<std::mutex> l(mut);
-    stats->num_ways_with_highway_tag++;
-    const size_t ref_size = osm_way.refs().size();
-    if (ref_size > 0) {
-      stats->num_edges_with_highway_tag += (osm_way.refs().size() - 1);
-      stats->num_noderefs_with_highway_tag += osm_way.refs().size();
-    }
     std::int64_t running_id = 0;
     for (int ref_idx = 0; ref_idx < osm_way.refs().size(); ++ref_idx) {
       running_id += osm_way.refs(ref_idx);
@@ -101,159 +103,12 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
   }
 }
 
-#if 0
-namespace {
-// Extract access information stored with node.
-// Returns false if there is no access restriction.
-// Returns true if the node has some access restrictions. The per vehicle access
-// is returned in node_attrs.
-bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
-                     const google::protobuf::RepeatedField<int>& keys_vals,
-                     int kv_start, int kv_stop, NodeAttributes* node_attrs) {
-  node_attrs->node_id = -1;
-  if (kv_start >= kv_stop) {
-    return false;
-  }
-
-  // We apply access tags are in the following order:
-  //   1) "barrier=" type sets the default.
-  //   2) "access=" overrides everything that barrier type might have set.
-  //   3) "motor_vehicle=" sets access for all motorized traffic.
-  //   4) "bicycle=", "foot=", "horse=" etc. set access for individual vehicle
-  //      types.
-  ACCESS access = ACC_MAX;
-  ACCESS motor_vehicle_access = ACC_MAX;
-  std::string_view barrier;
-  std::string_view locked;
-
-  // Parse global tags: "access", "barrier", "motor_vehicle", "locked".
-  for (int i = kv_start; i < kv_stop; i += 2) {
-    const std::string_view key = tagh.ToString(keys_vals.at(i));
-    if (key == "access") {
-      access = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
-      if (access == ACC_MAX) {
-        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
-                                       tagh.ToString(keys_vals.at(i + 1)),
-                                       node_id);
-      }
-    } else if (key == "motor_vehicle") {
-      motor_vehicle_access = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
-      if (motor_vehicle_access == ACC_MAX) {
-        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
-                                       tagh.ToString(keys_vals.at(i + 1)),
-                                       node_id);
-      }
-    } else if (key == "barrier") {
-      barrier = tagh.ToString(keys_vals.at(i + 1));
-    } else if (key == "locked") {
-      locked = tagh.ToString(keys_vals.at(i + 1));
-    }
-  }
-
-  if (barrier.empty()) {
-    return false;
-  }
-
-  /*
-  These attributes are assumed to block passage through the node for all vehicle
-  types. Since this is the default also for unknown barrier types, the list
-  isn't actually needed.
-
-  static const std::string_view full_blocks[] = {
-      "debris",    "chain",        "barrier_board", "jersey_barrier",
-      "log",       "rope",         "yes",           "hampshire_gate",
-      "sliding_beam", "sliding_gate",  "spikes",
-      "wedge",     "wicket_gate",
-  };
-  */
-  // Barrier types that don't block passage for any vehicle by default.
-  static const std::string_view no_blocks[] = {
-      "border_control", "bump_gate", "cattle_grid", "coupure",
-      "entrance",       "lift_gate", "sally_port",  "toll_booth"};
-
-  auto& vh_acc = node_attrs->vh_acc;
-
-  if (access != ACC_MAX) {
-    // The barrier type doesn't matter, use access.
-    std::fill_n(vh_acc, VH_MAX, access);
-  } else {
-    // There was no all-overriding "access" tag, set access based on barrier.
-    std::fill_n(vh_acc, VH_MAX, ACC_NO);
-    if (barrier == "stile" || barrier == "turnstile" ||
-        barrier == "full-height_turnstile" || barrier == "kerb" ||
-        barrier == "kissing_gate") {
-      vh_acc[VH_FOOT] = ACC_YES;
-    } else if (barrier == "cycle_barrier" || barrier == "bar" ||
-               barrier == "swing_gate") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_BICYCLE] = ACC_YES;
-    } else if (barrier == "bollard" || barrier == "block" ||
-               barrier == "motorcycle_barrier" || barrier == "planter") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_BICYCLE] = ACC_YES;
-      vh_acc[VH_MOPED] = ACC_YES;
-    } else if (barrier == "gate") {
-      if (locked != "yes") {
-        std::fill_n(vh_acc, VH_MAX, ACC_YES);
-      }
-    } else if (barrier == "horse_stile") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_HORSE] = ACC_YES;
-    } else if (barrier == "bus_trap") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_BICYCLE] = ACC_YES;
-      vh_acc[VH_MOPED] = ACC_YES;
-      vh_acc[VH_PSV] = ACC_YES;
-      vh_acc[VH_HGV] = ACC_YES;
-      vh_acc[VH_BUS] = ACC_YES;
-    } else if (SpanContains(no_blocks, barrier)) {
-      std::fill_n(vh_acc, VH_MAX, ACC_YES);  // blocks no traffic by default.
-    } else {
-      ;  // Assume everything else is blocking. This includes full_blocks.
-    }
-  }
-
-  if (motor_vehicle_access != ACC_MAX) {
-    for (uint8_t vh = VH_MOTORCAR; vh < VH_MAX; ++vh) {
-      if (VehicleIsMotorized((VEHICLE)vh)) {
-        vh_acc[(VEHICLE)vh] = motor_vehicle_access;
-      }
-    }
-  }
-
-  // Now apply all more specific access tags such as bicycle=yes.
-  for (int i = kv_start; i < kv_stop; i += 2) {
-    VEHICLE vh = VehicleToEnum(tagh.ToString(keys_vals.at(i)));
-    if (vh != VH_MAX) {
-      ACCESS acc = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
-      if (acc != ACC_MAX) {
-        vh_acc[vh] = acc;
-      } else {
-        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
-                                       tagh.ToString(keys_vals.at(i + 1)),
-                                       node_id);
-      }
-    }
-  }
-
-  for (const ACCESS acc : node_attrs->vh_acc) {
-    if (acc != ACC_YES) {
-      node_attrs->node_id = node_id;
-      return true;
-    }
-  }
-  return false;
-}
-
-}  // namespace
-#endif
-
 void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
                      const HugeBitset& touched_nodes_ids,
                      DataBlockTable* node_table, GraphMetaData* meta) {
   NodeBuilder builder;
-  NodeAttributes node_attrs;
+  NodeAttribute node_attr;
 
   for (const OSMPBF::PrimitiveGroup& pg : prim_block.primitivegroup()) {
     const auto& keys_vals = pg.dense().keys_vals();
@@ -276,10 +131,10 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
 
       if (touched_nodes_ids.GetBit(node.id)) {
         if (ConsumeNodeTags(tagh, node.id, keys_vals, kv_start, kv_stop,
-                            &node_attrs)) {
-          // Store node_attrs for this node.
+                            &node_attr)) {
+          // Store node_attr for this node.
           std::unique_lock<std::mutex> l(mut);
-          meta->graph.node_attrs.push_back(node_attrs);
+          meta->graph.node_attrs.push_back(node_attr);
         }
         builder.AddNode(node);
         if (builder.pending_nodes() >= 128) {
@@ -497,7 +352,8 @@ void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
 // This keeps edge distances short when we are not sure about speed limits,
 // access rules etc.
 void MarkSeenAndNeeded(GraphMetaData* meta, const std::vector<NodeCountry>& ncs,
-                       const OSMPBF::Way& osm_way) {
+                       const OSMPBF::Way& osm_way,
+                       build_graph::BuildGraphStats* stats) {
   if (meta->opt.keep_all_nodes) {
     for (const NodeCountry& nc : ncs) {
       meta->way_nodes_seen->SetBit(nc.id, true);
@@ -527,7 +383,7 @@ void MarkSeenAndNeeded(GraphMetaData* meta, const std::vector<NodeCountry>& ncs,
   meta->way_nodes_needed->SetBit(ncs.front().id, true);
   meta->way_nodes_needed->SetBit(ncs.back().id, true);
   if (ncs.front().id == ncs.back().id) {
-    meta->stats.num_ways_closed++;
+    stats->num_ways_closed++;
   }
 
   // Find loops in the way nodes and mark all nodes in the loop as needed.
@@ -657,13 +513,11 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
 
 namespace {
 void MayStoreWayTagStats(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                         std::mutex& mut, GraphMetaData* meta) {
-  if (meta->opt.log_way_tag_stats &&
-      !tagh.GetValue(osm_way, "highway").empty()) {
+                         build_graph::BuildGraphStats* stats) {
+  if (!tagh.GetValue(osm_way, "highway").empty()) {
     std::string statkey = CreateWayTagSignature(tagh, osm_way);
     if (!statkey.empty()) {
-      std::unique_lock<std::mutex> l(mut);
-      meta->stats.way_tag_stats.Add(statkey, osm_way.id());
+      stats->way_tag_stats.Add(statkey, osm_way.id());
     }
   }
 }
@@ -694,16 +548,19 @@ inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
 // bitsets.
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
-                      GraphMetaData* meta) {
+                      GraphMetaData* meta,
+                      BuildGraphStats* stats) {
   if (osm_way.refs().size() <= 1) {
     LOG_S(INFO) << absl::StrFormat("Ignore way %lld of length %lld",
                                    osm_way.id(), osm_way.refs().size());
-    std::unique_lock<std::mutex> l(mut);
-    meta->stats.num_ways_too_short++;
+    stats->num_ways_too_short++;
     return;
   }
 
-  MayStoreWayTagStats(tagh, osm_way, mut, meta);
+  if (meta->opt.log_way_tag_stats) {
+    MayStoreWayTagStats(tagh, osm_way, stats);
+  }
+
   const HIGHWAY_LABEL highway_label =
       HighwayLabelToEnum(tagh.GetValue(osm_way, "highway"));
 
@@ -722,8 +579,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   const std::vector<NodeCountry> node_countries =
       ExtractNodeCountries(*meta, osm_way, &missing_nodes, &dup_segments);
   if (missing_nodes || node_countries.size() <= 1) {
-    std::unique_lock<std::mutex> l(mut);
-    meta->stats.num_ways_missing_nodes++;
+    stats->num_ways_missing_nodes++;
     return;
   }
   // Sets way.ncc and way.uniform_country.
@@ -760,11 +616,10 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   WriteBuff node_ids_buff;
   EncodeNodeIds(node_countries, &node_ids_buff);
-  // const uint32_t prev_num_unique = deduper->num_unique();
+  stats->num_ways_dup_segments += dup_segments;
 
   // Run modifications of global data behind a mutex.
   {
-    meta->stats.num_ways_dup_segments += dup_segments;
     std::unique_lock<std::mutex> l(mut);
     wc.way.node_ids =
         meta->graph.unaligned_pool_.AllocBytes(node_ids_buff.used());
@@ -779,7 +634,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
       wc.way.streetname[streetname.size()] = '\0';
     }
 
-    MarkSeenAndNeeded(meta, node_countries, osm_way);
+    MarkSeenAndNeeded(meta, node_countries, osm_way, stats);
 
     wc.way.wsa_id = deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
@@ -874,7 +729,7 @@ void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
                                               const OSMPBF::Way& way,
                                               int thread_idx, std::mutex& mut) {
     ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids,
-                                   &meta->stats);
+                                   &meta->Stats(thread_idx));
   });
 
   // Read all the node coordinates for nodes in 'touched_nodes_ids'.
@@ -902,7 +757,7 @@ void SortGWays(GraphMetaData* meta) {
 
 void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
   FUNC_TIMER();
-  for (const NodeAttributes& na : meta->graph.node_attrs) {
+  for (const NodeAttribute& na : meta->graph.node_attrs) {
     if (meta->way_nodes_seen->GetBit(na.node_id)) {
       meta->way_nodes_needed->SetBit(na.node_id, true);
     }
@@ -1136,154 +991,6 @@ void PopulateEdgeArrays(GraphMetaData* meta) {
   pool.WaitAllFinished();
 }
 
-#if 0
-// Iterate through all nodes and for each check if it has a barrier which blocks
-// traffic. If it does, then add a simple turn restriction that forbids passing
-// the obstacle.
-//
-// Note that traffic within ways having the attribute area=yes is not blocked,
-// i.e. it is always possible to continue within the area, even if a border node
-// of the area has a blocking barrier.
-void StoreNodeBarrierData(GraphMetaData* meta) {
-  FUNC_TIMER();
-
-  Graph& g = meta->graph;
-  const std::vector<NodeAttributes>& attrs = g.node_attrs;
-  size_t attr_idx = 0;
-  std::set<uint32_t> way_set;
-  std::set<uint32_t> way_with_area_set;
-
-  for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
-    while (attr_idx < attrs.size() &&
-           attrs.at(attr_idx).node_id < g.nodes.at(node_idx).node_id) {
-      attr_idx++;
-    }
-    if (attr_idx >= attrs.size()) {
-      break;
-    }
-
-    // LOG_S(INFO) << "Compare " << attrs.at(attr_idx).node_id << " to "
-    //             << g.nodes.at(node_idx).node_id;
-    if (attrs.at(attr_idx).node_id == g.nodes.at(node_idx).node_id) {
-      const GNode& n = g.nodes.at(node_idx);
-      const NodeAttributes na = attrs.at(attr_idx++);
-      LOG_S(INFO) << "Examine node " << n.node_id;
-      const uint32_t num_edges = gnode_num_edges(g, node_idx);
-      bool same_target = false;
-      bool self_edge = false;
-      if (num_edges == 2) {
-        uint32_t other1 = g.edges.at(n.edges_start_pos).other_node_idx;
-        uint32_t other2 = g.edges.at(n.edges_start_pos + 1).other_node_idx;
-        self_edge = (other1 == node_idx || other2 == node_idx);
-        same_target = (other1 == other2);
-      }
-      way_set.clear();
-      way_with_area_set.clear();
-      for (const GEdge& e : gnode_all_edges(g, node_idx)) {
-        const GWay& w = g.ways.at(e.way_idx);
-        if (w.area) {
-          way_with_area_set.insert(e.way_idx);
-        } else {
-          way_set.insert(e.way_idx);
-        }
-        if (w.area && !w.closed_way) {
-          LOG_S(INFO) << "Way with area but not closed " << w.id;
-        }
-      }
-
-      bool access_allowed = (na.vh_acc[VH_MOTORCAR] > ACC_PRIVATE &&
-                             na.vh_acc[VH_MOTORCAR] < ACC_MAX);
-      LOG_S(INFO) << absl::StrFormat(
-          "Node barrier on node %lld forward:%u all:%u #w-norm:%llu "
-          "#w-area:%llu same-target:%u self-edge:%d acc:%d",
-          n.node_id, n.num_edges_forward, num_edges, way_set.size(),
-          way_with_area_set.size(), same_target, self_edge,
-          (int)access_allowed);
-
-      if (access_allowed) {
-        meta->stats.num_node_barrier_free++;
-        continue;  // Nothing to do.
-      }
-
-      // Iterate overall all incoming edges.
-      LOG_S(INFO) << "AA1";
-      for (const FullGEdge& in_ge : gnode_incoming_edges(g, node_idx)) {
-        LOG_S(INFO) << "AA2";
-        const GNode other = g.nodes.at(in_ge.start_idx);
-        GEdge& in = g.edges.at(other.edges_start_pos + in_ge.offset);
-        CHECK_EQ_S(in.other_node_idx, node_idx);  // Is it really incoming?
-        const bool in_way_area = g.ways.at(in.way_idx).area;
-        uint32_t allowed_edge_bits = 0;
-        for (uint32_t offset = 0; offset < n.num_edges_forward; ++offset) {
-          const GEdge& out = g.edges.at(n.edges_start_pos + offset);
-          // If the out-edge stays on the same way as the in-edge then there are
-          // two cases when the turn is allowed:
-          //   * the way is an area.
-          //   * out-edge is a u-turn on the same way.
-          //
-          // Consider the following, complicated case. There are several bollard
-          // nodes that are part of two ways marked as areas:
-          // https://www.openstreetmap.org/node/8680967810
-          // Note that there are parallel edges from both ways between the
-          // common bollard nodes. Because of this, allowing only u-turns on the
-          // same way is important, otherwise one could easily change ways at
-          // every bollard node by doing a u-turn on the other way.
-          if ((in.way_idx == out.way_idx) &&
-              (in_way_area ||
-               (out.other_node_idx == in_ge.start_idx))) {  // u-turn
-            // Allowed to stay within area, set bit.
-            allowed_edge_bits = (allowed_edge_bits | (1u << offset));
-          }
-        }
-        if (allowed_edge_bits == 0) {
-          // There is even no u-turn possible (might be a data error).
-          LOG_S(INFO) << "AA3";
-          meta->stats.num_edge_barrier_no_uturn++;
-        } else {
-          LOG_S(INFO) << "AA4";
-          // Add/merge a pseudo turn restriction.
-          const TurnRestriction::TREdge tr_key = {
-              .from_node_idx = in_ge.start_idx,
-              .way_idx = in.way_idx,
-              .to_node_idx = in.other_node_idx,
-              .edge_idx = 0};
-          auto iter = g.simple_turn_restriction_map.find(tr_key);
-          if (iter != g.simple_turn_restriction_map.end()) {
-            SimpleTurnRestrictionData& data = iter->second;
-            if (num_edges == 2) {
-              data.allowed_edge_bits =
-                  data.allowed_edge_bits & allowed_edge_bits;
-              data.from_node = 1;
-              in.car_uturn_allowed = 1;
-              meta->stats.num_edge_barrier_merged++;
-              LOG_S(INFO) << absl::StrFormat(
-                  "Preexisting TR for barrier (merged), rel:%lld node:%lld "
-                  "#edges:%u",
-                  data.id, n.node_id, num_edges);
-            } else {
-              LOG_S(INFO) << absl::StrFormat(
-                  "Preexisting TR for barrier (ignored), rel:%lld node:%lld "
-                  "#edges:%u",
-                  data.id, n.node_id, num_edges);
-            }
-          } else {
-            // Create a pseudo turn-restriction for this edge+barrier
-            g.simple_turn_restriction_map[tr_key] = {
-                .allowed_edge_bits = allowed_edge_bits,
-                .from_relation = 0,
-                .from_node = 1,
-                .id = n.node_id};
-            g.nodes.at(node_idx).simple_turn_restriction_via_node = 1;
-            in.car_uturn_allowed = 1;
-            meta->stats.num_edge_barrier_block++;
-          }
-        }
-      }
-    }
-  }
-}
-#endif
-
 void MarkUniqueEdges(GraphMetaData* meta) {
   FUNC_TIMER();
   for (uint32_t i = 0; i < meta->graph.nodes.size(); ++i) {
@@ -1328,7 +1035,8 @@ inline bool IsUTurnAllowedEdge(const Graph& g, uint32_t node_idx,
   return false;
 }
 
-void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
+void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta,
+                          BuildGraphStats* stats) {
   std::vector<TRResult> results(reader->n_threads());
   reader->ReadRelations([&meta, &results](const OSMTagHelper& tagh,
                                           const OSMPBF::Relation& osm_rel,
@@ -1336,12 +1044,11 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta) {
     ConsumeRelation(tagh, osm_rel, meta, &results.at(thread_idx));
   });
   for (const TRResult& res : results) {
-    meta->stats.num_turn_restriction_success += res.num_success;
-    meta->stats.max_turn_restriction_via_ways = std::max(
-        meta->stats.max_turn_restriction_via_ways, res.max_success_via_ways);
-    meta->stats.num_turn_restriction_error += res.num_error;
-    meta->stats.num_turn_restriction_error_connection +=
-        res.num_error_connection;
+    stats->num_turn_restriction_success += res.num_success;
+    stats->max_turn_restriction_via_ways = std::max(
+        stats->max_turn_restriction_via_ways, res.max_success_via_ways);
+    stats->num_turn_restriction_error += res.num_error;
+    stats->num_turn_restriction_error_connection += res.num_error_connection;
     for (const TurnRestriction& tr : res.trs) {
       if (tr.via_is_node) {
         CHECK_EQ_S(tr.path.size(), 2);
@@ -1407,14 +1114,14 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   build_clusters::AssignClusterColors(&(meta->graph));
 }
 
-void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
+void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
+               BuildGraphStats* stats) {
   FUNC_TIMER();
   const Graph& g = meta->graph;
-  BuildGraphStats& stats = meta->stats;
 
-  stats.num_nodes_in_pbf = reader.CountEntries(OsmPbfReader::ContentNodes);
-  stats.num_ways_in_pbf = reader.CountEntries(OsmPbfReader::ContentWays);
-  stats.num_relations_in_pbf =
+  stats->num_nodes_in_pbf = reader.CountEntries(OsmPbfReader::ContentNodes);
+  stats->num_ways_in_pbf = reader.CountEntries(OsmPbfReader::ContentWays);
+  stats->num_relations_in_pbf =
       reader.CountEntries(OsmPbfReader::ContentRelations);
 
   for (const GWay& w : g.ways) {
@@ -1424,80 +1131,83 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
 
     if (RoutableAccess(ra_forw.access) && RoutableAccess(ra_backw.access) &&
         ra_forw.maxspeed != ra_backw.maxspeed) {
-      stats.num_ways_diff_maxspeed += 1;
+      stats->num_ways_diff_maxspeed += 1;
     }
     if ((RoutableAccess(ra_forw.access) && ra_forw.maxspeed == 0) ||
         (RoutableAccess(ra_backw.access) && ra_backw.maxspeed == 0)) {
-      stats.num_ways_no_maxspeed += 1;
+      stats->num_ways_no_maxspeed += 1;
     }
-    stats.num_ways_has_country += w.uniform_country;
-    stats.num_ways_has_streetname += w.streetname == nullptr ? 0 : 1;
-    stats.num_ways_oneway_car +=
+    stats->num_ways_has_country += w.uniform_country;
+    stats->num_ways_has_streetname += w.streetname == nullptr ? 0 : 1;
+    stats->num_ways_oneway_car +=
         (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
     if ((FreeAccess(wsa.ra[0].access) && RestrictedAccess(wsa.ra[1].access)) ||
         (RestrictedAccess(wsa.ra[0].access) && FreeAccess(wsa.ra[1].access))) {
       LOG_S(INFO) << "Way has mixed restrictions: " << w.id;
-      stats.num_ways_mixed_restricted_car += 1;
+      stats->num_ways_mixed_restricted_car += 1;
     }
   }
 
+  std::vector<uint64_t> num_forwards(MAX_NUM_EDGES_OUT + 1, 0);
   for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
     const GNode& n = g.nodes.at(node_idx);
     if (n.cluster_id != INVALID_CLUSTER_ID) {
-      stats.num_nodes_in_cluster++;
+      stats->num_nodes_in_cluster++;
     }
     if (n.large_component == 0) {
-      stats.num_nodes_in_small_component++;
+      stats->num_nodes_in_small_component++;
     }
-    stats.num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
-    stats.num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
-    stats.num_edges_at_simple_tr_via +=
+    stats->num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
+    stats->num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
+    stats->num_edges_at_simple_tr_via +=
         n.simple_turn_restriction_via_node ? n.num_edges_forward : 0;
 
     int64_t num_edges_inverted = 0;
     int64_t num_edges_forward = 0;
+    num_forwards.at(n.num_edges_forward)++;
+
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
       const GNode& other = g.nodes.at(e.other_node_idx);
       // const bool edge_dead_end = n.dead_end || other.dead_end;
       if (!e.unique_other) {
-        stats.num_edges_non_unique++;
+        stats->num_edges_non_unique++;
       }
       num_edges_inverted += e.inverted;
       num_edges_forward += (e.inverted == 0);
 
       if (!e.inverted && e.other_node_idx != node_idx) {
-        stats.sum_edge_length_cm += e.distance_cm;
+        stats->sum_edge_length_cm += e.distance_cm;
         if (e.distance_cm == 0) {
           LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
                       << other.node_id;
         }
-        stats.min_edge_length_cm =
-            std::min(stats.min_edge_length_cm, (int64_t)e.distance_cm);
-        stats.max_edge_length_cm =
-            std::max(stats.max_edge_length_cm, (int64_t)e.distance_cm);
-        stats.num_edges_forward_car_restr_unset +=
+        stats->min_edge_length_cm =
+            std::min(stats->min_edge_length_cm, (int64_t)e.distance_cm);
+        stats->max_edge_length_cm =
+            std::max(stats->max_edge_length_cm, (int64_t)e.distance_cm);
+        stats->num_edges_forward_car_restr_unset +=
             (e.car_label == GEdge::LABEL_UNSET);
-        stats.num_edges_forward_car_restr_free +=
+        stats->num_edges_forward_car_restr_free +=
             (e.car_label == GEdge::LABEL_FREE);
-        stats.num_edges_forward_car_restricted +=
+        stats->num_edges_forward_car_restricted +=
             (e.car_label == GEdge::LABEL_RESTRICTED);
-        stats.num_edges_forward_car_restricted2 +=
+        stats->num_edges_forward_car_restricted2 +=
             (e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
-        stats.num_edges_forward_car_strange += e.car_label_strange;
+        stats->num_edges_forward_car_strange += e.car_label_strange;
         CHECK_S(e.car_label_strange == 0 ||
                 e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
         CHECK_NE_S(e.car_label, GEdge::LABEL_TEMPORARY);
-        stats.num_edges_forward_car_forbidden +=
+        stats->num_edges_forward_car_forbidden +=
             !RoutableAccess(GetRAFromWSA(g, e, VH_MOTORCAR).access);
       }
-      stats.num_cross_country_edges += (e.contra_way && e.cross_country);
-      stats.num_cross_country_restricted +=
+      stats->num_cross_country_edges += (e.contra_way && e.cross_country);
+      stats->num_cross_country_restricted +=
           (e.contra_way && e.cross_country && e.car_label != GEdge::LABEL_FREE);
       if (n.cluster_id != other.cluster_id &&
           n.cluster_id != INVALID_CLUSTER_ID &&
           other.cluster_id != INVALID_CLUSTER_ID) {
-        stats.num_cross_cluster_edges += 1;
-        stats.num_cross_cluster_restricted +=
+        stats->num_cross_cluster_edges += 1;
+        stats->num_cross_cluster_restricted +=
             (e.car_label != GEdge::LABEL_FREE);
         if (e.car_label != GEdge::LABEL_FREE) {
           LOG_S(INFO) << absl::StrFormat(
@@ -1507,23 +1217,27 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta) {
         }
         // By construction, this is 0, because dead-ends are omitted from
         // clusters.
-        // stats.num_cross_cluster_restricted_dead_end +=
+        // stats->num_cross_cluster_restricted_dead_end +=
         //     (e.car_label != GEdge::LABEL_FREE && edge_dead_end);
       }
     }
-    stats.max_edges =
-        std::max(stats.max_edges, num_edges_forward + num_edges_inverted);
-    stats.num_edges_forward += num_edges_forward;
-    stats.num_edges_inverted += num_edges_inverted;
-    stats.max_edges_out = std::max(stats.max_edges_out, num_edges_forward);
-    stats.max_edges_inverted =
-        std::max(stats.max_edges_inverted, num_edges_inverted);
+    stats->max_edges =
+        std::max(stats->max_edges, num_edges_forward + num_edges_inverted);
+    stats->num_edges_forward += num_edges_forward;
+    stats->num_edges_inverted += num_edges_inverted;
+    stats->max_edges_out = std::max(stats->max_edges_out, num_edges_forward);
+    stats->max_edges_inverted =
+        std::max(stats->max_edges_inverted, num_edges_inverted);
+  }
+  for (size_t i = 0; i <= MAX_NUM_EDGES_OUT; ++i) {
+    LOG_S(INFO) << absl::StrFormat(
+        "Num nodes with %llu out edges: %llu (%2.2f%%)", i, num_forwards.at(i),
+        (100.0 * num_forwards.at(i)) / (g.nodes.size() + 0.01));
   }
 }
 
-void PrintStats(const GraphMetaData& meta) {
+void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   const Graph& graph = meta.graph;
-  const BuildGraphStats& stats = meta.stats;
 
   LOG_S(INFO) << "=========== Pbf Stats ============";
   LOG_S(INFO) << absl::StrFormat("Nodes:              %12lld",
@@ -1705,15 +1419,14 @@ void PrintStats(const GraphMetaData& meta) {
                                      1000000.0);
 }
 
-void PrintWayTagStats(const GraphMetaData& meta) {
-  const FrequencyTable& ft = meta.stats.way_tag_stats;
+void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
   const std::vector<FrequencyTable::Entry> v = ft.GetSortedElements();
   for (size_t i = 0; i < v.size(); ++i) {
     const FrequencyTable::Entry& e = v.at(i);
     char cc[3] = "--";  // Way not found, can easily happen because many ways
                         // are not stored in the graph.
     {
-      const GWay* way = meta.graph.FindWay(e.example_id);
+      const GWay* way = g.FindWay(e.example_id);
       if (way != nullptr) {
         strcpy(cc, ">1");
         if (way->uniform_country) {
@@ -1740,11 +1453,18 @@ void MarkUTurnAllowedEdges(Graph* g) {
   }
 }
 
+BuildGraphStats CollectThreadStats(
+    const std::vector<BuildGraphStats>& thread_stats) {
+  BuildGraphStats stats;
+  for (const auto& s : thread_stats) {
+    stats.AddStats(s);
+  }
+  return stats;
+}
+
 GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   GraphMetaData meta;
   meta.opt = opt;
-  meta.way_nodes_seen.reset(new HugeBitset);
-  meta.way_nodes_needed.reset(new HugeBitset);
   meta.node_table.reset(new DataBlockTable);
 
   // Reading is fastest with 7 threads on my hardware.
@@ -1777,7 +1497,8 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     reader.ReadWays([&deduper, &meta](const OSMTagHelper& tagh,
                                       const OSMPBF::Way& way, int thread_idx,
                                       std::mutex& mut) {
-      ConsumeWayWorker(tagh, way, mut, &deduper, &meta);
+      ConsumeWayWorker(tagh, way, mut, &deduper, &meta,
+                       &meta.Stats(thread_idx));
     });
     {
       // Sort and build the vector with shared way attributes.
@@ -1822,23 +1543,27 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   }
 #endif
 
-  LoadTurnRestrictions(&reader, &meta);
-  StoreNodeBarrierData(&meta);
+  LoadTurnRestrictions(&reader, &meta, &meta.Stats());
+  StoreNodeBarrierData(&meta.graph, &meta.Stats());
   FindLargeComponents(&meta.graph);
-  meta.stats.num_dead_end_nodes = ApplyTarjan(meta.graph);
+  meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
   MarkUTurnAllowedEdges(&(meta.graph));
 
   ClusterGraph(meta.opt, &meta);
 
-  // Output.
+  // Add up all the per thread stats.
+  meta.global_stats = CollectThreadStats(*meta.thread_stats);
+
+  // Output way tag stats early (it is often a lot of lines).
   if (meta.opt.log_way_tag_stats) {
-    PrintWayTagStats(meta);
+    PrintWayTagStats(meta.graph, meta.global_stats.way_tag_stats);
   }
   ValidateGraph(meta.graph);
-  FillStats(reader, &meta);
-  PrintStats(meta);
+  FillStats(reader, &meta, &meta.global_stats);
+  PrintStats(meta, meta.global_stats);
   LogMemoryUsage();
+
   return meta;
 }
 }  // namespace build_graph

@@ -374,14 +374,6 @@ class EdgeRouter {
                   << " cluster:" << expansion_node.cluster_id;
     }
 
-    /*
-     * Doesn't work, need enable u-turns.
-    if (expansion_node.car_no_traffic && ctx.opt.vt == VH_MOTORCAR &&
-        prev.v_idx != INFU32) {
-      return;
-    }
-    */
-
     // The node with 'uturn_node_idx' represents a forbidden u-turn.
     uint32_t uturn_forbidden_node_idx = INFU32;
     // Compute a bitset that has bits for all the allowed edge offsets.
@@ -397,9 +389,9 @@ class EdgeRouter {
                .to_node_idx = prev.other_idx});
           if (iter != g_.simple_turn_restriction_map.end()) {
             if (verbosity_ >= 3) {
-              LOG_S(INFO) << absl::StrFormat(
-                  "*** TR found %s id:%lld",
-                  iter->second.id_name(), iter->second.id);
+              LOG_S(INFO) << absl::StrFormat("*** TR found %s id:%lld",
+                                             iter->second.id_name(),
+                                             iter->second.id);
             }
             allowed_offset_bits = iter->second.allowed_edge_bits;
           }
@@ -489,6 +481,10 @@ class EdgeRouter {
       }
     }
 
+    // Check if we have to travel an edge inside a cluster. These edges are
+    // special, they don't exist in the real graph and represent the
+    // precomputed, shortest connections between two border nodes within a
+    // cluster.
     if (ctx.opt.hybrid.on && expansion_node.cluster_border_node &&
         expansion_node.cluster_id != ctx.opt.hybrid.start_cluster_id &&
         expansion_node.cluster_id != ctx.opt.hybrid.target_cluster_id) {

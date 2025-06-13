@@ -14,9 +14,21 @@
 
 // Attributes extracted from node key-val pairs.
 // Currently, only barrier based access restrictions are extracted.
-struct NodeAttributes {
-  int64_t node_id : 40;
-  // Access for each individual vehicle type.
+struct NodeAttribute {
+  int64_t node_id : 40 = 0;
+
+  // has_bit_attr is true if any of the directly following bits below is 1.
+  std::uint32_t has_bit_attr : 1 = 0;
+  std::uint32_t bit_turning_circle : 1 = 0;
+  std::uint32_t bit_stop : 1 = 0;
+  std::uint32_t bit_traffic_signals : 1 = 0;
+  std::uint32_t bit_crossing : 1 = 0;
+  std::uint32_t bit_railway_crossing : 1 = 0;
+  std::uint32_t bit_public_transport : 1 = 0;
+  std::uint32_t bit_traffic_calming : 1 = 0;
+
+  // Access for each individual vehicle type for barriers.
+  std::uint32_t has_barrier : 1 = 0;
   ACCESS vh_acc[VH_MAX];
 };
 
@@ -139,8 +151,21 @@ struct GNode {
   // Country associated with lat/lon.
   std::uint16_t ncc : 10 = INVALID_NCC;
 
-  // True iff the node is a via node in a simple turn restriction.
+  // True iff the node is the via node in a simple turn restriction.
   std::uint32_t simple_turn_restriction_via_node : 1;
+
+  // Node has special keyvals.
+  std::uint32_t has_node_attrs : 1;
+  // Attributes that represent special keyvals stored in g.node_attrs. If
+  // has_node_attrs is 0 then all of the following bits must be 0 too.
+  std::uint32_t turning_circle : 1;
+  std::uint32_t stop : 1;
+  std::uint32_t traffic_signals : 1;
+  std::uint32_t pedestrian_crossing : 1;
+  std::uint32_t railway_crossing : 1;
+  std::uint32_t public_transport_platform : 1;
+  std::uint32_t toll_booth : 1;
+  std::uint32_t traffic_calming : 1;
 
   std::int32_t lat = 0;
   std::int32_t lon = 0;
@@ -255,7 +280,7 @@ struct Graph {
 
   static constexpr uint32_t kLargeComponentMinSize = 20000;
 
-  std::vector<NodeAttributes> node_attrs;
+  std::vector<NodeAttribute> node_attrs;
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
