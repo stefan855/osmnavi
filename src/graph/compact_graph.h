@@ -370,7 +370,8 @@ class CompactDirectedGraph {
 
   // Complex turn restrictions, involving more than 3 nodes.
   // The map is indexed by the first trigger edge index and contains an index to
-  // the first complex turn restriction in the vector below.
+  // the first complex turn restriction (starting at the trigger edge) in the
+  // vector below.
   absl::flat_hash_map<uint32_t, uint32_t> complex_tr_map_;
   std::vector<ComplexTurnRestriction> complex_trs_;
 };

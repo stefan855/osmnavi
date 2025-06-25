@@ -232,10 +232,17 @@ struct GraphMetaData final {
     return thread_stats->at(thread_idx);
   }
 
+  // Delete data that probably isn't needed after the creation of the graph.
   void ClearTempData() {
-    way_nodes_seen.reset(nullptr);
-    way_nodes_needed.reset(nullptr);
-    thread_stats.reset(nullptr);
+    if (way_nodes_seen.get() != nullptr) {
+      way_nodes_seen.reset(nullptr);
+    }
+    if (way_nodes_needed.get() != nullptr) {
+      way_nodes_needed.reset(nullptr);
+    }
+    if (thread_stats.get() != nullptr) {
+      thread_stats.reset(nullptr);
+    }
   }
 };
 

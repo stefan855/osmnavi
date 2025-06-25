@@ -15,6 +15,7 @@
 #include "graph/node_attributes.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
+#include "graph/turn_costs.h"
 #include "osm/access.h"
 #include "osm/key_bits.h"
 #include "osm/maxspeed.h"
@@ -548,8 +549,7 @@ inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
 // bitsets.
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                       std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
-                      GraphMetaData* meta,
-                      BuildGraphStats* stats) {
+                      GraphMetaData* meta, BuildGraphStats* stats) {
   if (osm_way.refs().size() <= 1) {
     LOG_S(INFO) << absl::StrFormat("Ignore way %lld of length %lld",
                                    osm_way.id(), osm_way.refs().size());
@@ -658,6 +658,9 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const std::uint64_t distance_cm, bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
+  CHECK_LE_S(distance_cm, MAX_EDGE_DISTANCE_CM)
+      << absl::StrFormat("Node %lld->%lld way %lld", n.node_id, other.node_id,
+                         GetGWayIdSafe(g, way_idx));
   const int64_t edge_start = n.edges_start_pos;
   const int64_t edge_stop = gnode_edge_stop(g, start_idx);
   int64_t ep;
@@ -1037,6 +1040,7 @@ inline bool IsUTurnAllowedEdge(const Graph& g, uint32_t node_idx,
 
 void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta,
                           BuildGraphStats* stats) {
+  // Get data.
   std::vector<TRResult> results(reader->n_threads());
   reader->ReadRelations([&meta, &results](const OSMTagHelper& tagh,
                                           const OSMPBF::Relation& osm_rel,
@@ -1059,12 +1063,14 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta,
     }
   }
 
+  // Store simple turn restrictions.
   SortTurnRestrictions(&(meta->simple_turn_restrictions));
   meta->graph.simple_turn_restriction_map = ComputeSimpleTurnRestrictionMap(
       meta->graph, meta->opt.verb_turn_restrictions,
       meta->simple_turn_restrictions);
   MarkSimpleViaNodes(&(meta->graph));
 
+  // Store complex turn restrictions.
   SortTurnRestrictions(&(meta->graph.complex_turn_restrictions));
   meta->graph.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
       meta->opt.verb_turn_restrictions, meta->graph.complex_turn_restrictions);
@@ -1149,6 +1155,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
   }
 
   std::vector<uint64_t> num_forwards(MAX_NUM_EDGES_OUT + 1, 0);
+  std::vector<int64_t> num_forwards_node_id(MAX_NUM_EDGES_OUT + 1, 0);
   for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
     const GNode& n = g.nodes.at(node_idx);
     if (n.cluster_id != INVALID_CLUSTER_ID) {
@@ -1165,6 +1172,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     int64_t num_edges_inverted = 0;
     int64_t num_edges_forward = 0;
     num_forwards.at(n.num_edges_forward)++;
+    if (absl::ToInt64Nanoseconds(absl::Now() - absl::Time()) %
+            num_forwards.at(n.num_edges_forward) ==
+        0) {
+      num_forwards_node_id.at(n.num_edges_forward) = n.node_id;
+    }
 
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
       const GNode& other = g.nodes.at(e.other_node_idx);
@@ -1231,8 +1243,10 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
   }
   for (size_t i = 0; i <= MAX_NUM_EDGES_OUT; ++i) {
     LOG_S(INFO) << absl::StrFormat(
-        "Num nodes with %llu out edges: %llu (%2.2f%%)", i, num_forwards.at(i),
-        (100.0 * num_forwards.at(i)) / (g.nodes.size() + 0.01));
+        "Num nodes with %llu out edges: %llu (%2.2f%%) example_id:%lld", i,
+        num_forwards.at(i),
+        (100.0 * num_forwards.at(i)) / (g.nodes.size() + 0.01),
+        num_forwards_node_id.at(i));
   }
 }
 

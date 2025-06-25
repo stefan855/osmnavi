@@ -1157,6 +1157,142 @@ void TestCalculateDistance() {
   LOG_S(INFO) << "TestCalculateDistance() finished";
 }
 
+uint32_t ComputeAngle(double lat1, double lon1, double lat2, double lon2) {
+  const int32_t lat1n = std::lround(lat1 * TEN_POW_7);
+  const int32_t lon1n = std::lround(lon1 * TEN_POW_7);
+  const int32_t lat2n = std::lround(lat2 * TEN_POW_7);
+  const int32_t lon2n = std::lround(lon2 * TEN_POW_7);
+  const uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
+  return angle_to_east_degrees(lat1n, lon1n, lat2n, lon2n, length_cm);
+}
+
+uint32_t TestAngle(double lat1, double lon1, double lat2, double lon2,
+                   uint32_t expected) {
+  /*
+  const int32_t lat1n = std::lround(lat1 * TEN_POW_7);
+  const int32_t lon1n = std::lround(lon1 * TEN_POW_7);
+  const int32_t lat2n = std::lround(lat2 * TEN_POW_7);
+  const int32_t lon2n = std::lround(lon2 * TEN_POW_7);
+  uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
+  uint32_t angle = angle_to_east_degrees(lat1n, lon1n, lat2n, lon2n, length_cm);
+  */
+  uint32_t angle = ComputeAngle(lat1, lon1, lat2, lon2);
+  LOG_S(INFO) << absl::StrFormat("Edge (%.1f,%.1f) to (%.1f,%.1f) has angle %d",
+                                 lat1, lon1, lat2, lon2, angle);
+  CHECK_EQ_S(angle, expected)
+      << absl::StrFormat("Edge (%.7f,%.7f) to (%.7f,%.7f) has angle %d", lat1,
+                         lon1, lat2, lon2, angle);
+  return angle;
+}
+
+void TestEdgeAngles() {
+  FUNC_TIMER();
+  // Check the angles of edges going from lat/long (0,0) to some points on the
+  // rectangle of +-1 degree around (0,0).
+  // The angle of (0,0) to (0.5,1) was manually verified to be approximately 27
+  // degrees, using the following python formula:
+  //   math.asin(0.5/math.sqrt(1+0.5*0.5)) / math.pi * 180
+  TestAngle(0.0, 0.0, 0.0, 1.0, /*expected=*/0);
+  TestAngle(0.0, 0.0, 0.5, 1.0, /*expected=*/27);
+  TestAngle(0.0, 0.0, 1.0, 1.0, /*expected=*/45);
+  TestAngle(0.0, 0.0, 1.0, 0.5, /*expected=*/63);
+
+  TestAngle(0.0, 0.0, 1.0, 0.0, /*expected=*/90);
+  TestAngle(0.0, 0.0, 1.0, -0.5, /*expected=*/117);
+  TestAngle(0.0, 0.0, 1.0, -1.0, /*expected=*/135);
+  TestAngle(0.0, 0.0, 0.5, -1.0, /*expected=*/153);
+
+  TestAngle(0.0, 0.0, 0.0, -1.0, /*expected=*/180);
+  TestAngle(0.0, 0.0, -0.5, -1.0, /*expected=*/207);
+  TestAngle(0.0, 0.0, -1.0, -1.0, /*expected=*/225);
+  TestAngle(0.0, 0.0, -1.0, -0.5, /*expected=*/243);
+
+  TestAngle(0.0, 0.0, -1.0, 0.0, /*expected=*/270);
+  TestAngle(0.0, 0.0, -1.0, 0.5, /*expected=*/297);
+  TestAngle(0.0, 0.0, -1.0, 1.0, /*expected=*/315);
+  TestAngle(0.0, 0.0, -0.5, 1.0, /*expected=*/333);
+
+  // This code shifts the edge (0,0) to (1,1) north in every step.
+  // The angle should grow as we get closer to the pole because the latitude
+  // circle is shrinking.
+  uint32_t prev_angle = 45;
+  for (uint32_t i = 4; i < 90; i += 5) {
+    const int32_t lat1 = i * TEN_POW_7;
+    const int32_t lon1 = 0;
+    const int32_t lat2 = (i + 1) * TEN_POW_7;
+    const int32_t lon2 = TEN_POW_7;
+    uint32_t length_cm = calculate_distance(lat1, lon1, lat2, lon2);
+    uint32_t angle = angle_to_east_degrees(lat1, lon1, lat2, lon2, length_cm);
+    LOG_S(INFO) << absl::StrFormat("angle of (%u,%u)->(%u,%u) is %u", i, 0,
+                                   i + 1, 1, angle);
+    CHECK_GE_S(angle, prev_angle);
+    prev_angle = angle;
+  }
+}
+
+void TestAngleBetweenEdges() {
+  FUNC_TIMER();
+  CHECK_EQ_S(angle_between_edges(0, 0), 0);
+  CHECK_EQ_S(angle_between_edges(1, 0), 1);
+  CHECK_EQ_S(angle_between_edges(0, 1), 1);
+  CHECK_EQ_S(angle_between_edges(30, 0), 30);
+  CHECK_EQ_S(angle_between_edges(0, 30), 30);
+
+  CHECK_EQ_S(angle_between_edges(0, 179), 179);
+  CHECK_EQ_S(angle_between_edges(0, 180), 180);
+  CHECK_EQ_S(angle_between_edges(0, 181), 179);
+
+  CHECK_EQ_S(angle_between_edges(179, 0), 179);
+  CHECK_EQ_S(angle_between_edges(180, 0), 180);
+  CHECK_EQ_S(angle_between_edges(181, 0), 179);
+
+  CHECK_EQ_S(angle_between_edges(269, 0), 91);
+  CHECK_EQ_S(angle_between_edges(270, 0), 90);
+  CHECK_EQ_S(angle_between_edges(271, 0), 89);
+
+  CHECK_EQ_S(angle_between_edges(0, 359), 1);
+
+  CHECK_EQ_S(angle_between_edges(90, 269), 179);
+  CHECK_EQ_S(angle_between_edges(90, 270), 180);
+  CHECK_EQ_S(angle_between_edges(90, 271), 179);
+}
+
+void TestRealAngles() {
+  FUNC_TIMER();
+  // Test a real junction: https://www.openstreetmap.org/node/28581626
+  // Mid-Node:   28581626, latlon=47.3779735, 8.5267194
+  // Nodes with estimated angles to east beam:
+  // 1. North:    3946827990, latlon=47.3784253, 8.5269862 angle:70
+  // 2. West:    12456090319, latlon=47.3779953, 8.5266785 angle:140
+  // 3. South:      28581602, latlon=47.3773794, 8.5263690 angle:250
+  // 4. East:     6165393392, latlon=47.3779501, 8.5267669 angle:320
+
+  // All edges go from mid point to outer point. The estimated angles (see
+  // above) have been adjusted to the returned angles after checking they are
+  // not deviating significantly.
+  int angle1 = TestAngle(47.3779735, 8.5267194, 47.3784253, 8.5269862, 68);
+  int angle2 = TestAngle(47.3779735, 8.5267194, 47.3779953, 8.5266785, 142);
+  int angle3 = TestAngle(47.3779735, 8.5267194, 47.3773794, 8.5263690, 248);
+  int angle4 = TestAngle(47.3779735, 8.5267194, 47.3779501, 8.5267669, 324);
+
+  // Test angles between some edges. 
+  CHECK_EQ_S(angle_between_edges(angle1, angle2), 74); 
+  CHECK_EQ_S(angle_between_edges(angle1, angle3), 180); 
+  CHECK_EQ_S(angle_between_edges(angle1, angle4), 104); 
+
+  CHECK_EQ_S(angle_between_edges(angle2, angle3), 106); 
+  CHECK_EQ_S(angle_between_edges(angle2, angle4), 178); 
+  CHECK_EQ_S(angle_between_edges(angle2, angle1), 74); 
+
+  CHECK_EQ_S(angle_between_edges(angle3, angle4), 76); 
+  CHECK_EQ_S(angle_between_edges(angle3, angle1), 180); 
+  CHECK_EQ_S(angle_between_edges(angle3, angle2), 106); 
+
+  CHECK_EQ_S(angle_between_edges(angle4, angle1), 104); 
+  CHECK_EQ_S(angle_between_edges(angle4, angle2), 178); 
+  CHECK_EQ_S(angle_between_edges(angle4, angle3), 76); 
+}
+
 void TestDeDuperWithIdsInt() {
   DeDuperWithIds<int> dd;
 
@@ -1313,6 +1449,10 @@ int main(int argc, char* argv[]) {
   TestDeDuperWithIdsInt();
   TestDeDuperWithIdsString();
   TestClosestPoint();
+
+  TestEdgeAngles();
+  TestAngleBetweenEdges();
+  TestRealAngles();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

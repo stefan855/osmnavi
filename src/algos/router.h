@@ -210,7 +210,7 @@ class Router {
 
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        {.distance_cm = static_cast<uint64_t>(
+        {.distance_cm = static_cast<uint32_t>(
              1.00 * calculate_distance(node.lat, node.lon, ctx.target_lat,
                                        ctx.target_lon)),
          .contra_way = 0});

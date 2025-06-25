@@ -120,7 +120,6 @@ constexpr std::uint32_t MAX_CLUSTER_ID = INVALID_CLUSTER_ID - 1;
 constexpr std::uint32_t NUM_EDGES_OUT_BITS = 5;
 constexpr std::uint32_t MAX_NUM_EDGES_OUT = (1 << NUM_EDGES_OUT_BITS) - 1;
 
-struct GEdge;
 struct GNode {
   std::int64_t node_id : 40;
   // 1 iff the node is in a large component of the graph.
@@ -171,6 +170,14 @@ struct GNode {
   std::int32_t lon = 0;
 };
 
+// TODO: 32 bits are needed to represent all distances on earth, but for edges
+// this is only actually used when calculating heuristic distances for AStar.
+// For real edges, something like 25 bits (335km) would probably be enough.
+constexpr std::uint32_t MAX_EDGE_DISTANCE_CM_BITS = 32;
+// roughly 1342 km.
+constexpr std::uint32_t MAX_EDGE_DISTANCE_CM =
+    (1ull << MAX_EDGE_DISTANCE_CM_BITS) - 1;
+
 struct GEdge {
   enum RESTRICTION : uint8_t {
     LABEL_UNSET = 0,
@@ -187,45 +194,46 @@ struct GEdge {
   std::uint32_t other_node_idx;
   std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
-  std::uint64_t distance_cm : 40;
+  // std::uint64_t distance_cm : 40;
+  std::uint32_t distance_cm : MAX_EDGE_DISTANCE_CM_BITS;
   // True iff this is the first time 'other_node_idx' has this value in the list
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
-  std::uint64_t unique_other : 1;
+  std::uint32_t unique_other : 1;
   // This edge connects two components in the undirected graph. Removing it
   // creates two non-connected subgraphs. The nodes in the smaller of the two
   // subgraphs are all marked 'dead end'. The other component has 'dead_end' set
   // to 0 for all nodes.
   // Note: Only bridges connect dead-end with non-dead-end nodes.
-  std::uint64_t bridge : 1;
+  std::uint32_t bridge : 1;
   // Each node in a dead-end has at least one edge that is marked 'to_bridge' or
   // 'bridge', i.e. by following edges with 'to_bridge==1' the bridge can be
   // found with a simple iteration instead of some thing more expensive such as
   // a BFS.
-  std::uint64_t to_bridge : 1;
+  std::uint32_t to_bridge : 1;
   // DIR_FORWARD (==0) or DIR_BACKWARD (==1), to indicate the
   // direction of the edge relative to the direction of the way. Is not typed
   // 'DIRECTION' because it can not hold all values of that enum. Important for
   // example when selecting forward/backward speed.
-  std::uint64_t contra_way : 1;
+  std::uint32_t contra_way : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
-  std::uint64_t cross_country : 1;
+  std::uint32_t cross_country : 1;
   // True iff this edge exists in reality only in the other direction. The
   // inverted edge is added to enable backward search.
-  std::uint64_t inverted : 1;
+  std::uint32_t inverted : 1;
   // True if the edge represents a way that enables both directions for at least
   // one vehicle. In this case, there are two out edges at both end nodes.
   // If false, then the way only enables one direction, and the other direction
   // is represented by an inverted edge at the other node.
   // Inverted edges always have false as value.
-  std::uint64_t both_directions : 1;
+  std::uint32_t both_directions : 1;
   // TODO: If the edge is restricted in access (DESTINATION etc). For cars only.
   RESTRICTION car_label : 3;
   // If there was some issue when setting the car label, such as a
   // restricted-secondary road that is a highway.
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
-  std::uint64_t car_label_strange : 1;
+  std::uint32_t car_label_strange : 1;
   // True if at 'other_node_idx' it is allowed to travel back to 'from' node of
   // this edge. There are two cases for this that are selected automatically. It
   // is always allowed to do a u-turn at an endpoint of a street. Additionally,

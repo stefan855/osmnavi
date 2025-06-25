@@ -45,8 +45,9 @@ class ComponentAnalyzer {
 
     for (const auto& comp : comps) {
       LOG_S(INFO) << absl::StrFormat(
-          "Keep component start:%u size:%u (%.2f%% of %u)", comp.start_node,
-          comp.size, (100.0 * comp.size) / g_.nodes.size(), g_.nodes.size());
+          "Keep component start:%lld size:%u (%.2f%% of %u)",
+          GetGNodeIdSafe(g_, comp.start_node), comp.size,
+          (100.0 * comp.size) / g_.nodes.size(), g_.nodes.size());
     }
     return comps;
   }
