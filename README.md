@@ -32,17 +32,17 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Support turn restrictions, including turn restrictions having multiple via-ways.
 1. Support access=destination and other kinds of restrictions.
 1. Support interactive routing in the browser.
+1. Handle gates, bollards and similar obstacles.
+1. Compute angles for edges. Needed for display in interactive routing, and for computing turn costs.
   
 ## Current Tasks
-* Handle gates, bollards and similar obstacles.
-* Compute angles for edges. Needed for display in interactive routing, and to later for computing turn costs.
+* Compute turn costs and use in routing.
 
 ## Tasks ahead
-1. Compute turn costs and add to routing.
+1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 2. Store the routing graph in a file. Currently, the import of OSM data is re-done from scratch every time the routing graph is needed (see [build_graph_main.cpp](./src/bin/build_graph_main.cpp)).
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 1. Add routing configs for more countries (see [routing.cfg](config/routing.cfg)).
-1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
 1. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
 1. Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are only useful for the user experience during navigation.
@@ -50,5 +50,53 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 
 ## Installation hints
 1. Code is developed on a 64-bit PC (AMD64) using Ubuntu Linux. I haven't tried compiling or running it on any other operating system or platform.
-1. The libraries abseil-cpp and cpp-httplib are imported as submodules. Run submodule update --init --recursive after cloning.
-1. The libraries libgd-dev, libosmpbf-dev, zlib1g-dev and nlohmann-json3-dev have to be installed on the system.
+2. Recently, I installed the repo on a clean install on kubuntu 25.4. Here are my notes:
+```
+sudo apt-get update && sudo apt-get install build-essential
+sudo apt-get install protobuf-compiler libprotobuf-dev
+sudo apt install libgd-dev
+sudo apt install libosmpbf-dev
+sudo apt install nlohmann-json3-dev
+
+cd ~
+mkdir src; cd src
+mkdir osm; cd osm
+
+# Download version 3.2.12 from https://github.com/perliedman/leaflet-routing-machine/releases 
+# and unpack it in the osm directory:
+tar xf ~/Downloads/leaflet-routing-machine-3.2.12.tar.gz
+
+git clone https://github.com/stefan855/osmnavi
+cd osmnavi
+git submodule update --init --recursive
+mkdir release
+cd release/
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j 16
+
+mkdir ../../data
+# Download a planet dump and a smaller dump (for instance Switzerland) and store them in ../../data
+# Webpage for the planet dumps: https://planet.openstreetmap.org/
+#   Swiss mirror: https://mirror.init7.net/openstreetmap/pbf/
+# Webpage for a country file: https://download.geofabrik.de
+# Example: Downloaded files:
+#   ~/src/osm/data/planet-latest.osm.pbf
+#   ~/src/osm/data/switzerland-latest.osm.pbf
+
+# Extract country borders, run the following in the release directory:
+./extract_admin ../../data/planet-latest.osm.pbf /tmp/admin
+# If no errors occurr (or if you can ignore the countries that have errors), then move the output directory as shown below.
+mv /tmp/admin ../../data/admin
+# Otherwise you might try another planet dump (some planet files have errors in the country boundaries such as incomplete polygons).
+
+# Create visualisation data in /tmp. This takes about 25 seconds on my home computer.
+./build_graph_main ../../data/switzerland-latest.osm.pbf
+
+# Run tile server for visualization data
+./tile_server
+# Run routing server to answer interactive queries
+./routing_server ../../data/switzerland-latest.osm.pbf
+
+# Browse information in both servers.
+file://<path_to_repo>/osmnavi/src/html/leaflet.html
+```
