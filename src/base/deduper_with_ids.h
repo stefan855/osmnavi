@@ -93,7 +93,7 @@ class DeDuperWithIds {
 
   // If SortByPopularity() was called, then return the vector of objects in the
   // new sorted order. Otherwise, return the vector of the original order, which
-  // corresponds to the ids returned by Add().
+  // corresponds to the order in which ids - ignoring duplicates - were added.
   // The returned vector has size num_unique().
   std::vector<TObj> GetObjVector() const {
     CHECK_EQ_S(entries_.size(), objs_.size());

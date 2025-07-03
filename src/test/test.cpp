@@ -21,6 +21,7 @@
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/routing_config.h"
+#include "graph/turn_costs.h"
 #include "osm/access.h"
 #include "osm/admin_boundary.h"
 #include "osm/key_bits.h"
@@ -1275,22 +1276,22 @@ void TestRealAngles() {
   int angle3 = TestAngle(47.3779735, 8.5267194, 47.3773794, 8.5263690, 248);
   int angle4 = TestAngle(47.3779735, 8.5267194, 47.3779501, 8.5267669, 324);
 
-  // Test angles between some edges. 
-  CHECK_EQ_S(angle_between_edges(angle1, angle2), 74); 
-  CHECK_EQ_S(angle_between_edges(angle1, angle3), 180); 
-  CHECK_EQ_S(angle_between_edges(angle1, angle4), 104); 
+  // Test angles between some edges.
+  CHECK_EQ_S(angle_between_edges(angle1, angle2), 74);
+  CHECK_EQ_S(angle_between_edges(angle1, angle3), 180);
+  CHECK_EQ_S(angle_between_edges(angle1, angle4), 104);
 
-  CHECK_EQ_S(angle_between_edges(angle2, angle3), 106); 
-  CHECK_EQ_S(angle_between_edges(angle2, angle4), 178); 
-  CHECK_EQ_S(angle_between_edges(angle2, angle1), 74); 
+  CHECK_EQ_S(angle_between_edges(angle2, angle3), 106);
+  CHECK_EQ_S(angle_between_edges(angle2, angle4), 178);
+  CHECK_EQ_S(angle_between_edges(angle2, angle1), 74);
 
-  CHECK_EQ_S(angle_between_edges(angle3, angle4), 76); 
-  CHECK_EQ_S(angle_between_edges(angle3, angle1), 180); 
-  CHECK_EQ_S(angle_between_edges(angle3, angle2), 106); 
+  CHECK_EQ_S(angle_between_edges(angle3, angle4), 76);
+  CHECK_EQ_S(angle_between_edges(angle3, angle1), 180);
+  CHECK_EQ_S(angle_between_edges(angle3, angle2), 106);
 
-  CHECK_EQ_S(angle_between_edges(angle4, angle1), 104); 
-  CHECK_EQ_S(angle_between_edges(angle4, angle2), 178); 
-  CHECK_EQ_S(angle_between_edges(angle4, angle3), 76); 
+  CHECK_EQ_S(angle_between_edges(angle4, angle1), 104);
+  CHECK_EQ_S(angle_between_edges(angle4, angle2), 178);
+  CHECK_EQ_S(angle_between_edges(angle4, angle3), 76);
 }
 
 void TestDeDuperWithIdsInt() {
@@ -1415,6 +1416,43 @@ void TestClosestPoint() {
   }
 }
 
+void TestTurningCostCompression() {
+  FUNC_TIMER();
+  CHECK_EQ_S(compress_turn_cost(0), 0);
+  CHECK_EQ_S(compress_turn_cost(1), 1);
+  CHECK_EQ_S(compress_turn_cost(2), 2);
+
+  CHECK_EQ_S(compress_turn_cost(116), 30);
+  CHECK_EQ_S(compress_turn_cost(123), 30);
+  CHECK_EQ_S(compress_turn_cost(124), 31);
+  CHECK_EQ_S(compress_turn_cost(131), 31);
+  CHECK_EQ_S(compress_turn_cost(132), 31);
+  CHECK_EQ_S(compress_turn_cost(133), 31);
+
+  CHECK_EQ_S(compress_turn_cost(346949 + (451034 - 346949) / 2 - 1), 61);
+  CHECK_EQ_S(compress_turn_cost(346949 + (451034 - 346949) / 2 + 1), 62);
+  CHECK_EQ_S(compress_turn_cost(451034), 62);
+  CHECK_EQ_S(compress_turn_cost(451034 + 1), 63);
+
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(0)), 0);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(1)), 1);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(2)), 2);
+
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(290)), 291);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(291)), 291);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(292)), 291);
+
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(451033)), 451034);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(451034)), 451034);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(451035)), TURN_COST_INF);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(10'000'000)),
+             TURN_COST_INF);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(100'000'000)),
+             TURN_COST_INF);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(1'000'000'000)),
+             TURN_COST_INF);
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1453,6 +1491,8 @@ int main(int argc, char* argv[]) {
   TestEdgeAngles();
   TestAngleBetweenEdges();
   TestRealAngles();
+
+  TestTurningCostCompression();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

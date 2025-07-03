@@ -1007,8 +1007,8 @@ void MarkUniqueEdges(GraphMetaData* meta) {
 // with no way to continue the travel, which is true at the end of a street or
 // when facing a restricted access area.
 // TODO: handle vehicle types properly.
-inline bool IsUTurnAllowedEdge(const Graph& g, uint32_t node_idx,
-                               const GEdge& out_edge) {
+inline bool IsUTurnAllowedEdgeOld(const Graph& g, uint32_t node_idx,
+                                  const GEdge& out_edge) {
   // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
   if (g.ways.at(out_edge.way_idx).highway_label <= HW_TRUNK_LINK) {
     return false;
@@ -1072,8 +1072,8 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta,
 
   // Store complex turn restrictions.
   SortTurnRestrictions(&(meta->graph.complex_turn_restrictions));
-  meta->graph.complex_turn_restriction_map = ComputeComplexTurnRestrictionMap(
-      meta->opt.verb_turn_restrictions, meta->graph.complex_turn_restrictions);
+  meta->graph.complex_turn_restriction_map =
+      ComputeTurnRestrictionMapToFirst(meta->graph.complex_turn_restrictions);
   MarkComplexTriggerEdges(&(meta->graph));
 }
 
@@ -1251,7 +1251,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
 }
 
 void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
-  const Graph& graph = meta.graph;
+  const Graph& g = meta.graph;
 
   LOG_S(INFO) << "=========== Pbf Stats ============";
   LOG_S(INFO) << absl::StrFormat("Nodes:              %12lld",
@@ -1287,15 +1287,15 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("Num t-restr simple:  %11lld",
                                  meta.simple_turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num t-restr complex: %11lld",
-                                 graph.complex_turn_restrictions.size());
+                                 g.complex_turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num t-restr comb/simple:%8lld",
-                                 graph.simple_turn_restriction_map.size());
+                                 g.simple_turn_restriction_map.size());
   LOG_S(INFO) << absl::StrFormat("Max t-restr via ways: %10llu",
                                  stats.max_turn_restriction_via_ways);
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
                                  stats.num_turn_restriction_error_connection);
-  LOG_S(INFO) << absl::StrFormat("Num node barrier attrs:%9lld",
-                                 meta.graph.node_attrs.size());
+  LOG_S(INFO) << absl::StrFormat("Num node attrs:      %11lld",
+                                 g.node_attrs.size());
   LOG_S(INFO) << absl::StrFormat("Num node barrier free:%10lld",
                                  stats.num_node_barrier_free);
   LOG_S(INFO) << absl::StrFormat("Num edge barrier block:%9lld",
@@ -1306,12 +1306,11 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edge_barrier_no_uturn);
 
   LOG_S(INFO) << "========= Graph Stats ============";
-  std::int64_t way_bytes = graph.ways.size() * sizeof(GWay);
-  std::int64_t way_added_bytes = graph.unaligned_pool_.MemAllocated();
+  std::int64_t way_bytes = g.ways.size() * sizeof(GWay);
+  std::int64_t way_added_bytes = g.unaligned_pool_.MemAllocated();
   std::int64_t way_shared_attrs_bytes =
-      graph.way_shared_attrs.size() * sizeof(WaySharedAttrs);
-  LOG_S(INFO) << absl::StrFormat("Ways selected:      %12lld",
-                                 graph.ways.size());
+      g.way_shared_attrs.size() * sizeof(WaySharedAttrs);
+  LOG_S(INFO) << absl::StrFormat("Ways selected:      %12lld", g.ways.size());
 
   LOG_S(INFO) << absl::StrFormat("  Nodes \"seen\":     %12lld",
                                  meta.way_nodes_seen->CountBits());
@@ -1325,9 +1324,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_ways_diff_maxspeed);
   LOG_S(INFO) << absl::StrFormat("  Has country:      %12lld",
                                  stats.num_ways_has_country);
-  LOG_S(INFO) << absl::StrFormat(
-      "  Has no country:   %12lld",
-      graph.ways.size() - stats.num_ways_has_country);
+  LOG_S(INFO) << absl::StrFormat("  Has no country:   %12lld",
+                                 g.ways.size() - stats.num_ways_has_country);
   LOG_S(INFO) << absl::StrFormat("  Has streetname:   %12lld",
                                  stats.num_ways_has_streetname);
   LOG_S(INFO) << absl::StrFormat("  Oneway for cars:  %12lld",
@@ -1337,14 +1335,13 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("  Closed ways:      %12lld",
                                  stats.num_ways_closed);
   LOG_S(INFO) << absl::StrFormat("  Bytes per way     %12.2f",
-                                 (double)way_bytes / graph.ways.size());
+                                 (double)way_bytes / g.ways.size());
   LOG_S(INFO) << absl::StrFormat("  Added per way     %12.2f",
-                                 (double)way_added_bytes / graph.ways.size());
+                                 (double)way_added_bytes / g.ways.size());
   LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
                                  way_bytes + way_added_bytes);
 
-  LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld",
-                                 graph.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld", g.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  stats.num_dead_end_nodes);
   LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld",
@@ -1354,12 +1351,12 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("  Nodes no country: %12lld",
                                  stats.num_nodes_no_country);
 
-  std::int64_t node_bytes = graph.nodes.size() * sizeof(GNode);
-  std::int64_t edge_memory = graph.edges.size() * sizeof(GEdge);
+  std::int64_t node_bytes = g.nodes.size() * sizeof(GNode);
+  std::int64_t edge_memory = g.edges.size() * sizeof(GEdge);
   LOG_S(INFO) << absl::StrFormat("  Bytes per node    %12.2f",
-                                 (double)node_bytes / graph.nodes.size());
+                                 (double)node_bytes / g.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Edge Mem per node %12.2f",
-                                 (double)edge_memory / graph.nodes.size());
+                                 (double)edge_memory / g.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
                                  node_bytes + edge_memory);
 
@@ -1370,6 +1367,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_inverted);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  stats.num_edges_non_unique);
+  LOG_S(INFO) << absl::StrFormat("  turn cost table size:%9lld",
+                                 g.turn_costs.size());
   LOG_S(INFO) << absl::StrFormat("  Car restr unset:  %12lld",
                                  stats.num_edges_forward_car_restr_unset);
   LOG_S(INFO) << absl::StrFormat("  Car restr free:   %12lld",
@@ -1393,7 +1392,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat(
       "  Num edges/node:   %12.2f",
       static_cast<double>(stats.num_edges_inverted + stats.num_edges_forward) /
-          graph.nodes.size());
+          g.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Max edges:        %12lld", stats.max_edges);
   LOG_S(INFO) << absl::StrFormat("  Max edges out:    %12lld",
                                  stats.max_edges_out);
@@ -1462,9 +1461,42 @@ void MarkUTurnAllowedEdges(Graph* g) {
   FUNC_TIMER();
   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
     for (GEdge& e : gnode_forward_edges(*g, from_idx)) {
-      e.car_uturn_allowed = IsUTurnAllowedEdge(*g, from_idx, e);
+      e.car_uturn_allowed = IsUTurnAllowedEdgeOld(*g, from_idx, e);
     }
   }
+}
+
+void ComputeAllTurnCosts(GraphMetaData* meta) {
+  FUNC_TIMER();
+
+  DeDuperWithIds<TurnCostData> deduper;
+  Graph& g = meta->graph;
+  const IndexedTurnRestrictions indexed_trs = {
+      .sorted_trs = meta->simple_turn_restrictions,
+      .map_to_first =
+          ComputeTurnRestrictionMapToFirst(meta->simple_turn_restrictions)};
+  TurnCostData tcd;
+  // For each node in the graph.
+  for (uint32_t from_idx = 0; from_idx < g.nodes.size(); ++from_idx) {
+    const GNode& from_node = g.nodes.at(from_idx);
+    // For each outgoing edge of this node.
+    for (uint32_t off = 0; off < from_node.num_edges_forward; ++off) {
+      GEdge& e = g.edges.at(from_node.edges_start_pos + off);
+      const GNode& target_node = g.nodes.at(e.other_node_idx);
+      // Get the node attribute of the target node of the edge.
+      const NodeAttribute* attr = g.FindNodeAttr(target_node.node_id);
+      // Compute the turn costs when continuing at 'target_node' after arriving
+      // there through 'e'.
+      ComputeTurnCostsForEdge(g, meta->opt.vehicle_types.front(), from_idx,
+                              from_node.edges_start_pos + off, indexed_trs,
+                              attr, &tcd);
+      e.turn_cost_idx = deduper.Add(tcd);
+    }
+  }
+  meta->graph.turn_costs = deduper.GetObjVector();
+  LOG_S(INFO) << absl::StrFormat(
+      "DeDuperWithIds<TurnCostData>: unique:%u tot:%u", deduper.num_unique(),
+      deduper.num_added());
 }
 
 BuildGraphStats CollectThreadStats(
@@ -1563,6 +1595,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
   MarkUTurnAllowedEdges(&(meta.graph));
+  ComputeAllTurnCosts(&meta);
 
   ClusterGraph(meta.opt, &meta);
 

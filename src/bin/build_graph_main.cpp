@@ -16,6 +16,7 @@
 #include "absl/time/time.h"
 #include "algos/compact_dijkstra.h"
 #include "algos/edge_router.h"
+#include "algos/edge_router2.h"
 #include "algos/router.h"
 #include "base/argli.h"
 #include "base/huge_bitset.h"
@@ -176,6 +177,9 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
   DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
                          RoutingMetricTime(),
                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/false,
+                         RoutingMetricTime(),
+                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
 
   DoCompactRoute(comp_data, start_idx, target_idx, csv_prefix);
   // RouteOnCompactGraph(comp_data, start_idx, target_idx, Verbosity::Brief);
@@ -197,6 +201,11 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
   DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/true,
                          RoutingMetricTime(),
                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
+
+  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/true,
+                         RoutingMetricTime(),
+                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
+
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
                      /*backward=*/true, /*hybrid=*/false, csv_prefix);

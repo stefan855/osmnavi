@@ -306,6 +306,7 @@ void StoreNodeBarrierData(Graph* g, build_graph::BuildGraphStats* stats) {
         CHECK_EQ_S(in.other_node_idx, node_idx);  // Is it really incoming?
         const bool in_way_area = g->ways.at(in.way_idx).area;
         uint32_t allowed_edge_bits = 0;
+        // Iterate outgoing edges at the same node.
         for (uint32_t offset = 0; offset < n.num_edges_forward; ++offset) {
           const GEdge& out = g->edges.at(n.edges_start_pos + offset);
           // If the out-edge stays on the same way as the in-edge then there are
@@ -323,7 +324,7 @@ void StoreNodeBarrierData(Graph* g, build_graph::BuildGraphStats* stats) {
           if ((in.way_idx == out.way_idx) &&
               (in_way_area ||
                (out.other_node_idx == in_ge.start_idx))) {  // u-turn
-            // Allowed to stay within area, set bit.
+            // Allowed, set bit.
             allowed_edge_bits = (allowed_edge_bits | (1u << offset));
           }
         }

@@ -10,6 +10,7 @@
 #include "base/varbyte.h"
 #include "graph/build_graph.h"
 #include "graph/graph_def.h"
+#include "graph/turn_costs.h"
 #include "osm/access.h"
 #include "osm/osm_helpers.h"
 
@@ -132,6 +133,37 @@ inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist,
   AddEdge(from, to, dist, label, /*way_idx=0*/ 0, both_dirs, edges);
 }
 
+// Adds turn costs to the graph g. Turn costs depend on node attributes such as
+// "barrier" (g.node_attrs), simple_turn_restrictions and the geometry of the
+// graph (angles). Any previously existing turn costs are overwritten.
+void AddTurnCostsForTests(std::vector<TurnRestriction> simple_turn_restrictions,
+                          VEHICLE vh, Graph* g) {
+  g->turn_costs.clear();
+  const IndexedTurnRestrictions indexed_trs = {
+      .sorted_trs = simple_turn_restrictions,
+      .map_to_first =
+          ComputeTurnRestrictionMapToFirst(simple_turn_restrictions)};
+  TurnCostData tcd;
+  // For each node in the graph.
+  for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
+    const GNode& from_node = g->nodes.at(from_idx);
+    // For each outgoing edge of this node.
+    for (uint32_t off = 0; off < from_node.num_edges_forward; ++off) {
+      GEdge& e = g->edges.at(from_node.edges_start_pos + off);
+      const GNode& target_node = g->nodes.at(e.other_node_idx);
+      // Get the node attribute of the target node of the edge.
+      const NodeAttribute* attr = g->FindNodeAttr(target_node.node_id);
+      // Compute the turn costs when continuing at 'target_node' after
+      // arriving there through 'e'.
+      ComputeTurnCostsForEdge(*g, vh, from_idx, from_node.edges_start_pos + off,
+                              indexed_trs, attr, &tcd);
+      e.turn_cost_idx = g->turn_costs.size();
+      g->turn_costs.push_back(tcd);
+    }
+  }
+  LOG_S(INFO) << "Added " << g->turn_costs.size() << " turn cost entries.";
+}
+
 inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
   std::sort(edges.begin(), edges.end());
   for (const TEdge& e : edges) {
@@ -151,7 +183,9 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         .both_directions = 0,
                         .car_label = std::get<3>(e),
                         .car_label_strange = 0,
-                        .car_uturn_allowed = 0});
+                        .car_uturn_allowed = 0,
+                        .complex_turn_restriction_trigger = 0,
+                        .turn_cost_idx = 0});
     // If this edge crosses clusters, then mark the nodes accordingly.
     if (g->nodes.at(from_idx).cluster_id != g->nodes.at(to_idx).cluster_id) {
       g->nodes.at(from_idx).cluster_border_node = 1;
@@ -164,6 +198,10 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     n.edges_start_pos = curr_pos;
     curr_pos += count;
   }
+  AddTurnCostsForTests(/*simple_turn_restrictions=*/{}, VH_MOTORCAR, g);
+  g->turn_costs.emplace_back(
+      std::vector<uint8_t>(32, TURN_COST_ZERO_COMPRESSED));
+
   // build_graph::MarkUTurnAllowedEdges(g);
 }
 

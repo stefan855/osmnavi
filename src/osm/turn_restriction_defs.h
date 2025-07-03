@@ -105,9 +105,15 @@ struct hash<TurnRestriction::TREdge> {
 using SimpleTurnRestrictionMap =
     absl::flat_hash_map<TurnRestriction::TREdge, SimpleTurnRestrictionData>;
 
-// Points to index of turn restriction in complex_turn_restriction vector.
-using ComplexTurnRestrictionMap =
+// Points to index of turn restriction in turn_restriction vector.
+using TurnRestrictionMapToFirst =
     absl::flat_hash_map<TurnRestriction::TREdge, uint32_t>;
+
+// map_to_first contains a mapping from TREdge to position of first turn restriction in 'trs'.
+struct IndexedTurnRestrictions {
+  const std::vector<TurnRestriction>& sorted_trs;
+  TurnRestrictionMapToFirst map_to_first;
+};
 
 // Sort the turn restrictions by the edge that triggers the
 // restriction, i.e. the edge of the from way that connects to the via node.
@@ -121,18 +127,17 @@ inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
             });
 }
 
-// Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
-// first position in trs where that key occurs. Note that trs needs to be sorted
-// by SortTurnRestrictions() and must contain complex turn  restrictions only.
-inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
-    Verbosity verbosity, const std::vector<TurnRestriction>& trs) {
-  ComplexTurnRestrictionMap res;
+// Given a sorted vector of turn restrictions (see SortTurnRestrictions()),
+// create a a map which for every TriggerKey stores the first position in trs
+// where that key occurs.
+inline TurnRestrictionMapToFirst ComputeTurnRestrictionMapToFirst(
+    const std::vector<TurnRestriction>& trs) {
+  TurnRestrictionMapToFirst res;
   if (trs.empty()) {
     return res;
   }
   size_t start = 0;
   for (size_t i = 0; i < trs.size(); ++i) {
-    CHECK_S(!trs.at(i).via_is_node);
     if (i == trs.size() - 1 ||
         trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
       res[trs.at(start).GetTriggerKey()] = start;

@@ -296,19 +296,18 @@ inline bool CreateSimpleTurnRestrictionData(
   const uint32_t from_way_idx = first_tr.path.front().way_idx;
   const uint32_t via_node_idx = first_tr.path.front().to_node_idx;
   const GNode& via_node = g.nodes.at(via_node_idx);
-  uint32_t num_edges =
+  uint32_t num_all_edges =
       gnode_edge_stop(g, via_node_idx) - via_node.edges_start_pos;
-  CHECK_GT_S(num_edges, 0) << via_node.node_id;
+  CHECK_GT_S(num_all_edges, 0) << via_node.node_id;
 
-  // Set the 'num_edges' lowest bits.
-  d->allowed_edge_bits = (1u << num_edges) - 1;
+  // Set the 'num_all_edges' lowest bits.
+  d->allowed_edge_bits = (1u << num_all_edges) - 1;
   d->from_relation = 1;
   d->id = first_tr.relation_id;
 
   bool found = false;
   for (const TurnRestriction& tr : trs) {
-    // Search the edge ending at via_node.
-    for (size_t offset = 0; offset < num_edges; ++offset) {
+    for (size_t offset = 0; offset < num_all_edges; ++offset) {
       const GEdge& e = g.edges.at(via_node.edges_start_pos + offset);
 
       if (e.inverted) {
@@ -336,7 +335,7 @@ inline bool CreateSimpleTurnRestrictionData(
   // This should have been caught before, therefore we check fail here.
   CHECK_S(!from_edge.inverted) << first_tr.relation_id;
   if (!from_edge.car_uturn_allowed) {
-    for (size_t offset = 0; offset < num_edges; ++offset) {
+    for (size_t offset = 0; offset < num_all_edges; ++offset) {
       const GEdge& e = g.edges.at(via_node.edges_start_pos + offset);
       if (!e.inverted && e.other_node_idx == from_node_idx &&
           e.way_idx == from_way_idx) {
@@ -536,29 +535,6 @@ inline void MarkSimpleViaNodes(Graph* g) {
     g->nodes.at(key.to_node_idx).simple_turn_restriction_via_node = 1;
   }
 }
-
-#if 0
-// Create a ComplexTurnRestrictionMap, which stores for every TriggerKey the
-// first position in trs where that key occurs. Note that trs needs to be sorted
-// by SortTurnRestrictions() and must contain complex turn  restrictions only.
-inline ComplexTurnRestrictionMap ComputeComplexTurnRestrictionMap(
-    Verbosity verbosity, const std::vector<TurnRestriction>& trs) {
-  ComplexTurnRestrictionMap res;
-  if (trs.empty()) {
-    return res;
-  }
-  size_t start = 0;
-  for (size_t i = 0; i < trs.size(); ++i) {
-    CHECK_S(!trs.at(i).via_is_node);
-    if (i == trs.size() - 1 ||
-        trs.at(i).GetTriggerKey() != trs.at(i + 1).GetTriggerKey()) {
-      res[trs.at(start).GetTriggerKey()] = start;
-      start = i + 1;
-    }
-  }
-  return res;
-}
-#endif
 
 inline void MarkComplexTriggerEdges(Graph* g) {
   for (const auto& [key, pos] : g->complex_turn_restriction_map) {

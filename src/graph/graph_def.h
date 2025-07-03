@@ -12,6 +12,25 @@
 #include "graph/routing_attrs.h"
 #include "osm/turn_restriction_defs.h"
 
+// For an edge in the graph, this data describes the turn costs when arriving
+// at the target node of the edge and continuing on an edge starting at the
+// target node (i.e. an outgoing edge).
+//
+// Note that the dimension of the 'turn_costs' vector of edge e must be equal
+// the number of outgoing edges at the target node of e.
+//
+// A special value indicates that a turn is not possible. This means that a turn
+// restriction forbids the turn, a barrier disallows passing the target node, a
+// u-turn is not allowed or something else.
+struct TurnCostData {
+  // TODO: Use a more memory-efficient data structure than a vector.
+  std::vector<uint8_t> turn_costs;
+
+  bool operator==(const TurnCostData& other) const {
+    return turn_costs == other.turn_costs;
+  }
+};
+
 // Attributes extracted from node key-val pairs.
 // Currently, only barrier based access restrictions are extracted.
 struct NodeAttribute {
@@ -37,7 +56,7 @@ struct NodeAttribute {
 // node_idx, edge_idx and all kinds of osm-ids.
 constexpr uint64_t WAY_IDX_BITS = 31;
 
-// WaySharedAttrs (=WSA) contains many of the way attributes in a
+// 9955WaySharedAttrs (=WSA) contains many of the way attributes in a
 // data structure that is shared between ways. The shared data is stored in
 // Graph::way_shared_attrs vector and accessed through GWay::wsa_id.
 // Used to decrease the storage needed to store ways, both in ram and on disk.
@@ -153,6 +172,7 @@ struct GNode {
   // True iff the node is the via node in a simple turn restriction.
   std::uint32_t simple_turn_restriction_via_node : 1;
 
+#if 0
   // Node has special keyvals.
   std::uint32_t has_node_attrs : 1;
   // Attributes that represent special keyvals stored in g.node_attrs. If
@@ -165,6 +185,7 @@ struct GNode {
   std::uint32_t public_transport_platform : 1;
   std::uint32_t toll_booth : 1;
   std::uint32_t traffic_calming : 1;
+#endif
 
   std::int32_t lat = 0;
   std::int32_t lon = 0;
@@ -241,6 +262,8 @@ struct GEdge {
   // have to enter a restricted access area if not doing a u-turn.
   std::uint8_t car_uturn_allowed : 1;
   std::uint8_t complex_turn_restriction_trigger : 1;
+
+  std::uint32_t turn_cost_idx : 24;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -290,6 +313,7 @@ struct Graph {
 
   std::vector<NodeAttribute> node_attrs;
   std::vector<WaySharedAttrs> way_shared_attrs;
+  std::vector<TurnCostData> turn_costs;
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
   std::vector<GEdge> edges;
@@ -298,9 +322,10 @@ struct Graph {
 
   // Turn restrictions. Both types are indexed by the first trigger edge.
   SimpleTurnRestrictionMap simple_turn_restriction_map;
+
   std::vector<TurnRestriction> complex_turn_restrictions;
   // Map from trigger edge to the index in 'complex_turn_restrictions' above.
-  ComplexTurnRestrictionMap complex_turn_restriction_map;
+  TurnRestrictionMapToFirst complex_turn_restriction_map;
 
   std::vector<GCluster> clusters;
 
@@ -334,6 +359,20 @@ struct Graph {
       return nodes.size();
     } else {
       return it - nodes.begin();
+    }
+  }
+
+  // Find the stored node attribute for a given node_id. Returns the found
+  // record or nullptr if it doesn't exist.
+  const NodeAttribute* FindNodeAttr(int64_t node_id) const {
+    auto it = std::lower_bound(node_attrs.begin(), node_attrs.end(), node_id,
+                               [](const NodeAttribute& s, std::int64_t value) {
+                                 return s.node_id < value;
+                               });
+    if (it == node_attrs.end() || it->node_id != node_id) {
+      return nullptr;
+    } else {
+      return &(*it);
     }
   }
 
@@ -458,11 +497,11 @@ inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
                                 g.nodes.at(node_idx).num_edges_forward);
 }
 
-// Note, this returns a new vector, not a span.
 struct FullGEdge {
-  uint32_t start_idx;
-  uint32_t offset : NUM_EDGES_OUT_BITS;
+  uint32_t start_idx;  // offset of the start node of the edge in g.nodes
+  uint32_t offset : NUM_EDGES_OUT_BITS;  // offset of the edge in g.edges.
 };
+// Note, this returns a new vector, not a span.
 inline std::vector<FullGEdge> gnode_incoming_edges(const Graph& g,
                                                    uint32_t node_idx) {
   std::vector<FullGEdge> res;
@@ -652,3 +691,14 @@ inline bool RoutableBackward(const Graph& g, const GEdge& e, VEHICLE vt) {
   return RoutableAccess(
       GetRAFromWSA(g, g.ways.at(e.way_idx), vt, EDGE_INVERSE_DIR(e)).access);
 }
+
+namespace std {
+template <>
+struct hash<TurnCostData> {
+  size_t operator()(const TurnCostData& tcd) const {
+    return std::hash<std::string_view>{}(
+        std::string_view((char*)tcd.turn_costs.data(), tcd.turn_costs.size()));
+  }
+};
+}  // namespace std
+
