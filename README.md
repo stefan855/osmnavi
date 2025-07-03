@@ -85,9 +85,11 @@ mkdir ../../data
 
 # Extract country borders, run the following in the release directory:
 ./extract_admin ../../data/planet-latest.osm.pbf /tmp/admin
-# If no errors occurr (or if you can ignore the countries that have errors), then move the output directory as shown below.
+# If no errors occurr (or if you can ignore the countries that have errors), then move the output directory
+# as shown below.
 mv /tmp/admin ../../data/admin
-# Otherwise you might try another planet dump (some planet files have errors in the country boundaries such as incomplete polygons).
+# Otherwise you might try another planet dump (some planet files have errors in the country boundaries such
+# as incomplete polygons).
 
 # Create visualisation data in /tmp. This takes about 25 seconds on my home computer.
 ./build_graph_main ../../data/switzerland-latest.osm.pbf
