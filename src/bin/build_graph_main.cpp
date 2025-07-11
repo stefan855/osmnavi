@@ -108,7 +108,8 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
 
   uint32_t num_len_gt_1 = 0;
   uint32_t max_len = 0;
-  if constexpr (std::is_same_v<RouterT, EdgeRouter>) {
+  if constexpr (std::is_same_v<RouterT, EdgeRouter> ||
+                std::is_same_v<RouterT, EdgeRouter2>) {
     router.TurnRestrictionSpecialStats(&num_len_gt_1, &max_len);
   }
 
@@ -178,8 +179,8 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
                          RoutingMetricTime(),
                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
   DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/false,
-                         RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
+                          RoutingMetricTime(),
+                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
 
   DoCompactRoute(comp_data, start_idx, target_idx, csv_prefix);
   // RouteOnCompactGraph(comp_data, start_idx, target_idx, Verbosity::Brief);
@@ -203,8 +204,8 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
 
   DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/true,
-                         RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
+                          RoutingMetricTime(),
+                          /*backward=*/false, /*hybrid=*/false, csv_prefix);
 
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
@@ -647,36 +648,6 @@ int main(int argc, char* argv[]) {
       }
     }
   }
-
-#if 0
-  TestRoute(g, 49973500, 805904068, "Pfäffikon ZH", "Bern",
-            /*csv_prefix=*/"pb");
-  TestRoute(g, 805904068, 49973500, "Bern", "Pfäffikon ZH",
-            /*csv_prefix=*/"bp");
-
-  TestRoute(g, 3108534441, 3019156898, "Uster", "Weesen",
-            /*csv_prefix=*/"uw");
-  TestRoute(g, 3019156898, 3108534441, "Weesen", "Uster",
-            /*csv_prefix=*/"wu");
-
-  TestRoute(g, 26895904, 300327675, "Augsburg", "Stralsund",
-            /*csv_prefix=*/"as");
-  TestRoute(g, 300327675, 26895904, "Stralsund", "Augsburg",
-            /*csv_prefix=*/"sa");
-
-  TestRoute(g, 1131001345, 899297768, "Lissabon", "Nordkapp",
-            /*csv_prefix=*/"ln");
-  TestRoute(g, 899297768, 1131001345, "Nordkapp", "Lissabon",
-            /*csv_prefix=*/"");
-
-  // TestRouteLatLong(g, 47.36275428, 8.07097094, 47.38663149, 8.13231129,
-  // "tmp");
-
-  TestRoute(g, 654083753, 3582774151, "Ulisbach SG", "Ricken SG",
-            /*csv_prefix=*/"ur");
-  TestRoute(g, 32511837, 3582774151, "Ulisbach restricted SG", "Ricken SG",
-            /*csv_prefix=*/"ur2");
-#endif
 
   LOG_S(INFO) << "Finished.";
   if (argli.ArgIsSet("debug_node")) {

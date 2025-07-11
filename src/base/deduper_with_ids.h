@@ -31,25 +31,29 @@
 template <typename TObj>
 class DeDuperWithIds {
  public:
-   DeDuperWithIds() { clear(); }
+  DeDuperWithIds() { clear(); }
 
   // Add object 'obj' and return the id for it. If the object hasn't been seen
   // before, then a new id will be returned, otherwise the id of the already
   // stored object is returned.
-  uint32_t Add(const TObj& obj) {
+  uint32_t Add(const TObj& obj, uint32_t ref_count = 1) {
     CHECK_S(!sorted_);
     added_++;
     auto iter = lookup_.find(&obj);
     if (iter != lookup_.end()) {
-      iter->second->ref_count++;
+      iter->second->ref_count += ref_count;
       return iter->second->id;
     }
     uint32_t new_idx = lookup_.size();
     objs_.push_back(obj);
-    entries_.push_back({.id = new_idx, .ref_count = 1});
+    entries_.push_back({.id = new_idx, .ref_count = ref_count});
     lookup_[&objs_.back()] = &entries_.back();
     return new_idx;
   }
+
+  // Get object that has id. Note that even after sorting, the original id has
+  // to be used. Fails if 'id' is not valid.
+  const TObj& GetObj(uint32_t id) const { return objs_.at(id); }
 
   // Number of calls to Add().
   uint32_t num_added() const { return added_; }
@@ -87,10 +91,6 @@ class DeDuperWithIds {
     return v;
   }
 
-  // Get object that has id. Note that even after sorting, the original id has
-  // to be used.
-  const TObj& GetObj(uint32_t id) const { return objs_.at(id); }
-
   // If SortByPopularity() was called, then return the vector of objects in the
   // new sorted order. Otherwise, return the vector of the original order, which
   // corresponds to the order in which ids - ignoring duplicates - were added.
@@ -103,6 +103,18 @@ class DeDuperWithIds {
       v.push_back(objs_.at(e.id));
     }
     return v;
+  }
+
+  // Given independently created dedupers in 'input', merge and frequency-sort
+  // them. Return the global list of sorted 'objects' (with no duplicates) and
+  // a mapping vector for each of the inputs. Note that after the call,
+  // mappings->size() == input.size().
+  // This is useful when creating dedupers in multiple threads and merging them
+  // in the end.
+  static void MergeSort(const std::vector<DeDuperWithIds<TObj>>& input,
+                        std::vector<TObj>* objects,
+                        std::vector<std::vector<uint32_t>>* mappings) {
+    ;
   }
 
   void clear() {

@@ -12,6 +12,7 @@ class RoutingMetric {
       const GEdge& edge,
       uint32_t compressed_turn_cost = TURN_COST_ZERO_COMPRESSED) const = 0;
   virtual std::string_view Name() const = 0;
+  virtual bool IsTimeMetric() const { return false; }
 };
 
 class RoutingMetricDistance : public RoutingMetric {
@@ -41,4 +42,5 @@ class RoutingMetricTime : public RoutingMetric {
   }
 
   std::string_view Name() const override final { return "time(ms)"; }
+  virtual bool IsTimeMetric() const { return true; }
 };

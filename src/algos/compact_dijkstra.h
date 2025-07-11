@@ -77,7 +77,8 @@ class SingleSourceEdgeDijkstra {
 
     const std::vector<uint32_t>& edges_start = cg.edges_start();
     const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
-    const auto& compact_tr_map = cg.GetSimpleTRMap();
+    const std::vector<TurnCostData>& turn_costs = cg.turn_costs();
+    // const auto& compact_tr_map = cg.GetSimpleTRMap();
     ActiveCtrs active_ctrs;
 
     // Push edges of start node into queue.
@@ -137,6 +138,7 @@ class SingleSourceEdgeDijkstra {
       const uint32_t num_edges =
           edges_start.at(prev_cg_edge.to_c_idx + 1) - start;
 
+#if 0
       uint32_t allowed_offset_bits = -1;  // Set all bits
       if (prev_cg_edge.simple_tr_trigger) {
         // LOG_S(INFO) << "Search simple TR trigger!";
@@ -146,6 +148,10 @@ class SingleSourceEdgeDijkstra {
           // LOG_S(INFO) << "Found simple TR trigger!";
         }
       }
+#endif
+
+      // LOG_S(INFO) << "XX:" << prev_cg_edge.turn_cost_idx;
+      const TurnCostData& tcd = turn_costs.at(prev_cg_edge.turn_cost_idx);
 
       for (uint32_t off = 0; off < num_edges; ++off) {
         const uint32_t i = start + off;
@@ -157,9 +163,21 @@ class SingleSourceEdgeDijkstra {
 #endif
         // LOG_S(INFO) << "AA1";
 
+#if 0
         if (!(allowed_offset_bits & (1u << off)) ||
             (opt.handle_restricted_access &&
              prev_v.in_target_restricted_access_area && !e.restricted_access)) {
+          // At least one of these holds:
+          // 1) Not all edges are allowed because of a TR
+          // 2) We're in the target restricted access area, not allowed to
+          // transition to a free edge.
+          continue;
+        }
+#endif
+        if ((tcd.turn_costs.at(off) == TURN_COST_INF_COMPRESSED) ||
+            (opt.handle_restricted_access &&
+             prev_v.in_target_restricted_access_area && !e.restricted_access)) {
+          // LOG_S(INFO) << "XX2:" << (int)tcd.turn_costs.at(off);
           // At least one of these holds:
           // 1) Not all edges are allowed because of a TR
           // 2) We're in the target restricted access area, not allowed to
@@ -186,7 +204,9 @@ class SingleSourceEdgeDijkstra {
         }
 
         // LOG_S(INFO) << "AA4";
-        const uint32_t new_weight = prev_v.min_weight + e.weight;
+        const uint32_t new_weight =
+            prev_v.min_weight + e.weight +
+            decompress_turn_cost(tcd.turn_costs.at(off)) * 100;
         const bool in_target_raa =
             opt.handle_restricted_access &&
             (prev_v.in_target_restricted_access_area |
@@ -639,10 +659,11 @@ inline RoutingResult RouteOnCompactGraph(const Graph& g, uint32_t g_start,
   CHECK_EQ_S(graph_to_compact_nodemap.find(g_start)->second, CG_START);
   CHECK_EQ_S(graph_to_compact_nodemap.find(g_target)->second, CG_TARGET);
   CompactDirectedGraph cg(num_nodes, full_edges);
-  cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
-                               graph_to_compact_nodemap);
+  // cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
+  //                              graph_to_compact_nodemap);
   cg.AddComplexTurnRestrictions(g.complex_turn_restrictions,
                                 graph_to_compact_nodemap);
+  cg.AddTurnCosts(g, metric.IsTimeMetric(), graph_to_compact_nodemap);
 
   // Now route!
   cg.LogStats();
@@ -730,10 +751,12 @@ inline CompactDijkstraRoutingData CreateCompactDijkstraRoutingData(
     ;
   }
   CompactDirectedGraph cg(num_nodes, full_edges);
-  cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
-                               graph_to_compact_nodemap);
+  // cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
+  //                              graph_to_compact_nodemap);
   cg.AddComplexTurnRestrictions(g.complex_turn_restrictions,
                                 graph_to_compact_nodemap);
+  cg.AddTurnCosts(g, metric.IsTimeMetric(), graph_to_compact_nodemap);
+
   cg.LogStats();
   if (verb >= Verbosity::Debug) {
     cg.DebugPrint();

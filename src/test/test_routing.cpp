@@ -25,11 +25,6 @@ RoutingResult RouteOnCompactGraph(const Graph& g, uint32_t g_start,
   const CompactDijkstraRoutingData data = CreateCompactDijkstraRoutingData(
       g, {g_start, g_target}, metric, opt, Verbosity::Brief);
   return RouteOnCompactGraph(data, g_start, g_target, Verbosity::Brief);
-
-  /*
-  return compact_dijkstra::RouteOnCompactGraph(g, g_start, g_target, metric,
-                                               opt, Verbosity::Trace);
-  */
 }
 
 // Create a compacted graph from 'g' which has the same node ordering and the
@@ -632,23 +627,23 @@ void TestClusterRouteDoubleEdge() {
     CHECK_EQ_S(res.route_v_idx.size(), 4);
 
     EdgeRouter2::VisitedEdge ve = router.GetVEdge(res.route_v_idx.at(0));
-    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), A);
-    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), E);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_list_), A);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_list_), E);
     CHECK_S(!ve.key.IsClusterEdge());
 
     ve = router.GetVEdge(res.route_v_idx.at(1));
-    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), E);
-    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), F);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_list_), E);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_list_), F);
     CHECK_S(!ve.key.IsClusterEdge());
 
     ve = router.GetVEdge(res.route_v_idx.at(2));
-    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), F);
-    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), C);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_list_), F);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_list_), C);
     CHECK_S(ve.key.IsClusterEdge());
 
     ve = router.GetVEdge(res.route_v_idx.at(3));
-    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_deduper_), C);
-    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_deduper_), D);
+    CHECK_EQ_S(ve.key.GetFromIdx(g, router.ctr_list_), C);
+    CHECK_EQ_S(ve.key.GetToIdx(g, router.ctr_list_), D);
     CHECK_S(!ve.key.IsClusterEdge());
   }
 }
@@ -1057,7 +1052,7 @@ void CompareShortestPaths(const Graph& g, bool test_compact_edge) {
   const CompactDirectedGraph cg = CreateCompactGraph(g);
 
   // The mapping of graph to compact indexes is the identity. So just create
-  // them in a simple loop..
+  // them in a simple loop.
   absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
   std::vector<std::uint32_t> compact_to_graph_nodemap;
   for (uint32_t i = 0; i < cg.num_nodes(); ++i) {
@@ -1142,8 +1137,6 @@ void TestBitFunctions() {
   CHECK_EQ_S(__builtin_ctzll(1llu << 63), 63);
 }
 
-void TestBoost() {}
-
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1165,7 +1158,6 @@ int main(int argc, char* argv[]) {
   TestRouteComplexTurnRestrictionNegative();
   TestRouteComplexTurnRestrictionPositive();
   TestRouteOverlappingTurnRestrictions();
-  TestBoost();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

@@ -133,24 +133,6 @@ inline std::string ActiveCtrsToDebugString(const Graph& g,
   }
   return res;
 }
-#if 0
-inline std::string ActiveCtrsToDebugString(const CompactDirectedGraph& cg,
-                                           const ActiveCtrs& active_ctrs) {
-  std::string res;
-  for (const CTRPosition ctr_pos : active_ctrs) {
-    const TurnRestriction& tr = g.complex_turn_restrictions.at(ctr_pos.ctr_idx);
-    const TurnRestriction::TREdge& tr_edge = tr.path.at(ctr_pos.position);
-    absl::StrAppend(&res,
-                    absl::StrFormat("%s(TR:%lld pos:%u f:%lld t:%lld w:%lld)",
-                                    res.size() > 0 ? " " : "", tr.relation_id,
-                                    ctr_pos.position,
-                                    GetGNodeIdSafe(g, tr_edge.from_node_idx),
-                                    GetGNodeIdSafe(g, tr_edge.to_node_idx),
-                                    GetGWayIdSafe(g, tr_edge.way_idx)));
-  }
-  return res;
-}
-#endif
 
 namespace std {
 template <>

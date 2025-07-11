@@ -5,8 +5,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "algos/routing_defs.h"
 #include "algos/routing_metric.h"
+#include "base/deduper_with_ids.h"
 #include "base/util.h"
 #include "graph/graph_def.h"
+#include "graph/turn_costs.h"
 #include "osm/turn_restriction_defs.h"
 
 // This is a compact, i.e. memory efficient view on the nodes and edges of a
@@ -20,8 +22,8 @@ class CompactDirectedGraph {
     uint32_t to_c_idx;
     uint32_t weight;
     uint32_t way_idx : WAY_IDX_BITS;  // 31 bits.
-    uint8_t restricted_access : 1;
-    uint8_t uturn_allowed : 1;
+    uint32_t restricted_access : 1;
+    uint32_t uturn_allowed : 1;
   };
 
   // Edge type used for edges of the compact graph.
@@ -31,14 +33,17 @@ class CompactDirectedGraph {
     uint32_t way_idx : WAY_IDX_BITS;  // 31 bits.
     // Edge has restricted car_label (LABEL_RESTRICTED or
     // LABEL_RESTRICTED_SECONDARY) set.
-    uint8_t restricted_access : 1;
+    uint32_t restricted_access : 1;
     // If a u-turn (i.e. return from to_c_idx to the origin of this edge) is
     // allowed or not.
-    uint8_t uturn_allowed : 1;
+    uint32_t uturn_allowed : 1;
     // '1' iff this edge a trigger for a simple turn restriction.
-    uint8_t simple_tr_trigger : 1;
+    uint32_t simple_tr_trigger : 1;
     // '1' iff this edge a trigger for a complex turn restriction.
-    uint8_t complex_tr_trigger : 1;
+    uint32_t complex_tr_trigger : 1;
+
+    // Index into turn_costs_ vector.
+    std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
   };
 
   // A complex turn restriction.
@@ -64,6 +69,8 @@ class CompactDirectedGraph {
   CompactDirectedGraph(uint32_t num_nodes,
                        const std::vector<FullEdge>& full_edges)
       : num_nodes_(num_nodes) {
+    turn_costs_.emplace_back(
+        std::vector<uint8_t>(32, TURN_COST_ZERO_COMPRESSED));
     BuildGraph(full_edges);
   }
 
@@ -79,6 +86,8 @@ class CompactDirectedGraph {
   // Sorted edge vector contains all edges of all nodes. The edges of node k are
   // in positions edges_start()[k]..edges_start()[k+1] - 1.
   const std::vector<PartialEdge>& edges() const { return edges_; }
+
+  const std::vector<TurnCostData>& turn_costs() const { return turn_costs_; }
 
   // Return the position of the edge (from_node, to_node) in edges().
   // Returns -1 in case the edge does not exist.
@@ -125,12 +134,88 @@ class CompactDirectedGraph {
     for (auto [graph_idx, compact_idx] : graph_to_compact_nodemap) {
       node_refs.at(compact_idx) = graph_idx;
     }
+    // Sanity check.
     for (size_t i = 0; i < num_nodes; ++i) {
       CHECK_NE_S(node_refs.at(i), INFU32);
     }
     return node_refs;
   }
 
+ private:
+  // Compute turn costs for edge 'in_ce'.
+  void ConvertTurnCostsAtEdge(
+      const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
+      const std::vector<std::uint32_t>& compact_to_graph,
+      TurnCostData* tcd) const {
+    const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
+    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_edges_forward,
+               g_tcd.turn_costs.size());
+
+    const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
+    const uint32_t c_stop = edges_start_.at(in_ce.to_c_idx + 1);
+    tcd->turn_costs.assign(c_stop - c_start, TURN_COST_ZERO_COMPRESSED);
+
+    for (uint32_t ce_idx = c_start; ce_idx < c_stop; ++ce_idx) {
+      // Find corresponding edge in graph 'g'.
+      const PartialEdge& out_ce = edges_.at(ce_idx);
+      uint32_t g_off = gnode_find_forward_edge_offset(
+          g, in_ge.other_node_idx, compact_to_graph.at(out_ce.to_c_idx),
+          out_ce.way_idx);
+      // Copy turn cost for this one edge.
+      tcd->turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
+    }
+  }
+
+ public:
+  // Add the turn costs that are stored with every outgoing edge in 'g' to the
+  // compact graph.
+  void AddTurnCosts(
+      const Graph& g, bool is_time_metric,
+      const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
+    FUNC_TIMER();
+
+    CHECK_EQ_S(graph_to_compact_nodemap.size(), num_nodes_);
+    const std::vector<std::uint32_t> compact_to_graph =
+        InvertGraphToCompactNodeMap(graph_to_compact_nodemap);
+
+    DeDuperWithIds<TurnCostData> deduper;
+    TurnCostData tcd;
+    for (uint32_t cn_idx = 0; cn_idx < num_nodes_; cn_idx++) {
+      for (uint32_t ce_idx = edges_start_.at(cn_idx);
+           ce_idx < edges_start_.at(cn_idx + 1); ce_idx++) {
+        // Compute turn costs for 'c_edge' arriving at its target node.
+        PartialEdge& in_ce = edges_.at(ce_idx);
+        const GEdge& in_ge =
+            gnode_find_edge(g, compact_to_graph.at(cn_idx),
+                            compact_to_graph.at(in_ce.to_c_idx), in_ce.way_idx);
+        ConvertTurnCostsAtEdge(g, in_ce, in_ge, compact_to_graph, &tcd);
+
+        // No turn costs except blocked turns for non-time metrics.
+        if (!is_time_metric) {
+          for (auto& val : tcd.turn_costs) {
+            if (val != TURN_COST_INF_COMPRESSED) {
+              val = TURN_COST_ZERO_COMPRESSED;
+            }
+          }
+        }
+
+        in_ce.turn_cost_idx = deduper.Add(tcd);
+      }
+    }
+
+    CHECK_LE_S(deduper.num_unique(), MAX_TURN_COST_IDX);
+    deduper.SortByPopularity();
+    auto sort_mapping = deduper.GetSortMapping();
+    for (PartialEdge& ce : edges_) {
+      ce.turn_cost_idx = sort_mapping.at(ce.turn_cost_idx);
+    }
+    turn_costs_ = deduper.GetObjVector();
+    LOG_S(INFO) << absl::StrFormat(
+        "DeDuperWithIds<TurnCostData>: unique:%u tot:%u", deduper.num_unique(),
+        deduper.num_added());
+  }
+
+#if 0
   // Add simple turn restrictions, transforming from Graph format to
   // CompactGraph format.
   void AddSimpleTurnRestrictions(
@@ -183,6 +268,7 @@ class CompactDirectedGraph {
       }
     }
   }
+#endif
 
   // Add complex turn restrictions from the standard Graph format, which means
   // that node references have to be converted to reference within the
@@ -215,8 +301,8 @@ class CompactDirectedGraph {
           return a.GetTriggerEdgeIdx() < b.GetTriggerEdgeIdx();
         });
 
-    // Fill complex_tr_map_. It maps from trigger edge index to the position of
-    // the first complex turn restriction in complex_trs_.
+    // Fill complex_tr_map_. It maps from trigger edge index to the position
+    // of the first complex turn restriction in complex_trs_.
     size_t start = 0;
     for (size_t i = 0; i < complex_trs_.size(); ++i) {
       const ComplexTurnRestriction& tr = complex_trs_.at(i);
@@ -235,9 +321,11 @@ class CompactDirectedGraph {
                 << " complex turn restrictions added";
   }
 
+#if 0
   inline const absl::flat_hash_map<uint32_t, uint32_t>& GetSimpleTRMap() const {
     return simple_tr_map_;
   }
+#endif
 
   inline const std::vector<ComplexTurnRestriction>& GetComplexTRS() const {
     return complex_trs_;
@@ -261,9 +349,10 @@ class CompactDirectedGraph {
       uturn += e.uturn_allowed;
     }
     LOG_S(INFO) << absl::StrFormat(
-        "CompactGraph #nodes:%u #edges:%u restricted:%u uturn:%u mem:%u "
-        "weight=[%u,%u]",
+        "CompactGraph #nodes:%u #edges:%u restricted:%u uturn:%u #turncosts:%u "
+        "mem:%u weight=[%u,%u]",
         edges_start_.size() - 1, edges_.size(), restricted_access, uturn,
+        turn_costs_.size(),
         edges_start_.size() * sizeof(uint32_t) +
             edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
         min_weight, max_weight);
@@ -312,7 +401,8 @@ class CompactDirectedGraph {
     uint32_t full_restricted = 0;
     uint32_t partial_restricted = 0;
     for (const FullEdge& e : full_edges) {
-      // LOG_S(INFO) << absl::StrFormat("Cluster:%u pos:%u from:%u to:%u w:%d",
+      // LOG_S(INFO) << absl::StrFormat("Cluster:%u pos:%u from:%u to:%u
+      // w:%d",
       //                                cluster.cluster_id, edges_.size(),
       //                                e.from_c_idx, e.to_c_idx,
       //                                e.weight);
@@ -333,7 +423,7 @@ class CompactDirectedGraph {
   bool ConvertGraphBasedTurnRestrictionEdge(
       const TurnRestriction::TREdge& tr_edge,
       const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap,
-      TurnRestriction::TREdge* converted_edge) {
+      TurnRestriction::TREdge* converted_edge) const {
     const auto iter_from = graph_to_compact_nodemap.find(tr_edge.from_node_idx);
     const auto iter_to = graph_to_compact_nodemap.find(tr_edge.to_node_idx);
     if (iter_from == graph_to_compact_nodemap.end() ||
@@ -364,16 +454,19 @@ class CompactDirectedGraph {
   std::vector<PartialEdge> edges_;
 
   // Simple turn restrictions (3 nodes involved). Key is the edge index of
-  // the trigger edge. Value is the allowed offsets of outgoing edges at the via
-  // node.
-  absl::flat_hash_map<uint32_t, uint32_t> simple_tr_map_;
+  // the trigger edge. Value is the allowed offsets of outgoing edges at the
+  // via node.
+  // absl::flat_hash_map<uint32_t, uint32_t> simple_tr_map_;
 
   // Complex turn restrictions, involving more than 3 nodes.
-  // The map is indexed by the first trigger edge index and contains an index to
-  // the first complex turn restriction (starting at the trigger edge) in the
-  // vector below.
+  // The map is indexed by the first trigger edge index and contains an index
+  // to the first complex turn restriction (starting at the trigger edge) in
+  // the vector below.
   absl::flat_hash_map<uint32_t, uint32_t> complex_tr_map_;
   std::vector<ComplexTurnRestriction> complex_trs_;
+
+  // Turn costs indexed by edges, see 'PartialEdge.turn_cost_idx'.
+  std::vector<TurnCostData> turn_costs_;
 };
 
 inline bool operator<(const CompactDirectedGraph::FullEdge& a,
@@ -384,13 +477,14 @@ inline bool operator<(const CompactDirectedGraph::FullEdge& a,
 
 // Visit all reachable nodes using a BFS, starting from the nodes in
 // 'routing_nodes', using 'opt' to limit expansion. Assigns a serial id=0..N-1
-// to each node. The routing nodes are mapped to indices
+// to each visted node. The routing nodes are mapped to indices
 // [0..deduped_routing_nodes_size-1] in the given order, ignoring duplicate
 // nodes.
 //
 // Note: If a routing node is in a dead end (and opt.avoid_dead_end is true),
-// then the bridge is allowed to be traversed in both directions. This way, the
-// resulting graph contains all dead ends with routing nodes in them.
+// then the specific bridge is allowed to be traversed in both directions.
+// This way, the resulting graph contains all dead ends which contain routing
+// nodes.
 //
 // 'undirected_expand': If 'false', then only forward edges are followed, i.e.
 // only nodes reachable by forward routing from one of the start nodes will be
@@ -400,8 +494,9 @@ inline bool operator<(const CompactDirectedGraph::FullEdge& a,
 // Returns the number of visited nodes in 'num_nodes' and the edges between
 // visited nodes in 'full_edges'.
 //
-// If 'graph_to_compact_nodemap' is not nullptr, then it will contain a mapping
-// from indexes in graph.nodes to indexes in the compact graph [0..num_nodes-1].
+// If 'graph_to_compact_nodemap' is not nullptr, then it will contain a
+// mapping from indexes in graph.nodes to indexes in the compact graph
+// [0..num_nodes-1].
 inline void CollectEdgesForCompactGraph(
     const Graph& g, const RoutingMetric& metric, RoutingOptions opt,
     const std::vector<std::uint32_t>& routing_nodes, bool undirected_expand,
@@ -430,9 +525,12 @@ inline void CollectEdgesForCompactGraph(
   }
   const uint32_t deduped_routing_nodes_size = graph_to_compact_nodemap->size();
 
-  // Find dead end bridge nodes for routing nodes, and preallocate them.
-  // This way they have c_idx values in a defined range, which allows fast
-  // checks (see max_bridge_c_idx below).
+  // Special case, which handles routing nodes in dead-ends while
+  // opt.avoid_dead_end is true. We find the dead-end bridge node
+  // for the routing node and preallocate a compact index 'c_idx' for it. This
+  // way they allocate c_idx values for these special bridges in a defined
+  // range in the compact graph, which allows fast checks (see
+  // max_bridge_c_idx below).
   if (opt.avoid_dead_end) {
     for (uint32_t node_idx : routing_nodes) {
       if (g.nodes.at(node_idx).dead_end) {
@@ -450,7 +548,7 @@ inline void CollectEdgesForCompactGraph(
   // allowed bridges.
   const uint32_t max_bridge_c_idx = graph_to_compact_nodemap->size() - 1;
 
-  // Do a BFS.
+  // Allocate all the other nodes, i.e. do a BFS.
   uint32_t check_idx = 0;
   while (!q.empty()) {
     uint32_t node_idx = q.front();
@@ -529,8 +627,8 @@ inline void CollectEdgesForCompactGraph(
       // Examine neighbours connected by backward edges and add them to the
       // queue if they haven't been seen yet.
       for (const GEdge& edge : gnode_inverted_edges(g, node_idx)) {
-        // for (size_t i = node.num_edges_out; i < gnode_total_edges(node); ++i)
-        // { const GEdge& edge = node.edges[i];
+        // for (size_t i = node.num_edges_out; i < gnode_total_edges(node);
+        // ++i) { const GEdge& edge = node.edges[i];
         const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
         if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                               EDGE_INVERSE_DIR(edge))) {

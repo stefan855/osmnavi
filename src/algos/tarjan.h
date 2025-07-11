@@ -130,8 +130,8 @@ class Tarjan {
     std::vector<std::int32_t> visno(g_.nodes.size(), -1);
     std::vector<std::int32_t> low(g_.nodes.size(), -1);
     LOG_S(INFO) << absl::StrFormat(
-        "Tarjan.FindBridges() Component start node %u size %u", comp.start_node,
-        comp.size);
+        "Tarjan.FindBridges() Component start node %lld (idx:%u) size %u",
+        GetGNodeIdSafe(g_, comp.start_node), comp.start_node, comp.size);
     CHECK_GT_S(comp.size, 0u);
     DFSIterative(comp, &visno, &low, bridges);
     return 0;

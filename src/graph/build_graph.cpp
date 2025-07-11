@@ -1058,6 +1058,7 @@ void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta,
         CHECK_EQ_S(tr.path.size(), 2);
         meta->simple_turn_restrictions.push_back(tr);
       } else {
+        CHECK_GT_S(tr.path.size(), 2);
         meta->graph.complex_turn_restrictions.push_back(tr);
       }
     }
@@ -1375,7 +1376,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_forward_car_restr_free);
   LOG_S(INFO) << absl::StrFormat("  Car restricted:   %12lld",
                                  stats.num_edges_forward_car_restricted);
-  LOG_S(INFO) << absl::StrFormat("  Car restricted2:  %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Car restricted 2nd:%11lld",
                                  stats.num_edges_forward_car_restricted2);
   LOG_S(INFO) << absl::StrFormat("  Car strange:      %12lld",
                                  stats.num_edges_forward_car_strange);
@@ -1493,6 +1494,16 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
       e.turn_cost_idx = deduper.Add(tcd);
     }
   }
+  CHECK_LE_S(deduper.num_unique(), MAX_TURN_COST_IDX);
+
+  deduper.SortByPopularity();
+  auto sort_mapping = deduper.GetSortMapping();
+  for (GEdge& e : g.edges) {
+    if (!e.inverted) {
+      e.turn_cost_idx = sort_mapping.at(e.turn_cost_idx);
+    }
+  }
+
   meta->graph.turn_costs = deduper.GetObjVector();
   LOG_S(INFO) << absl::StrFormat(
       "DeDuperWithIds<TurnCostData>: unique:%u tot:%u", deduper.num_unique(),

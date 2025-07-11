@@ -221,8 +221,8 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
           << tr->relation_id;
       prev_idx = entry.to_node_idx;
 
-      entry.edge_idx = gnode_find_forward_edge_idx(
-          g, entry.from_node_idx, entry.to_node_idx, entry.way_idx);
+      entry.edge_idx = gnode_find_edge_idx(g, entry.from_node_idx,
+                                           entry.to_node_idx, entry.way_idx);
       const GEdge& edge = g.edges.at(entry.edge_idx);
       if (edge.inverted || edge.other_node_idx != entry.to_node_idx) {
         if (verbosity >= Verbosity::Warning) {
@@ -269,11 +269,13 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
                                    chain.GetChainCodeString(), tr->relation_id);
     if (tr->path.size() >= 2) {
       LOG_S(INFO) << absl::StrFormat(
-          "TR: Connecting nodes from:%lld via-in:%lld via-out:%lld to:%lld",
-          GetGNodeIdSafe(g, tr->path.front().from_node_idx),
+          "TR %lld: Connecting nodes from:%lld via-in:%lld via-out:%lld "
+          "to:%lld cat:%s",
+          tr->relation_id, GetGNodeIdSafe(g, tr->path.front().from_node_idx),
           GetGNodeIdSafe(g, tr->path.front().to_node_idx),
           GetGNodeIdSafe(g, tr->path.back().from_node_idx),
-          GetGNodeIdSafe(g, tr->path.back().to_node_idx));
+          GetGNodeIdSafe(g, tr->path.back().to_node_idx),
+          tr->via_is_node ? "simple" : "complex");
     }
   }
 

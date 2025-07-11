@@ -198,6 +198,8 @@ constexpr std::uint32_t MAX_EDGE_DISTANCE_CM_BITS = 32;
 // roughly 1342 km.
 constexpr std::uint32_t MAX_EDGE_DISTANCE_CM =
     (1ull << MAX_EDGE_DISTANCE_CM_BITS) - 1;
+constexpr uint32_t MAX_TURN_COST_IDX_BITS = 18;
+constexpr uint32_t MAX_TURN_COST_IDX = (1ull << MAX_TURN_COST_IDX_BITS) - 1;
 
 struct GEdge {
   enum RESTRICTION : uint8_t {
@@ -216,7 +218,7 @@ struct GEdge {
   std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
   // std::uint64_t distance_cm : 40;
-  std::uint32_t distance_cm : MAX_EDGE_DISTANCE_CM_BITS;
+  std::uint32_t distance_cm;  // MAX_EDGE_DISTANCE_CM_BITS is 32 anyways.
   // True iff this is the first time 'other_node_idx' has this value in the list
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
@@ -260,10 +262,10 @@ struct GEdge {
   // is always allowed to do a u-turn at an endpoint of a street. Additionally,
   // it is allowed to do a u-turn if the edge is non-restricted and one would
   // have to enter a restricted access area if not doing a u-turn.
-  std::uint8_t car_uturn_allowed : 1;
-  std::uint8_t complex_turn_restriction_trigger : 1;
+  std::uint32_t car_uturn_allowed : 1;
+  std::uint32_t complex_turn_restriction_trigger : 1;
 
-  std::uint32_t turn_cost_idx : 24;
+  std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -521,12 +523,29 @@ inline std::vector<FullGEdge> gnode_incoming_edges(const Graph& g,
   return res;
 }
 
-inline const uint32_t gnode_find_forward_edge_idx(const Graph& g,
-                                                  uint32_t from_node_idx,
-                                                  uint32_t to_node_idx,
-                                                  uint32_t way_idx) {
+inline const uint32_t gnode_find_forward_edge_offset(const Graph& g,
+                                                     uint32_t from_node_idx,
+                                                     uint32_t to_node_idx,
+                                                     uint32_t way_idx) {
+  const GNode& from = g.nodes.at(from_node_idx);
+  uint32_t e_start = from.edges_start_pos;
+  for (uint32_t off = 0; off < from.num_edges_forward; ++off) {
+    if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
+        g.edges.at(e_start + off).way_idx == way_idx) {
+      return off;
+    }
+  }
+  ABORT_S() << absl::StrFormat(
+      "Node %lld has no forward edge to node %lld with way %lld",
+      GetGNodeIdSafe(g, from_node_idx), GetGNodeIdSafe(g, to_node_idx),
+      g.ways.at(way_idx).id);
+}
+
+inline const uint32_t gnode_find_edge_idx(const Graph& g,
+                                          uint32_t from_node_idx,
+                                          uint32_t to_node_idx,
+                                          uint32_t way_idx) {
   uint32_t e_start = g.nodes.at(from_node_idx).edges_start_pos;
-  // uint32_t num = g.nodes.at(from_node_idx).num_edges_forward;
   uint32_t num = gnode_edge_stop(g, from_node_idx) - e_start;
   for (uint32_t off = 0; off < num; ++off) {
     if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
@@ -701,4 +720,3 @@ struct hash<TurnCostData> {
   }
 };
 }  // namespace std
-
