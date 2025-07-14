@@ -143,6 +143,29 @@ class CompactDirectedGraph {
 
  private:
   // Compute turn costs for edge 'in_ce'.
+  TurnCostData ConvertTurnCostsAtEdge(
+      const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
+      const std::vector<std::uint32_t>& compact_to_graph) const {
+    const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
+    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_edges_forward,
+               g_tcd.turn_costs.size());
+
+    const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
+    const uint32_t c_stop = edges_start_.at(in_ce.to_c_idx + 1);
+    TurnCostData tcd{{c_stop - c_start, TURN_COST_ZERO_COMPRESSED}};
+
+    for (uint32_t ce_idx = c_start; ce_idx < c_stop; ++ce_idx) {
+      // Find corresponding edge in graph 'g'.
+      const PartialEdge& out_ce = edges_.at(ce_idx);
+      uint32_t g_off = gnode_find_forward_edge_offset(
+          g, in_ge.other_node_idx, compact_to_graph.at(out_ce.to_c_idx),
+          out_ce.way_idx);
+      // Copy turn cost for this one edge.
+      tcd.turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
+    }
+    return tcd;
+  }
+#if 0
   void ConvertTurnCostsAtEdge(
       const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
       const std::vector<std::uint32_t>& compact_to_graph,
@@ -165,6 +188,7 @@ class CompactDirectedGraph {
       tcd->turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
     }
   }
+#endif
 
  public:
   // Add the turn costs that are stored with every outgoing edge in 'g' to the
@@ -179,7 +203,7 @@ class CompactDirectedGraph {
         InvertGraphToCompactNodeMap(graph_to_compact_nodemap);
 
     DeDuperWithIds<TurnCostData> deduper;
-    TurnCostData tcd;
+    // TurnCostData tcd;
     for (uint32_t cn_idx = 0; cn_idx < num_nodes_; cn_idx++) {
       for (uint32_t ce_idx = edges_start_.at(cn_idx);
            ce_idx < edges_start_.at(cn_idx + 1); ce_idx++) {
@@ -188,13 +212,14 @@ class CompactDirectedGraph {
         const GEdge& in_ge =
             gnode_find_edge(g, compact_to_graph.at(cn_idx),
                             compact_to_graph.at(in_ce.to_c_idx), in_ce.way_idx);
-        ConvertTurnCostsAtEdge(g, in_ce, in_ge, compact_to_graph, &tcd);
+        TurnCostData tcd =
+            ConvertTurnCostsAtEdge(g, in_ce, in_ge, compact_to_graph/*, &tcd*/);
 
         // No turn costs except blocked turns for non-time metrics.
         if (!is_time_metric) {
-          for (auto& val : tcd.turn_costs) {
-            if (val != TURN_COST_INF_COMPRESSED) {
-              val = TURN_COST_ZERO_COMPRESSED;
+          for (uint32_t pos = 0; pos < tcd.turn_costs.size(); ++pos) {
+            if (tcd.turn_costs.at(pos) != TURN_COST_INF_COMPRESSED) {
+              tcd.turn_costs.at(pos) = TURN_COST_ZERO_COMPRESSED;
             }
           }
         }

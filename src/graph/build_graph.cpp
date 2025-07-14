@@ -1476,7 +1476,7 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
       .sorted_trs = meta->simple_turn_restrictions,
       .map_to_first =
           ComputeTurnRestrictionMapToFirst(meta->simple_turn_restrictions)};
-  TurnCostData tcd;
+  // TurnCostData tcd;
   // For each node in the graph.
   for (uint32_t from_idx = 0; from_idx < g.nodes.size(); ++from_idx) {
     const GNode& from_node = g.nodes.at(from_idx);
@@ -1488,9 +1488,9 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
       const NodeAttribute* attr = g.FindNodeAttr(target_node.node_id);
       // Compute the turn costs when continuing at 'target_node' after arriving
       // there through 'e'.
-      ComputeTurnCostsForEdge(g, meta->opt.vehicle_types.front(), from_idx,
-                              from_node.edges_start_pos + off, indexed_trs,
-                              attr, &tcd);
+      TurnCostData tcd = ComputeTurnCostsForEdge(
+          g, meta->opt.vehicle_types.front(), from_idx,
+          from_node.edges_start_pos + off, indexed_trs, attr/*, &tcd*/);
       e.turn_cost_idx = deduper.Add(tcd);
     }
   }

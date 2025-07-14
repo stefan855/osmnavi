@@ -7,6 +7,7 @@
 #include "base/constants.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
+#include "base/small_vector.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/routing_attrs.h"
@@ -24,7 +25,8 @@
 // u-turn is not allowed or something else.
 struct TurnCostData {
   // TODO: Use a more memory-efficient data structure than a vector.
-  std::vector<uint8_t> turn_costs;
+  // std::vector<uint8_t> turn_costs;
+  SmallVector<uint8_t, 7> turn_costs;
 
   bool operator==(const TurnCostData& other) const {
     return turn_costs == other.turn_costs;
@@ -619,6 +621,55 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, uint32_t way_idx) {
 
 inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
   return g.way_shared_attrs.at(way.wsa_id);
+}
+
+// Describe a path of length two (two edges, three nodes).
+// The first edge starts at 'node0_idx' with edge offset 'edge0_off'.
+// The second edge starts at 'node1_idx' with edge offset 'edge1_off'.
+struct PathLen2Data final {
+  bool valid = false;
+  uint32_t node0_idx = 0;
+  uint32_t edge0_off = 0;
+  uint32_t node1_idx = 0;
+  uint32_t edge1_off = 0;
+  uint32_t node2_idx = 0;
+
+  const GEdge& edge0(const Graph& g) {
+    return g.edges.at(g.nodes.at(node0_idx).edges_start_pos + edge0_off);
+  }
+  const GEdge& edge1(const Graph& g) {
+    return g.edges.at(g.nodes.at(node1_idx).edges_start_pos + edge1_off);
+  }
+  // The compressed turn cost between the first and the second edge.
+  uint32_t get_compressed_turn_cost_0to1(const Graph& g) {
+    return g.turn_costs.at(edge0(g).turn_cost_idx).turn_costs.at(edge1_off);
+  }
+};
+
+// Find a path of length 2 (nodes and edges), given the three nodes on the
+// path.
+// If a path was found, return the path with 'valid' set to true.
+// If the path can't be found, return 'valid' set to false.
+inline PathLen2Data FindPathLen2(const Graph& g, uint32_t node0_idx,
+                           uint32_t node1_idx, uint32_t node2_idx) {
+  const GNode& n0 = g.nodes.at(node0_idx);
+  for (uint32_t off0 = 0; off0 < n0.num_edges_forward; ++off0) {
+    if (g.edges.at(n0.edges_start_pos + off0).other_node_idx == node1_idx) {
+      const GNode& n1 = g.nodes.at(node1_idx);
+      for (uint32_t off1 = 0; off1 < n1.num_edges_forward; ++off1) {
+        if (g.edges.at(n1.edges_start_pos + off1).other_node_idx == node2_idx) {
+          // Found a path
+          return {.valid = true,
+                  .node0_idx = node0_idx,
+                  .edge0_off = off0,
+                  .node1_idx = node1_idx,
+                  .edge1_off = off1,
+                  .node2_idx = node2_idx};
+        }
+      }
+    }
+  }
+  return {.valid = false};
 }
 
 // Returns the position of routing attrs for vehicle type 'vt' and direction

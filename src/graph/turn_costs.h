@@ -26,27 +26,32 @@ struct TurnCostData {
 };
 #endif
 
-constexpr uint32_t TURN_COST_INF = 100'000'000u;  // ~115 days
+constexpr uint32_t TURN_COST_INF = 1'000'000'000u;  // ~11.5 days
 constexpr uint32_t TURN_COST_ZERO = 0;
+constexpr uint32_t TURN_COST_U_TURN = 10000;
+
 
 namespace {
-// turn costs (unit tenth of a second) are compressed into 63 buckets, which
+// turn costs in milliseconds are compressed into 63 buckets, which
 // represent the following values.
 static constexpr size_t compressed_turn_cost_values_dim = 64;
 static constexpr uint32_t
     compressed_turn_cost_values[compressed_turn_cost_values_dim] = {
-        0,     1,      2,      3,      4,      5,      6,      7,
-        8,     9,      10,     11,     12,     13,     14,     15,
-        16,    19,     22,     25,     28,     33,     38,     43,
-        50,    57,     66,     76,     87,     100,    115,    132,
-        172,   224,    291,    378,    492,    639,    831,    1080,
-        1404,  1826,   2373,   3085,   4011,   5214,   6778,   8812,
-        11455, 14892,  19359,  25167,  32717,  42532,  55292,  71880,
-        93443, 121477, 157919, 205295, 266884, 346949, 451034, TURN_COST_INF};
+        0,        100,      200,      300,          400,      500,
+        600,      700,      800,      900,          1000,     1100,
+        1200,     1300,     1400,     1500,         1600,     1900,
+        2200,     2500,     2800,     3300,         3800,     4300,
+        5000,     5700,     6600,     7600,         8700,     10000,
+        11500,    13200,    17200,    22400,        29100,    37800,
+        49200,    63900,    83100,    108000,       140400,   182600,
+        237300,   308500,   401100,   521400,       677800,   881200,
+        1145500,  1489200,  1935900,  2516700,      3271700,  4253200,
+        5529200,  7188000,  9344300,  12147700,     15791900, 20529500,
+        26688400, 34694900, 45103400, TURN_COST_INF};
 }  // namespace
 
-// Compress a turn cost value (unit one tenth of a second) to compressed format
-// using 6 bits. Note that all values > 451034 are compressed to INF and are
+// Compress a turn cost value (milli seconds) to compressed format
+// using 6 bits. Note that all values > 45103400 are compressed to INF and are
 // treated as non-routable.
 inline constexpr uint32_t compress_turn_cost(uint32_t cost) {
   if (cost == 0) return 0;
@@ -86,21 +91,33 @@ inline constexpr uint32_t decompress_turn_cost(uint32_t compressed_cost) {
 namespace {
 
 // Compute the cost of a turn from edge e1 to e2. A smaller angle has higher
-// cost. The unit of the value returned is 1/100 seconds.
+// cost. The unit of the value returned is in milli seconds.
 //
-// TODO: This code is far too simple! It does not consider the max speed and it
-// only looks at the angle of two consecutive segments, which might yield wrong
-// turning costs if the segments of the edges are very short.
+// TODO: Use the following formula
+// https://www.lernhelfer.de/schuelerlexikon/physik/artikel/kurvenfahrten
+// Formula max. v through curve with length s and angle-change a:
+//   v-max = 3.6 * sqrt(u * g * s / (a * pi / 180))
+//           u = coefficient of static friction (Haftreibungskoeffizient)
+//               depends on conditions (rain etc.) surface and more.
+//               Range for cars is 0.4..0.8 (on asphalt roads).
+//           g = 9.81
+//           s = arc length (Bogenlänge)
+//           a = angle change in degrees
+// Example for a curve with length 100m and 90 degree change in direction:
+//   v-max = 69.70 km/h = 3.6 * math.sqrt(0.6*9.81*100/(90*3.14/180))
 uint32_t turn_angle_cost(const GEdge& e1, const GEdge& e2,
                          uint32_t turning_angle) {
   if (turning_angle > 160) {
     return 0;
   } else if (turning_angle > 120) {
-    return 5;
+    return 500;
   } else if (turning_angle > 60) {
-    return 20;
+    return 2000;
+  } else if (turning_angle > 0) {
+    return 4000;
   } else {
-    return 50;
+    // u-turn.
+    return TURN_COST_U_TURN;
   }
 }
 
@@ -204,18 +221,18 @@ inline void ProcessSimpleTurnRestrictions(
 // turn_restriction_data:
 // node_attr:
 // tcd: resulting turn costs data. Any incoming data is overwritten.
-inline bool ComputeTurnCostsForEdge(const Graph& g, VEHICLE vh,
-                                    uint32_t start_node_idx, uint32_t edge_idx,
-                                    const IndexedTurnRestrictions& indexed_trs,
-                                    const NodeAttribute* node_attr,
-                                    TurnCostData* tcd) {
-  CHECK_NOTNULL_S(tcd);
+inline TurnCostData ComputeTurnCostsForEdge(
+    const Graph& g, VEHICLE vh, uint32_t start_node_idx, uint32_t edge_idx,
+    const IndexedTurnRestrictions& indexed_trs, const NodeAttribute* node_attr
+    /* ,TurnCostData* tcd*/) {
+  // CHECK_NOTNULL_S(tcd);
   const GEdge& e = g.edges.at(edge_idx);
   const GNode& target_node = g.nodes.at(e.other_node_idx);
 
   // Set default.
-  tcd->turn_costs.assign(target_node.num_edges_forward,
-                         TURN_COST_ZERO_COMPRESSED);
+  // tcd->turn_costs.assign(target_node.num_edges_forward,
+  //                       TURN_COST_ZERO_COMPRESSED);
+  TurnCostData tcd{{target_node.num_edges_forward, TURN_COST_ZERO_COMPRESSED}};
 
   // Handle automatically allowed u-turns.
   // TODO: this might contradict a turn restriction or node attributes induced
@@ -224,7 +241,7 @@ inline bool ComputeTurnCostsForEdge(const Graph& g, VEHICLE vh,
     for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
       if (g.edges.at(target_node.edges_start_pos + off).other_node_idx ==
           start_node_idx) {
-        tcd->turn_costs.at(off) = TURN_COST_INF_COMPRESSED;
+        tcd.turn_costs.at(off) = TURN_COST_INF_COMPRESSED;
       }
     }
   }
@@ -256,37 +273,37 @@ inline bool ComputeTurnCostsForEdge(const Graph& g, VEHICLE vh,
         ;                                              // Allowed, do nothing.
       } else {
         // Forbidden.
-        tcd->turn_costs.at(off) = TURN_COST_INF_COMPRESSED;
+        tcd.turn_costs.at(off) = TURN_COST_INF_COMPRESSED;
       }
     }
   }
 
   ProcessSimpleTurnRestrictions(g, indexed_trs, vh, start_node_idx, edge_idx,
-                                tcd);
+                                &tcd);
 
   // ==========================================================================
-  // So far, all turned costs stored in tcd->turn_costs are on/off, i.e. either
+  // So far, all turned costs stored in tcd.turn_costs are on/off, i.e. either
   // TURN_COST_ZERO_COMPRESSED or TURN_COST_INF_COMPRESSED.
   // Now compute small increments and recompress the values that were changed.
   // ==========================================================================
 
-  uint32_t static_cost = 0;  // unit is one tenth of a second.
+  uint32_t static_cost = 0;  // unit is milli second
   if (node_attr != nullptr) {
     if (node_attr->bit_stop) {
-      static_cost += 30;
+      static_cost += 3000;
     }
     if (node_attr->bit_traffic_signals) {
-      static_cost += 100;
+      static_cost += 10000;
     }
     if (node_attr->bit_crossing) {
-      static_cost += 30;
+      static_cost += 3000;
     }
     if (node_attr->bit_railway_crossing) {
       // We don't know how busy the railway is...
-      static_cost += 300;
+      static_cost += 30000;
     }
     if (node_attr->bit_traffic_calming) {
-      static_cost += 10;
+      static_cost += 1000;
     }
   }
 
@@ -296,7 +313,7 @@ inline bool ComputeTurnCostsForEdge(const Graph& g, VEHICLE vh,
       angle_to_east_degrees(target_node.lat, target_node.lon, start_node.lat,
                             start_node.lon, e.distance_cm);
   for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
-    if (tcd->turn_costs.at(off) != TURN_COST_INF_COMPRESSED) {
+    if (tcd.turn_costs.at(off) != TURN_COST_INF_COMPRESSED) {
       const GEdge e2 = g.edges.at(target_node.edges_start_pos + off);
       const GNode other_node = g.nodes.at(e2.other_node_idx);
       const uint32_t edge2_angle =
@@ -304,10 +321,10 @@ inline bool ComputeTurnCostsForEdge(const Graph& g, VEHICLE vh,
                                 other_node.lat, other_node.lon, e2.distance_cm);
       const uint32_t turning_angle =
           angle_between_edges(edge1_angle, edge2_angle);
-      tcd->turn_costs.at(off) = compress_turn_cost(
+      tcd.turn_costs.at(off) = compress_turn_cost(
           static_cost + turn_angle_cost(e, e2, turning_angle));
     }
   }
 
-  return true;
+  return tcd;
 }

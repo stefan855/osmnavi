@@ -10,7 +10,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
-#include "algos/edge_router.h"
+#include "algos/edge_router2.h"
 #include "base/argli.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
@@ -146,32 +146,32 @@ float GetLon(const GNode& n) { return n.lon / static_cast<float>(TEN_POW_7); }
 
 float GetLat(const GNode& n) { return n.lat / static_cast<float>(TEN_POW_7); }
 
-std::string GetEdgeName(const Graph& g, const CTRDeDuper& dd,
-                        const EdgeRouter::VisitedEdge& ve) {
-  if (ve.key.GetType() == GEdgeKey::CLUSTER) {
+std::string GetEdgeName(const Graph& g, const CTRList& ctr_list,
+                        const EdgeRouter2::VisitedEdge& ve) {
+  if (ve.key.GetType() == EdgeRoutingLabel::CLUSTER) {
     return "cluster edge";
   }
-  const GWay& way = g.ways.at(ve.key.GetEdge(g, dd).way_idx);
+  const GWay& way = g.ways.at(ve.key.GetEdge(g, ctr_list).way_idx);
   return absl::StrFormat("%s (w:%lld %lld->%lld)",
                          way.streetname == nullptr ? "<null>" : way.streetname,
-                         way.id, ve.key.FromNode(g, dd).node_id,
-                         ve.key.ToNode(g, dd).node_id);
+                         way.id, ve.key.FromNode(g, ctr_list).node_id,
+                         ve.key.ToNode(g, ctr_list).node_id);
 }
 
 double Round1(double val) { return std::round(val * 10.0) / 10.0; }
 
-JsonResult CreateOneStep(const Graph& g, const EdgeRouter& router,
+JsonResult CreateOneStep(const Graph& g, const EdgeRouter2& router,
                          const RoutingResult& res, uint32_t pos,
                          bool arrival = false) {
-  const CTRDeDuper& dd = router.GetCTRDeDuper();
+  const CTRList& ctr_list = router.GetCTRList();
   uint32_t v_idx = res.route_v_idx.at(pos);
-  const EdgeRouter::VisitedEdge& ve = router.GetVEdge(v_idx);
-  const EdgeRouter::VisitedEdge* prev_edge = nullptr;
+  const EdgeRouter2::VisitedEdge& ve = router.GetVEdge(v_idx);
+  const EdgeRouter2::VisitedEdge* prev_edge = nullptr;
   if (ve.prev_v_idx != INFU32) {
     prev_edge = &router.GetVEdge(ve.prev_v_idx);
   }
-  const GNode& to_node = ve.key.ToNode(g, dd);
-  const GNode& from_node = arrival ? to_node : ve.key.FromNode(g, dd);
+  const GNode& to_node = ve.key.ToNode(g, ctr_list);
+  const GNode& from_node = arrival ? to_node : ve.key.FromNode(g, ctr_list);
   std::vector<CoordinatePair> coords;
   coords.push_back({.lat = GetLat(from_node), .lon = GetLon(from_node)});
   double dist = 0;
@@ -182,10 +182,10 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter& router,
     duration = (prev_edge != nullptr ? ve.min_metric - prev_edge->min_metric
                                      : ve.min_metric) /
                1000.0;
-    if (ve.key.GetType() == GEdgeKey::CLUSTER) {
+    if (ve.key.GetType() == EdgeRoutingLabel::CLUSTER) {
       dist = 11111;
     } else {
-      dist = ve.key.GetEdge(g, dd).distance_cm / 100.0;
+      dist = ve.key.GetEdge(g, ctr_list).distance_cm / 100.0;
     }
   }
 
@@ -200,16 +200,16 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter& router,
 
   nlohmann::json step = {{"geometry", EncodePolyline(coords)},
                          {"maneuver", maneuver},
-                         {"name", GetEdgeName(g, dd, ve)},
+                         {"name", GetEdgeName(g, ctr_list, ve)},
                          {"duration", Round1(duration)},
                          {"distance", Round1(dist)}};
   return {.j = step,
           .sum_dist = dist,
           .sum_duration = duration,
-          .last_name = GetEdgeName(g, dd, ve)};
+          .last_name = GetEdgeName(g, ctr_list, ve)};
 }
 
-JsonResult CreateSteps(const Graph& g, const EdgeRouter& router,
+JsonResult CreateSteps(const Graph& g, const EdgeRouter2& router,
                        const RoutingResult& res) {
   JsonResult result;
   result.j = nlohmann::json::array();
@@ -229,26 +229,28 @@ JsonResult CreateSteps(const Graph& g, const EdgeRouter& router,
 }
 
 nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
-                           const EdgeRouter& router, const RoutingResult& res) {
+                           const EdgeRouter2& router,
+                           const RoutingResult& res) {
   if (res.route_v_idx.empty()) {
     return {{"code", "NoRoute"}};
   }
-  const CTRDeDuper& dd = router.GetCTRDeDuper();
+  const CTRList& ctr_list = router.GetCTRList();
 
   nlohmann::json waypoints = nlohmann::json::array();
   {
-    const EdgeRouter::VisitedEdge& ve =
+    const EdgeRouter2::VisitedEdge& ve =
         router.GetVEdge(res.route_v_idx.front());
-    const GNode& n = ve.key.FromNode(g, dd);
+    const GNode& n = ve.key.FromNode(g, ctr_list);
     waypoints.push_back({{"distance", std::roundf(dist_p1 / 10.0) / 10.0},
-                         {"name", GetEdgeName(g, dd, ve)},
+                         {"name", GetEdgeName(g, ctr_list, ve)},
                          {"location", {GetLon(n), GetLat(n)}}});
   }
   {
-    const EdgeRouter::VisitedEdge& ve = router.GetVEdge(res.route_v_idx.back());
-    const GNode& n = ve.key.ToNode(g, dd);
+    const EdgeRouter2::VisitedEdge& ve =
+        router.GetVEdge(res.route_v_idx.back());
+    const GNode& n = ve.key.ToNode(g, ctr_list);
     waypoints.push_back({{"distance", std::roundf(dist_p2 / 10.0) / 10.0},
-                         {"name", GetEdgeName(g, dd, ve)},
+                         {"name", GetEdgeName(g, ctr_list, ve)},
                          {"location", {GetLon(n), GetLat(n)}}});
   }
 
@@ -302,7 +304,7 @@ nlohmann::json ComputeRoute(const Graph& g,
   }
 
   const absl::Time start = absl::Now();
-  EdgeRouter router(g, 0);
+  EdgeRouter2 router(g, 0);
   auto res = router.Route(start_idx, target_idx, metric, opt);
   const double elapsed = ToDoubleSeconds(absl::Now() - start);
 

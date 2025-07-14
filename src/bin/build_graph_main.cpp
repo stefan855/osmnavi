@@ -76,6 +76,10 @@ void PrintStructSizes() {
                                  sizeof(build_graph::WayTaggedZones));
   LOG_S(INFO) << absl::StrFormat("sizeof(pair<int32_t,int32_t>):  %4u",
                                  sizeof(std::pair<int32_t, int32_t>));
+  LOG_S(INFO) << absl::StrFormat("sizeof(CTRPosition):            %4u",
+                                 sizeof(CTRPosition));
+  LOG_S(INFO) << absl::StrFormat("sizeof(TurnCostData):           %4u",
+                                 sizeof(TurnCostData));
 }
 
 template <typename RouterT>

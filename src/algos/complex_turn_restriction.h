@@ -84,6 +84,7 @@ struct CTRPosition {
 };
 
 using ActiveCtrs = std::vector<CTRPosition>;
+// using ActiveCtrs = SmallVector<CTRPosition>;
 
 // Add an edge to the path currently followed by active_ctrs. Modifies
 // active_ctrs by advancing and removing individual turn restrictions to reflect

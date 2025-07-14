@@ -38,7 +38,7 @@ class RoutingMetricTime : public RoutingMetric {
         << RoutingAttrsDebugString(GetRAFromWSA(wsa, vt, dir));
     // Compute how long it takes in milliseconds.
     return ((36ull * edge.distance_cm) / km_per_hour) +
-           decompress_turn_cost(compressed_turn_cost) * 100;
+           decompress_turn_cost(compressed_turn_cost);
   }
 
   std::string_view Name() const override final { return "time(ms)"; }

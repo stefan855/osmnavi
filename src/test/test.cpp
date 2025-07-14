@@ -10,6 +10,7 @@
 #include "base/deduper_with_ids.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
+#include "base/small_vector.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
 #include "base/varbyte.h"
@@ -1419,38 +1420,132 @@ void TestClosestPoint() {
 void TestTurningCostCompression() {
   FUNC_TIMER();
   CHECK_EQ_S(compress_turn_cost(0), 0);
-  CHECK_EQ_S(compress_turn_cost(1), 1);
-  CHECK_EQ_S(compress_turn_cost(2), 2);
+  CHECK_EQ_S(compress_turn_cost(100), 1);
+  CHECK_EQ_S(compress_turn_cost(200), 2);
 
-  CHECK_EQ_S(compress_turn_cost(116), 30);
-  CHECK_EQ_S(compress_turn_cost(123), 30);
-  CHECK_EQ_S(compress_turn_cost(124), 31);
-  CHECK_EQ_S(compress_turn_cost(131), 31);
-  CHECK_EQ_S(compress_turn_cost(132), 31);
-  CHECK_EQ_S(compress_turn_cost(133), 31);
+  CHECK_EQ_S(compress_turn_cost(11600), 30);
+  CHECK_EQ_S(compress_turn_cost(12300), 30);
+  CHECK_EQ_S(compress_turn_cost(12400), 31);
+  CHECK_EQ_S(compress_turn_cost(13100), 31);
+  CHECK_EQ_S(compress_turn_cost(13200), 31);
+  CHECK_EQ_S(compress_turn_cost(13300), 31);
 
-  CHECK_EQ_S(compress_turn_cost(346949 + (451034 - 346949) / 2 - 1), 61);
-  CHECK_EQ_S(compress_turn_cost(346949 + (451034 - 346949) / 2 + 1), 62);
-  CHECK_EQ_S(compress_turn_cost(451034), 62);
-  CHECK_EQ_S(compress_turn_cost(451034 + 1), 63);
+  CHECK_EQ_S(compress_turn_cost(34694900 + (45103400 - 34694900) / 2 - 1), 61);
+  CHECK_EQ_S(compress_turn_cost(34694900 + (45103400 - 34694900) / 2 + 1), 62);
+  CHECK_EQ_S(compress_turn_cost(45103400), 62);
+  CHECK_EQ_S(compress_turn_cost(45103400 + 1), 63);
 
   CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(0)), 0);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(1)), 1);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(2)), 2);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(100)), 100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(200)), 200);
 
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(290)), 291);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(291)), 291);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(292)), 291);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(29000)), 29100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(29100)), 29100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(29200)), 29100);
 
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(451033)), 451034);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(451034)), 451034);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(451035)), TURN_COST_INF);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(10'000'000)),
-             TURN_COST_INF);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103300)), 45103400);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103400)), 45103400);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103401)), TURN_COST_INF);
   CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(100'000'000)),
              TURN_COST_INF);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(1'000'000'000)),
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(4'000'000'000u)),
              TURN_COST_INF);
+}
+
+void TestSmallVector() {
+  FUNC_TIMER();
+
+  {
+    SmallVector<uint8_t, 0> x(0, 55);
+    static_assert(sizeof(x) == 16);
+    CHECK_EQ_S(x.size(), 0);
+    CHECK_S(x.internal());
+  }
+
+  {
+    SmallVector<uint8_t, 4> x(4, 55);
+    static_assert(sizeof(x) == 16);
+    CHECK_EQ_S(x.size(), 4);
+    CHECK_EQ_S(x.at(3), 55);
+    CHECK_S(x.internal());
+  }
+
+  {
+    SmallVector<uint8_t, 7> x(7, 55);
+    static_assert(sizeof(x) == 16);
+    CHECK_EQ_S(x.size(), 7);
+    CHECK_S(x.internal());
+  }
+
+  {
+    SmallVector<uint8_t, 7> x(8, 55);
+    static_assert(sizeof(x) == 16);
+    CHECK_EQ_S(x.size(), 8);
+    CHECK_S(!x.internal());
+    CHECK_EQ_S(x.at(7), 55);
+  }
+
+  {
+    SmallVector<uint8_t, 8> x(8, 55);
+    static_assert(sizeof(x) == 24);
+  }
+
+  {
+    SmallVector<uint32_t, 0> x(0, 55);
+    static_assert(sizeof(x) == 16);
+    CHECK_EQ_S(x.size(), 0);
+    CHECK_S(x.internal());
+  }
+
+  {
+    SmallVector<uint32_t, 1> x(1, 55);
+    static_assert(sizeof(x) == 16);
+    CHECK_EQ_S(x.size(), 1);
+    CHECK_EQ_S(x.at(0), 55);
+    CHECK_S(x.internal());
+  }
+
+  {
+    SmallVector<uint32_t, 2> x(2, 55);
+    static_assert(sizeof(x) == 24);
+    CHECK_EQ_S(x.size(), 2);
+    CHECK_EQ_S(x.at(0), 55);
+    CHECK_EQ_S(x.at(1), 55);
+    x.at(1) = 66;
+    CHECK_EQ_S(x.at(1), 66);
+    CHECK_S(x.internal());
+  }
+
+  {
+    SmallVector<uint32_t, 2> x(3, 55);
+    static_assert(sizeof(x) == 24);
+    CHECK_EQ_S(x.size(), 3);
+    CHECK_EQ_S(x.at(0), 55);
+    CHECK_EQ_S(x.at(1), 55);
+    CHECK_EQ_S(x.at(2), 55);
+    x.at(0) = 66;
+    x.at(1) = 77;
+    x.at(2) = 88;
+    CHECK_EQ_S(x.at(0), 66);
+    CHECK_EQ_S(x.at(1), 77);
+    CHECK_EQ_S(x.at(2), 88);
+    CHECK_S(!x.internal());
+  }
+  {
+    SmallVector<uint32_t, 3> x(3, 55);
+    static_assert(sizeof(x) == 24);
+    CHECK_EQ_S(x.size(), 3);
+    CHECK_EQ_S(x.at(0), 55);
+    CHECK_EQ_S(x.at(1), 55);
+    CHECK_EQ_S(x.at(2), 55);
+    x.at(0) = 66;
+    x.at(1) = 77;
+    x.at(2) = 88;
+    CHECK_EQ_S(x.at(0), 66);
+    CHECK_EQ_S(x.at(1), 77);
+    CHECK_EQ_S(x.at(2), 88);
+    CHECK_S(x.internal());
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -1493,6 +1588,7 @@ int main(int argc, char* argv[]) {
   TestRealAngles();
 
   TestTurningCostCompression();
+  TestSmallVector();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

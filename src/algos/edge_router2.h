@@ -172,7 +172,7 @@ class EdgeRouter2 {
   }
 
   // Ugly but currently needed when accessing data in an edge key.
-  const CTRList& GetCTRDeDuper() const { return ctr_list_; }
+  const CTRList& GetCTRList() const { return ctr_list_; }
 
   std::vector<uint32_t> GetShortestPathNodeIndexes(const RoutingResult& res) {
     std::vector<uint32_t> v;

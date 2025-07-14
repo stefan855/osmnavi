@@ -878,8 +878,8 @@ void TestRouteComplexTurnRestrictionNegative() {
     CHECK_EQ_S(res.found_distance, 5000);
     // TODO, should be 5000
     CHECK_EQ_S(12000, RouteOnCompactGraph(g, A, D, RoutingMetricDistance(),
-                                         RoutingOptions())
-                         .found_distance);
+                                          RoutingOptions())
+                          .found_distance);
   }
   {
     // Test route without initial segment.
@@ -1137,6 +1137,62 @@ void TestBitFunctions() {
   CHECK_EQ_S(__builtin_ctzll(1llu << 63), 63);
 }
 
+// Get compressed turn costs for a path of len 2. If the costs can't be found,
+// -1 is returned.
+int64_t GetComprTurnCost(const Graph& g, uint32_t node0_idx, uint32_t node1_idx,
+                         uint32_t node2_idx) {
+  PathLen2Data pd = FindPathLen2(g, node0_idx, node1_idx, node2_idx);
+  if (pd.valid) {
+    return pd.get_compressed_turn_cost_0to1(g);
+  } else {
+    return -1;
+  }
+}
+
+void TestTurnCosts_UTurns() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
+  enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
+  Graph g = CreateComplexTurnRestrictionGraph(true);
+  
+  // Check all u-turn related turn costs in the following graph.
+  // For every edge we check all possible u-turns.
+  /*
+   *                [e]               [f]
+   *                 |               /   \
+   *             1w3 |          5w4 /     \ 5w4
+   *                 |             /       \
+   *                 |            /         \
+   *    [a] ------- [b] ------- [c] ------- [d]
+   *          1w0         1w1          1w2
+   */
+
+  constexpr uint32_t ALLOWED = compress_turn_cost(TURN_COST_U_TURN);
+  constexpr uint32_t FORBIDDEN = TURN_COST_INF_COMPRESSED;
+
+  // Check non-existing path.
+  CHECK_EQ_S(GetComprTurnCost(g, A, B, D), -1);
+
+  // A: u-turn allowed.
+  CHECK_EQ_S(GetComprTurnCost(g, B, A, B), ALLOWED);
+  // B: u-turns forbidden.
+  CHECK_EQ_S(GetComprTurnCost(g, A, B, A), FORBIDDEN);
+  CHECK_EQ_S(GetComprTurnCost(g, C, B, C), FORBIDDEN);
+  CHECK_EQ_S(GetComprTurnCost(g, E, B, E), FORBIDDEN);
+  // C: u-turn: forbidden.
+  CHECK_EQ_S(GetComprTurnCost(g, B, C, B), FORBIDDEN);
+  CHECK_EQ_S(GetComprTurnCost(g, D, C, D), FORBIDDEN);
+  CHECK_EQ_S(GetComprTurnCost(g, F, C, F), FORBIDDEN);
+  // D: u-turn: forbidden.
+  CHECK_EQ_S(GetComprTurnCost(g, C, D, C), FORBIDDEN);
+  CHECK_EQ_S(GetComprTurnCost(g, F, D, F), FORBIDDEN);
+  // E: u-turn: allowed.
+  CHECK_EQ_S(GetComprTurnCost(g, B, E, B), ALLOWED);
+  // F: u-turn: forbidden.
+  CHECK_EQ_S(GetComprTurnCost(g, C, F, C), FORBIDDEN);
+  CHECK_EQ_S(GetComprTurnCost(g, D, F, D), FORBIDDEN);
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1158,6 +1214,8 @@ int main(int argc, char* argv[]) {
   TestRouteComplexTurnRestrictionNegative();
   TestRouteComplexTurnRestrictionPositive();
   TestRouteOverlappingTurnRestrictions();
+
+  TestTurnCosts_UTurns();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

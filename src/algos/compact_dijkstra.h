@@ -203,10 +203,18 @@ class SingleSourceEdgeDijkstra {
           continue;
         }
 
-        // LOG_S(INFO) << "AA4";
+#if 0
+        LOG_S(INFO) << "AA4: off=" << off << " size=" << tcd.turn_costs.size();
+        for (uint32_t pos = 0; pos < tcd.turn_costs.size(); ++pos) {
+          LOG_S(INFO) << absl::StrFormat("val[%u]=%d", pos,
+                                         (int)tcd.turn_costs.at(off));
+        }
+#endif
+
         const uint32_t new_weight =
             prev_v.min_weight + e.weight +
-            decompress_turn_cost(tcd.turn_costs.at(off)) * 100;
+            decompress_turn_cost(tcd.turn_costs.at(off));
+        // LOG_S(INFO) << "AA4b";
         const bool in_target_raa =
             opt.handle_restricted_access &&
             (prev_v.in_target_restricted_access_area |

@@ -117,20 +117,20 @@ inline void AddNode(Graph& g, uint32_t idx, uint32_t cluster_id = 0) {
 using TEdge = std::tuple<uint32_t, uint32_t, uint32_t, GEdge::RESTRICTION,
                          uint32_t, bool>;
 
-inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist,
+inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist_cm,
                     GEdge::RESTRICTION label, uint32_t way_idx, bool both_dirs,
                     std::vector<TEdge>* edges) {
-  edges->push_back({from, to, dist, label, way_idx, false});
+  edges->push_back({from, to, dist_cm, label, way_idx, false});
   if (both_dirs) {
-    edges->push_back({to, from, dist, label, way_idx, true});
+    edges->push_back({to, from, dist_cm, label, way_idx, true});
   }
 }
 
 // Same as above, but omitting way_idx.
-inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist,
+inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist_cm,
                     GEdge::RESTRICTION label, bool both_dirs,
                     std::vector<TEdge>* edges) {
-  AddEdge(from, to, dist, label, /*way_idx=0*/ 0, both_dirs, edges);
+  AddEdge(from, to, dist_cm, label, /*way_idx=0*/ 0, both_dirs, edges);
 }
 
 // Adds turn costs to the graph g. Turn costs depend on node attributes such as
@@ -143,7 +143,7 @@ void AddTurnCostsForTests(std::vector<TurnRestriction> simple_turn_restrictions,
       .sorted_trs = simple_turn_restrictions,
       .map_to_first =
           ComputeTurnRestrictionMapToFirst(simple_turn_restrictions)};
-  TurnCostData tcd;
+  // TurnCostData tcd;
   // For each node in the graph.
   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
     const GNode& from_node = g->nodes.at(from_idx);
@@ -155,8 +155,9 @@ void AddTurnCostsForTests(std::vector<TurnRestriction> simple_turn_restrictions,
       const NodeAttribute* attr = g->FindNodeAttr(target_node.node_id);
       // Compute the turn costs when continuing at 'target_node' after
       // arriving there through 'e'.
-      ComputeTurnCostsForEdge(*g, vh, from_idx, from_node.edges_start_pos + off,
-                              indexed_trs, attr, &tcd);
+      TurnCostData tcd = ComputeTurnCostsForEdge(
+          *g, vh, from_idx, from_node.edges_start_pos + off, indexed_trs,
+          attr /*, &tcd*/);
       e.turn_cost_idx = g->turn_costs.size();
       g->turn_costs.push_back(tcd);
     }
