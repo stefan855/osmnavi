@@ -1154,7 +1154,7 @@ void TestTurnCosts_UTurns() {
   enum : uint32_t { A = 0, B, C, D, E, F };  // Node indexes.
   enum : uint32_t { Way0 = 0, Way1, Way2, Way3, Way4 };
   Graph g = CreateComplexTurnRestrictionGraph(true);
-  
+
   // Check all u-turn related turn costs in the following graph.
   // For every edge we check all possible u-turns.
   /*
@@ -1193,6 +1193,34 @@ void TestTurnCosts_UTurns() {
   CHECK_EQ_S(GetComprTurnCost(g, D, F, D), FORBIDDEN);
 }
 
+void TestTurnCosts_Angles() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C };  // Node indexes.
+  constexpr bool both_dirs = true;
+
+  Graph g;
+  AddDefaultWSA(g);
+  constexpr uint32_t Way0 = 0;
+  AddWay(g, Way0);
+
+  AddNode(g, A);
+  AddNode(g, B);
+  AddNode(g, C);
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
+  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+
+  SetNodeCoords(g, A, 0.0, 0.0);
+  SetNodeCoords(g, B, 0.0, 0.1);
+  SetNodeCoords(g, C, 0.1, 0.1);
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  PathLen2Data pd = FindPathLen2(g, A, B, C);
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1216,6 +1244,7 @@ int main(int argc, char* argv[]) {
   TestRouteOverlappingTurnRestrictions();
 
   TestTurnCosts_UTurns();
+  TestTurnCosts_Angles();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

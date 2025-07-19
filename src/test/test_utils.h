@@ -113,6 +113,30 @@ inline void AddNode(Graph& g, uint32_t idx, uint32_t cluster_id = 0) {
                      .lon = 100 + (int32_t)idx});
 }
 
+inline void SetNodeCoords(Graph& g, uint32_t idx, double lat, double lon) {
+  CHECK_LT_S(idx, g.nodes.size());
+  GNode& n = g.nodes.at(idx);
+  n.lat = std::roundl(lat * TEN_POW_7);
+  n.lon = std::roundl(lon * TEN_POW_7);
+}
+
+// Recompute distances for testing. Note that this ignores that ways may have
+// omitted nodes and edges, therefore the computed distances might be too short.
+// Use only for testing.
+void RecomputeDistancesForTesting(Graph* g) {
+  for (uint32_t node_idx = 0; node_idx < g->nodes.size(); ++node_idx) {
+    const GNode& n1 = g->nodes.at(node_idx);
+    for (GEdge& e : gnode_all_edges(*g, node_idx)) {
+      const GNode& n2 = g->nodes.at(e.other_node_idx);
+      e.distance_cm = calculate_distance(n1.lat, n1.lon, n2.lat, n2.lon);
+    }
+  }
+}
+
+#define CHECK_BETWEEN(val, lower, higher) \
+  CHECK_GE_S(val, lower);                 \
+  CHECK_LE_S(val, higher);
+
 // Contains (from, to, dist, restriction-label, way_idx, contra_way).
 using TEdge = std::tuple<uint32_t, uint32_t, uint32_t, GEdge::RESTRICTION,
                          uint32_t, bool>;
