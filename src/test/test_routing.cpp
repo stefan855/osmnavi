@@ -1212,13 +1212,109 @@ void TestTurnCosts_Angles() {
   AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
   StoreEdges(edges, &g);
 
-
   SetNodeCoords(g, A, 0.0, 0.0);
   SetNodeCoords(g, B, 0.0, 0.1);
-  SetNodeCoords(g, C, 0.1, 0.1);
+
+  SetNodeCoords(g, C, 0.0, 0.2);  // 180 degrees, i.e. no curve.
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  PathLen2Data pd = FindPathLen2(g, A, B, C);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(0));
+
+  SetNodeCoords(g, C, 0.1, 0.2);  // 135 degrees
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(500));
+
+  SetNodeCoords(g, C, 0.1, 0.1);  // 90 degrees
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(2000));
+
+  SetNodeCoords(g, C, 0.1, 0.0);  // 45 degrees
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(4000));
+
+  SetNodeCoords(g, C, 0.0, 0.0);  // 0 degrees, i.e. u-turn
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(TURN_COST_U_TURN));
+
+  SetNodeCoords(g, C, -0.1, 0.0);  // 45 degrees
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(4000));
+
+  SetNodeCoords(g, C, -0.1, 0.1);  // 90 degrees
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(2000));
+
+  SetNodeCoords(g, C, -0.1, 0.2);  // 135 degrees
+  RecomputeDistancesForTesting(&g);
+  AddTurnCostsForTests({}, VH_MOTORCAR, &g);
+  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+             compress_turn_cost(500));
+}
+
+void TestTurnCosts_Angles2() {
+  FUNC_TIMER();
+
+  // Maximal curve velocity for arc_length=100m, angle=90 degrees.
+  CHECK_BETWEEN(MaxCurveVelocity(100 * 100, 90), 63.5, 63.7);
+  // Maximal curve velocity for arc_length=10m, angle=90 degrees.
+  CHECK_BETWEEN(MaxCurveVelocity(10 * 100, 90), 19.8, 20.3);
+  // Maximal curve velocity for arc_length=4m, angle=180, i.e. u-turn.
+  CHECK_BETWEEN(MaxCurveVelocity(4 * 100, 180), 8.9, 9.1);
+}
+
+void   TestTurnCosts_SpeedChange() {
+  FUNC_TIMER();
+  // DistanceForSpeedChange(VH_MOTORCAR, 40, 60)
+}
+
+void TestCountryBitset() {
+  FUNC_TIMER();
+  {
+    CountryBitset cb;
+    for (uint32_t i = 0; i < MAX_NCC; ++i) {
+      CHECK_EQ_S(cb.GetBit(i), false) << i;
+      cb.SetBit(i);
+      CHECK_EQ_S(cb.GetBit(i), true) << i;
+      cb.SetBit(i, false);
+      CHECK_EQ_S(cb.GetBit(i), false) << i;
+    }
+  }
+  {
+    // Test copy construction.
+    CountryBitset cb;
+    cb.SetBit(NCC_CH);
+    CountryBitset cb2 = cb;
+    CHECK_EQ_S(cb2.GetBit(NCC_CH), true);
+    CHECK_EQ_S(cb2.GetBit(NCC_DE), false);
+  }
+  {
+    CountryBitset cb("../config/left_traffic_countries.cfg");
+    CHECK_EQ_S(cb.GetBit(NCC_CH), false);
+    CHECK_EQ_S(cb.GetBit(NCC_DE), false);
+    CHECK_EQ_S(cb.GetBit(NCC_AT), false);
+    CHECK_EQ_S(cb.GetBit(NCC_FR), false);
+    CHECK_EQ_S(cb.GetBit(NCC_LI), false);
+
+    CHECK_EQ_S(cb.GetBit(TwoLetterCountryCodeToNum("AU")), true);
+    CHECK_EQ_S(cb.GetBit(TwoLetterCountryCodeToNum("GB")), true);
+    CHECK_EQ_S(cb.GetBit(TwoLetterCountryCodeToNum("NG")), true);
+    CHECK_EQ_S(cb.GetBit(TwoLetterCountryCodeToNum("US")), false);
+    CHECK_EQ_S(cb.GetBit(TwoLetterCountryCodeToNum("ZA")), true);
+    CHECK_EQ_S(cb.GetBit(TwoLetterCountryCodeToNum("ZW")), true);
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -1245,6 +1341,10 @@ int main(int argc, char* argv[]) {
 
   TestTurnCosts_UTurns();
   TestTurnCosts_Angles();
+  TestTurnCosts_Angles2();
+  TestTurnCosts_SpeedChange();
+
+  TestCountryBitset();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

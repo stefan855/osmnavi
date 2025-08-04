@@ -628,17 +628,26 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
 // The second edge starts at 'node1_idx' with edge offset 'edge1_off'.
 struct PathLen2Data final {
   bool valid = false;
-  uint32_t node0_idx = 0;
+  uint32_t node0_idx = INFU32;
   uint32_t edge0_off = 0;
-  uint32_t node1_idx = 0;
+  uint32_t node1_idx = INFU32;
   uint32_t edge1_off = 0;
-  uint32_t node2_idx = 0;
+  uint32_t node2_idx = INFU32;
 
+  const GNode& node0(const Graph& g) {
+    return g.nodes.at(node0_idx);
+  }
+  const GNode& node1(const Graph& g) {
+    return g.nodes.at(node1_idx);
+  }
+  const GNode& node2(const Graph& g) {
+    return g.nodes.at(node2_idx);
+  }
   const GEdge& edge0(const Graph& g) {
-    return g.edges.at(g.nodes.at(node0_idx).edges_start_pos + edge0_off);
+    return g.edges.at(node0(g).edges_start_pos + edge0_off);
   }
   const GEdge& edge1(const Graph& g) {
-    return g.edges.at(g.nodes.at(node1_idx).edges_start_pos + edge1_off);
+    return g.edges.at(node1(g).edges_start_pos + edge1_off);
   }
   // The compressed turn cost between the first and the second edge.
   uint32_t get_compressed_turn_cost_0to1(const Graph& g) {

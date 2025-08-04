@@ -30,7 +30,6 @@ constexpr uint32_t TURN_COST_INF = 1'000'000'000u;  // ~11.5 days
 constexpr uint32_t TURN_COST_ZERO = 0;
 constexpr uint32_t TURN_COST_U_TURN = 10000;
 
-
 namespace {
 // turn costs in milliseconds are compressed into 63 buckets, which
 // represent the following values.
@@ -48,9 +47,10 @@ static constexpr uint32_t
         1145500,  1489200,  1935900,  2516700,      3271700,  4253200,
         5529200,  7188000,  9344300,  12147700,     15791900, 20529500,
         26688400, 34694900, 45103400, TURN_COST_INF};
-}  // namespace
 
-// Compress a turn cost value (milli seconds) to compressed format
+};  // namespace
+
+// Compress a turn cost value (milliseconds) to compressed format
 // using 6 bits. Note that all values > 45103400 are compressed to INF and are
 // treated as non-routable.
 inline constexpr uint32_t compress_turn_cost(uint32_t cost) {
@@ -88,32 +88,124 @@ inline constexpr uint32_t decompress_turn_cost(uint32_t compressed_cost) {
   return compressed_turn_cost_values[compressed_cost];
 }
 
+#if 0
+// Classify a turn based on an entry edge and an exit edge.
+enum TURN_TYPE : uint8_t {
+  TT_STRAIGHT,
+  TT_CURVE,
+  TT_STOP_TO_LEFT,
+  TT_LOWER_TO_LEFT,
+  TT_HIGHER_TO_LEFT,
+  TT_MAX
+};
+
+struct TurnClassification {
+  TURN_TYPE tt;
+};
+
+inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vh, const GEdge& e1,
+                       const GEdge& e2, int32_t turning_angle) {
+  return TT_CURVE;
+}
+#endif
+
+// Return the maximal velocity (km/h) in a curve for a typical car.
+// arc_length_cm: The distance for which we have a turning_angle. Typically this
+//                is 1/2 of the length of the incoming edge plus 1/2 of the
+//                length of the outgoing edge.
+// turning_angle: angle change in degrees between incoming and outgoing edge.
+//                0 degrees indicate a straight continuation, 180 degrees
+//                indicate a u-turn.
+//
+// See https://www.lernhelfer.de/schuelerlexikon/physik/artikel/kurvenfahrten
+// Formula for max. v through curve with length s and angle-change a:
+//           v-max: 3.6 * sqrt(u * g * s / (a * pi / 180))
+//           u:     coefficient of static friction (Haftreibungskoeffizient)
+//                  depends on conditions (rain etc.) surface and more.
+//                  Range for cars is 0.4..0.8 (on asphalt roads).
+//                  We use 0.5, which is on the conservative side.
+//           g:     9.81
+//           s:     arc length (Bogenlänge)
+//           a:     angle change in degrees
+// Example for a curve with length 100m and 90 degree change in direction:
+//   v-max = 63.615 km/h = 3.6 * math.sqrt(0.5*9.81*100/(90*math.pi/180))
+inline double MaxCurveVelocity(uint32_t arc_length_cm, int32_t turning_angle) {
+  return std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * 0.01 * arc_length_cm) /
+                   (turning_angle * std::numbers::pi / 180.0));
+}
+
+// This computes the distance (cm) for accelerating or decelerating a vehicle
+// from speed1_kmh to speed2_kmh.
+//
+// Uses the following formula for speed changes:
+//     dist = (v1^2 - v2^2) / (2 * a).
+inline uint32_t DistanceForSpeedChange(VEHICLE vh, double speed1_kmh,
+                                       double speed2_kmh) {
+  // Rough assumptions about vehicle specific acceleration/deceleration
+  // constants.
+  // TODO: Maybe this should be moved to a config file.
+  constexpr double acc_car = 3;
+  constexpr double dec_car = 2;
+  constexpr double acc_hgv = 2;
+  constexpr double dec_hgv = 1.5;
+  constexpr double acc_bicycle = 1.5;
+  constexpr double dec_bicycle = 1.5;
+
+  const double sp1 = speed1_kmh / 3.6;
+  const double sp2 = speed2_kmh / 3.6;
+  double a;
+  switch (vh) {
+    case VH_MOTORCAR:
+    case VH_MOTORCYCLE:
+      a = (sp1 >= sp2) ? dec_car : acc_car;
+      break;
+    case VH_BICYCLE:
+    case VH_MOPED:
+    case VH_HORSE:
+      a = (sp1 >= sp2) ? dec_bicycle : acc_bicycle;
+      break;
+    case VH_PSV:
+    case VH_BUS:
+    case VH_HGV:
+      a = (sp1 >= sp2) ? dec_hgv : acc_hgv;
+      break;
+    default:
+      ABORT_S() << vh;
+  }
+
+  return std::abs(std::lround(100 * (sp1 * sp1 - sp2 * sp2) / (2 * a)));
+}
+
+// Compute the time loss in milliseconds that is caused by a curve that
+// doesn't allow max speed. The time loss is computed for the full distance of
+// edge 'e'.
+inline uint32_t TimeLossFromCurve(const Graph& g, VEHICLE vh, const GEdge& e,
+                                  double curve_speed) {
+  const double max_speed =
+      GetRAFromWSA(GetWSA(g, e.way_idx), vh, EDGE_DIR(e)).maxspeed;
+  if (curve_speed >= max_speed || e.distance_cm == 0) {
+    return 0;
+  }
+  double time_max_speed_ms = e.distance_cm / (max_speed * 100.0 / 3.6);
+  double time_curve_speed_ms = e.distance_cm / (curve_speed * 100.0 / 3.6);
+
+  return std::max(0l, std::lround(time_curve_speed_ms - time_max_speed_ms));
+}
+
 namespace {
 
-// Compute the cost of a turn from edge e1 to e2. A smaller angle has higher
-// cost. The unit of the value returned is in milli seconds.
-//
-// TODO: Use the following formula
-// https://www.lernhelfer.de/schuelerlexikon/physik/artikel/kurvenfahrten
-// Formula max. v through curve with length s and angle-change a:
-//   v-max = 3.6 * sqrt(u * g * s / (a * pi / 180))
-//           u = coefficient of static friction (Haftreibungskoeffizient)
-//               depends on conditions (rain etc.) surface and more.
-//               Range for cars is 0.4..0.8 (on asphalt roads).
-//           g = 9.81
-//           s = arc length (Bogenlänge)
-//           a = angle change in degrees
-// Example for a curve with length 100m and 90 degree change in direction:
-//   v-max = 69.70 km/h = 3.6 * math.sqrt(0.6*9.81*100/(90*3.14/180))
-uint32_t turn_angle_cost(const GEdge& e1, const GEdge& e2,
-                         uint32_t turning_angle) {
-  if (turning_angle > 160) {
+// Compute the time loss in milliseconds of a turn from edge e1 to e2. A smaller
+// angle has higher cost.
+uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vh, const GEdge& e1,
+                           const GEdge& e2, int32_t turning_angle) {
+  turning_angle = std::labs(turning_angle);
+  if (turning_angle <= 20) {
     return 0;
-  } else if (turning_angle > 120) {
+  } else if (turning_angle <= 60) {
     return 500;
-  } else if (turning_angle > 60) {
+  } else if (turning_angle <= 120) {
     return 2000;
-  } else if (turning_angle > 0) {
+  } else if (turning_angle <= 179) {
     return 4000;
   } else {
     // u-turn.
@@ -223,15 +315,12 @@ inline void ProcessSimpleTurnRestrictions(
 // tcd: resulting turn costs data. Any incoming data is overwritten.
 inline TurnCostData ComputeTurnCostsForEdge(
     const Graph& g, VEHICLE vh, uint32_t start_node_idx, uint32_t edge_idx,
-    const IndexedTurnRestrictions& indexed_trs, const NodeAttribute* node_attr
-    /* ,TurnCostData* tcd*/) {
-  // CHECK_NOTNULL_S(tcd);
+    const IndexedTurnRestrictions& indexed_trs,
+    const NodeAttribute* node_attr) {
   const GEdge& e = g.edges.at(edge_idx);
   const GNode& target_node = g.nodes.at(e.other_node_idx);
 
   // Set default.
-  // tcd->turn_costs.assign(target_node.num_edges_forward,
-  //                       TURN_COST_ZERO_COMPRESSED);
   TurnCostData tcd{{target_node.num_edges_forward, TURN_COST_ZERO_COMPRESSED}};
 
   // Handle automatically allowed u-turns.
@@ -284,45 +373,50 @@ inline TurnCostData ComputeTurnCostsForEdge(
   // ==========================================================================
   // So far, all turned costs stored in tcd.turn_costs are on/off, i.e. either
   // TURN_COST_ZERO_COMPRESSED or TURN_COST_INF_COMPRESSED.
-  // Now compute small increments and recompress the values that were changed.
+  // Now compute static costs for all non-blocked turns.
   // ==========================================================================
 
-  uint32_t static_cost = 0;  // unit is milli second
+  uint32_t static_cost = 0;  // unit is millisecond
   if (node_attr != nullptr) {
     if (node_attr->bit_stop) {
-      static_cost += 3000;
+      static_cost += 3'000;
     }
     if (node_attr->bit_traffic_signals) {
-      static_cost += 10000;
+      static_cost += 10'000;
     }
     if (node_attr->bit_crossing) {
-      static_cost += 3000;
+      static_cost += 3'000;
     }
     if (node_attr->bit_railway_crossing) {
       // We don't know how busy the railway is...
-      static_cost += 30000;
+      static_cost += 20'000;
     }
     if (node_attr->bit_traffic_calming) {
-      static_cost += 1000;
+      static_cost += 1'000;
     }
   }
 
-  // TODO: Compute turn cost for given velocity and angle
+  // TODO: Compute turn cost for given velocity and angle and assign overall
+  // costs for all turns that aren't blocked.
   const GNode& start_node = g.nodes.at(start_node_idx);
-  const uint32_t edge1_angle =
-      angle_to_east_degrees(target_node.lat, target_node.lon, start_node.lat,
-                            start_node.lon, e.distance_cm);
+  const int32_t edge1_angle =
+      angle_to_east_degrees(start_node.lat, start_node.lon, target_node.lat,
+                            target_node.lon, e.distance_cm);
   for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
     if (tcd.turn_costs.at(off) != TURN_COST_INF_COMPRESSED) {
       const GEdge e2 = g.edges.at(target_node.edges_start_pos + off);
       const GNode other_node = g.nodes.at(e2.other_node_idx);
-      const uint32_t edge2_angle =
+      const int32_t edge2_angle =
           angle_to_east_degrees(target_node.lat, target_node.lon,
                                 other_node.lat, other_node.lon, e2.distance_cm);
-      const uint32_t turning_angle =
+      const int32_t turning_angle =
           angle_between_edges(edge1_angle, edge2_angle);
+
+      // TODO: Compute additional static costs for a crossing, for instance
+      // turning left or right depending on left/right traffic in the country.
+
       tcd.turn_costs.at(off) = compress_turn_cost(
-          static_cost + turn_angle_cost(e, e2, turning_angle));
+          static_cost + TurnAngleTimeLoss(g, vh, e, e2, turning_angle));
     }
   }
 

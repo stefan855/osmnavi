@@ -500,6 +500,11 @@ int main(int argc, char* argv[]) {
         .dflt = opt.routing_config,
         .desc = "Location of routing config file."},
 
+       {.name = "left_traffic_config",
+        .type = "string",
+        .dflt = opt.left_traffic_config,
+        .desc = "Location of left traffic countries config file."},
+
        {.name = "align_clusters_to_ncc",
         .type = "bool",
         .dflt = opt.align_clusters_to_ncc ? "true" : "false",
@@ -550,6 +555,7 @@ int main(int argc, char* argv[]) {
   opt.pbf = argli.GetString("pbf");
   opt.admin_filepattern = argli.GetString("admin_filepattern");
   opt.routing_config = argli.GetString("routing_config");
+  opt.left_traffic_config = argli.GetString("left_traffic_config");
   opt.align_clusters_to_ncc = argli.GetBool("align_clusters_to_ncc");
   opt.merge_tiny_clusters =
       opt.align_clusters_to_ncc && argli.GetBool("merge_tiny_clusters");

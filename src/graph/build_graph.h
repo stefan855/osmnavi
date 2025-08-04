@@ -30,6 +30,7 @@ struct BuildGraphOptions {
   // File pattern for admin files (country polygons).
   std::string admin_filepattern = "../../data/admin/??_*.csv";
   std::string routing_config = "../config/routing.cfg";
+  std::string left_traffic_config = "../config/left_traffic_countries.cfg";
   // Align clusters as much as possible with country borders.
   bool align_clusters_to_ncc = false;
   // Clusters are aligned to country border. This sometimes causes small
@@ -201,6 +202,8 @@ struct GraphMetaData final {
 
   // Default RoutingAttrs records per country, highway type, rural/urban, ...
   std::unique_ptr<PerCountryConfig> per_country_config;
+
+  CountryBitset left_traffic_bits;
 
   // Nodes in-memory table. This contains node coordinates loaded from pbf
   // file. All nodes in 'way_nodes_seen' are present.

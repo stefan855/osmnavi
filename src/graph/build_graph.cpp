@@ -1490,7 +1490,7 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
       // there through 'e'.
       TurnCostData tcd = ComputeTurnCostsForEdge(
           g, meta->opt.vehicle_types.front(), from_idx,
-          from_node.edges_start_pos + off, indexed_trs, attr/*, &tcd*/);
+          from_node.edges_start_pos + off, indexed_trs, attr);
       e.turn_cost_idx = deduper.Add(tcd);
     }
   }
@@ -1542,6 +1542,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     pool.AddWork([&meta](int) {
       meta.per_country_config.reset(new PerCountryConfig);
       meta.per_country_config->ReadConfig(meta.opt.routing_config);
+      meta.left_traffic_bits.LoadFromFile(meta.opt.left_traffic_config);
     });
     pool.Start(std::min(meta.opt.n_threads, 3));
     pool.WaitAllFinished();

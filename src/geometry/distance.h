@@ -94,15 +94,19 @@ inline int32_t angle_to_east_degrees(int32_t lat1_100nano, int32_t lon1_100nano,
   }
 }
 
-// Compute the (smaller) angle between two edges. Input for each edge is the
-// angle computed by angle_to_east_degrees() starting at the point connecting
-// the two edges. The angle returned is in the range [0..180].
-inline uint32_t angle_between_edges(uint32_t edge_angle_1,
-                                    uint32_t edge_angle_2) {
-  long diff_angle = std::labs(static_cast<long>(edge_angle_1) -
-                              static_cast<long>(edge_angle_2));
-  if (diff_angle > 180) {
-    diff_angle = 360 - diff_angle;
+// Compute the angle change between two consecutive edges. Input for each edge
+// is the angle computed by angle_to_east_degrees().
+//
+// The angle returned is in the range [-179..180]. A value of 0 indicates no
+// change in direction, and angle of 180 degrees denotes a full u-turn. Negative
+// values happen when the second edge goes to the right side, positive values
+// when it goes to the left side of the first edge.
+inline int32_t angle_between_edges(int32_t edge_angle_1, int32_t edge_angle_2) {
+  int32_t a = edge_angle_2 - edge_angle_1;
+  if (a > 180) {
+    a = a - 360;
+  } else if (a <= -180) {
+    a = a + 360;
   }
-  return diff_angle;
+  return a;
 }
