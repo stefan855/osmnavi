@@ -816,6 +816,16 @@ inline bool RoutableBackward(const Graph& g, const GWay& way, VEHICLE vt) {
   return RoutableAccess(GetRAFromWSA(g, way, vt, DIR_BACKWARD).access);
 }
 
+inline DIRECTION RoutableDirection(const Graph& g, const GWay& way,
+                                   VEHICLE vt) {
+  const bool df = RoutableForward(g, way, vt);
+  const bool db = RoutableBackward(g, way, vt);
+  if (df) {
+    return db ? DIR_BOTH : DIR_FORWARD;
+  }
+  return db ? DIR_BACKWARD : DIR_MAX;
+}
+
 inline bool RoutableForward(const Graph& g, const GEdge& e, VEHICLE vt) {
   return RoutableAccess(
       GetRAFromWSA(g, g.ways.at(e.way_idx), vt, EDGE_DIR(e)).access);
