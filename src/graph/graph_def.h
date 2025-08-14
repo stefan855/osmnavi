@@ -38,19 +38,36 @@ struct TurnCostData {
 struct NodeAttribute {
   int64_t node_id : 40 = 0;
 
-  // has_bit_attr is true if any of the directly following bits below is 1.
-  std::uint32_t has_bit_attr : 1 = 0;
   std::uint32_t bit_turning_circle : 1 = 0;
+  // TODO: Direction of the stop.
   std::uint32_t bit_stop : 1 = 0;
+  // TODO: Direction of the signal.
   std::uint32_t bit_traffic_signals : 1 = 0;
   std::uint32_t bit_crossing : 1 = 0;
+  // Railway crossings are reported for each track that is crossed, for instance
+  // see https://www.openstreetmap.org/way/541407035. This causes issues when
+  // the street passes multiple railway tracks between two barriers, because the
+  // naive approach would count each barrier individually. To handle multiple
+  // nodes following each other, we do the following:
+  //   1. An edge that arrives from a non-railway crossing node to a railway
+  //   crossing node, get s the full costs of the crossing.
+  //   2. Each subsequent edge, i.e. an edge starting at a railway crossing and
+  //   ending at a railway crossing, does not get costs for the new crossings
   std::uint32_t bit_railway_crossing : 1 = 0;
+  std::uint32_t bit_railway_crossing_barrier : 1 = 0;
   std::uint32_t bit_public_transport : 1 = 0;
   std::uint32_t bit_traffic_calming : 1 = 0;
 
   // Access for each individual vehicle type for barriers.
   std::uint32_t has_barrier : 1 = 0;
   ACCESS vh_acc[VH_MAX];
+
+  constexpr bool empty() const {
+    return node_id == 0 && !bit_turning_circle && !bit_stop &&
+           !bit_traffic_signals && !bit_crossing && !bit_railway_crossing &&
+           !bit_railway_crossing_barrier && !bit_public_transport &&
+           !bit_traffic_calming && !has_barrier;
+  }
 };
 
 // Number of bits at least needed when storing way_idx.
@@ -108,14 +125,18 @@ struct GWay {
   // 'uniform_country' is 0 if more than one country_num exists for the nodes in
   // the way, 1 if all the nodes belong to the same country.
   std::uint8_t uniform_country : 1 = 0;
-#if 0
-  // Some ways have loops. This is some information about them.
-  std::uint8_t head_loop : 1 = 0;   // First node appears multiple times.
-  std::uint8_t tail_loop : 1 = 0;   // Last node appears multiple times.
-  std::uint8_t inner_loop : 1 = 0;  // Some inner node appears multiple times.
-#endif
+
   std::uint8_t closed_way : 1 = 0;  // First node == Last node.
   std::uint8_t area : 1 = 0;        // Has tag area=yes.
+  std::uint8_t roundabout : 1 = 0;  // Has tag junction=roundabout.
+  std::uint8_t has_ref : 1 = 0;     // Has tag ref=
+  // Tags priority_road= and priority_road:(forward|backward)=
+  std::uint8_t priority_road_forward : 1 = 0;
+  std::uint8_t priority_road_backward : 1 = 0;
+  // Marks high number of (car-)lanes of the way, as defined by the "lanes" and
+  // "lanes:(forward|backward)" tags.
+  std::uint8_t more_than_two_lanes : 1 = 0;
+  //
   // Country of the first node in the way.
   // If uniform_country==1, then this value is the country of all the nodes.
   std::uint16_t ncc : 10 = INVALID_NCC;
@@ -173,21 +194,6 @@ struct GNode {
 
   // True iff the node is the via node in a simple turn restriction.
   std::uint32_t simple_turn_restriction_via_node : 1;
-
-#if 0
-  // Node has special keyvals.
-  std::uint32_t has_node_attrs : 1;
-  // Attributes that represent special keyvals stored in g.node_attrs. If
-  // has_node_attrs is 0 then all of the following bits must be 0 too.
-  std::uint32_t turning_circle : 1;
-  std::uint32_t stop : 1;
-  std::uint32_t traffic_signals : 1;
-  std::uint32_t pedestrian_crossing : 1;
-  std::uint32_t railway_crossing : 1;
-  std::uint32_t public_transport_platform : 1;
-  std::uint32_t toll_booth : 1;
-  std::uint32_t traffic_calming : 1;
-#endif
 
   std::int32_t lat = 0;
   std::int32_t lon = 0;
@@ -315,7 +321,7 @@ struct Graph {
 
   static constexpr uint32_t kLargeComponentMinSize = 20000;
 
-  std::vector<NodeAttribute> node_attrs;
+  std::vector<NodeAttribute> node_attrs_sorted;
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<TurnCostData> turn_costs;
   std::vector<GWay> ways;
@@ -369,11 +375,12 @@ struct Graph {
   // Find the stored node attribute for a given node_id. Returns the found
   // record or nullptr if it doesn't exist.
   const NodeAttribute* FindNodeAttr(int64_t node_id) const {
-    auto it = std::lower_bound(node_attrs.begin(), node_attrs.end(), node_id,
+    auto it = std::lower_bound(node_attrs_sorted.begin(),
+                               node_attrs_sorted.end(), node_id,
                                [](const NodeAttribute& s, std::int64_t value) {
                                  return s.node_id < value;
                                });
-    if (it == node_attrs.end() || it->node_id != node_id) {
+    if (it == node_attrs_sorted.end() || it->node_id != node_id) {
       return nullptr;
     } else {
       return &(*it);
@@ -501,14 +508,30 @@ inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
                                 g.nodes.at(node_idx).num_edges_forward);
 }
 
-struct FullGEdge {
+// An edges that is specified using the index of the start node and the offset
+// of the edge within the list of edges of this node.
+struct FullEdge final {
   uint32_t start_idx;  // offset of the start node of the edge in g.nodes
   uint32_t offset : NUM_EDGES_OUT_BITS;  // offset of the edge in g.edges.
+
+  inline const GNode& start_node(const Graph& g) const {
+    return g.nodes.at(start_idx);
+  }
+  inline const uint32_t target_node_idx(const Graph& g) const {
+    return edge(g).other_node_idx;
+  }
+  inline const GNode& target_node(const Graph& g) const {
+    return g.nodes.at(target_node_idx(g));
+  }
+  inline const GEdge& edge(const Graph& g) const {
+    return g.edges.at(start_node(g).edges_start_pos + offset);
+  }
 };
+
 // Note, this returns a new vector, not a span.
-inline std::vector<FullGEdge> gnode_incoming_edges(const Graph& g,
-                                                   uint32_t node_idx) {
-  std::vector<FullGEdge> res;
+inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
+                                                  uint32_t node_idx) {
+  std::vector<FullEdge> res;
   for (const GEdge& out : gnode_all_edges(g, node_idx)) {
     if (!out.unique_other || out.other_node_idx == node_idx) {
       continue;
@@ -623,35 +646,46 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
   return g.way_shared_attrs.at(way.wsa_id);
 }
 
-// Describe a path of length two (two edges, three nodes).
+// Describe a path connecting 3 nodes, using two edges
 // The first edge starts at 'node0_idx' with edge offset 'edge0_off'.
 // The second edge starts at 'node1_idx' with edge offset 'edge1_off'.
-struct PathLen2Data final {
-  bool valid = false;
+struct N3Path final {
   uint32_t node0_idx = INFU32;
-  uint32_t edge0_off = 0;
   uint32_t node1_idx = INFU32;
-  uint32_t edge1_off = 0;
   uint32_t node2_idx = INFU32;
+  uint32_t edge0_off : NUM_EDGES_OUT_BITS = 0;
+  uint32_t edge1_off : NUM_EDGES_OUT_BITS = 0;
+  bool valid = false;
 
-  const GNode& node0(const Graph& g) {
-    return g.nodes.at(node0_idx);
+  const GNode& node0(const Graph& g) const { return g.nodes.at(node0_idx); }
+  const GNode& node1(const Graph& g) const { return g.nodes.at(node1_idx); }
+  const GNode& node2(const Graph& g) const { return g.nodes.at(node2_idx); }
+  const FullEdge full_edge0() const {
+    return {.start_idx = node0_idx, .offset = edge0_off};
   }
-  const GNode& node1(const Graph& g) {
-    return g.nodes.at(node1_idx);
+  const FullEdge full_edge1() const {
+    return {.start_idx = node1_idx, .offset = edge1_off};
   }
-  const GNode& node2(const Graph& g) {
-    return g.nodes.at(node2_idx);
-  }
-  const GEdge& edge0(const Graph& g) {
+  const GEdge& edge0(const Graph& g) const {
     return g.edges.at(node0(g).edges_start_pos + edge0_off);
   }
-  const GEdge& edge1(const Graph& g) {
+  const GEdge& edge1(const Graph& g) const {
     return g.edges.at(node1(g).edges_start_pos + edge1_off);
   }
   // The compressed turn cost between the first and the second edge.
-  uint32_t get_compressed_turn_cost_0to1(const Graph& g) {
+  uint32_t get_compressed_turn_cost_0to1(const Graph& g) const {
     return g.turn_costs.at(edge0(g).turn_cost_idx).turn_costs.at(edge1_off);
+  }
+
+  static N3Path Create(const Graph& g, const FullEdge& fe0,
+                       const FullEdge& fe1) {
+    CHECK_EQ_S(fe0.target_node_idx(g), fe1.start_idx);
+    return {.node0_idx = fe0.start_idx,
+            .node1_idx = fe1.start_idx,
+            .node2_idx = fe1.target_node_idx(g),
+            .edge0_off = fe0.offset,
+            .edge1_off = fe1.offset,
+            .valid = true};
   }
 };
 
@@ -659,8 +693,8 @@ struct PathLen2Data final {
 // path.
 // If a path was found, return the path with 'valid' set to true.
 // If the path can't be found, return 'valid' set to false.
-inline PathLen2Data FindPathLen2(const Graph& g, uint32_t node0_idx,
-                           uint32_t node1_idx, uint32_t node2_idx) {
+inline N3Path FindN3Path(const Graph& g, uint32_t node0_idx, uint32_t node1_idx,
+                         uint32_t node2_idx) {
   const GNode& n0 = g.nodes.at(node0_idx);
   for (uint32_t off0 = 0; off0 < n0.num_edges_forward; ++off0) {
     if (g.edges.at(n0.edges_start_pos + off0).other_node_idx == node1_idx) {
@@ -668,17 +702,38 @@ inline PathLen2Data FindPathLen2(const Graph& g, uint32_t node0_idx,
       for (uint32_t off1 = 0; off1 < n1.num_edges_forward; ++off1) {
         if (g.edges.at(n1.edges_start_pos + off1).other_node_idx == node2_idx) {
           // Found a path
-          return {.valid = true,
-                  .node0_idx = node0_idx,
-                  .edge0_off = off0,
-                  .node1_idx = node1_idx,
-                  .edge1_off = off1,
-                  .node2_idx = node2_idx};
+          return {
+              .node0_idx = node0_idx,
+              .node1_idx = node1_idx,
+              .node2_idx = node2_idx,
+              .edge0_off = off0,
+              .edge1_off = off1,
+              .valid = true,
+          };
         }
       }
     }
   }
   return {.valid = false};
+}
+
+// Return a vector containing all paths of two edges starting with the edge
+// 'fe'.
+inline std::vector<N3Path> GetN3Paths(const Graph& g, FullEdge fe) {
+  std::vector<N3Path> result;
+  const GNode& target_node = fe.target_node(g);
+  for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
+    result.push_back({
+        .node0_idx = fe.start_idx,
+        .node1_idx = fe.target_node_idx(g),
+        .node2_idx =
+            g.edges.at(target_node.edges_start_pos + off).other_node_idx,
+        .edge0_off = fe.offset,
+        .edge1_off = off,
+        .valid = true,
+    });
+  }
+  return result;
 }
 
 // Returns the position of routing attrs for vehicle type 'vt' and direction

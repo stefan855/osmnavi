@@ -20,6 +20,8 @@ enum class TurnDirection : std::uint8_t {
   NoExit = 5,
 };
 
+enum class TRStatus : std::uint8_t { EMPTY = 0, ALLOWED = 1, FORBIDDEN = 2 };
+
 // Turn restriction parsed from a relation. "no_entry/no_exit" restrictions with
 // multiple from/to ways are split into multiple turn restrictions with only one
 // from/to-way each.
@@ -109,10 +111,28 @@ using SimpleTurnRestrictionMap =
 using TurnRestrictionMapToFirst =
     absl::flat_hash_map<TurnRestriction::TREdge, uint32_t>;
 
-// map_to_first contains a mapping from TREdge to position of first turn restriction in 'trs'.
-struct IndexedTurnRestrictions {
+// map_to_first contains a mapping from TREdge to position of first turn
+// restriction in 'trs'.
+struct IndexedTurnRestrictions final {
   const std::vector<TurnRestriction>& sorted_trs;
   TurnRestrictionMapToFirst map_to_first;
+
+  // Return a span with the matching turn restrictions for 'trigger_key'.
+  std::span<const TurnRestriction> FindTurnRestrictions(
+      const TurnRestriction::TREdge& trigger_key) const {
+    auto iter = map_to_first.find(trigger_key);
+    if (iter == map_to_first.end()) {
+      return std::span<const TurnRestriction>();  // Empty span.
+    }
+    const size_t start_pos = iter->second;
+    CHECK_S(sorted_trs.at(start_pos).GetTriggerKey() == trigger_key);
+    size_t stop_pos = start_pos;
+    while (++stop_pos < sorted_trs.size() &&
+           sorted_trs.at(stop_pos).GetTriggerKey() == trigger_key) {
+    }
+    return std::span<const TurnRestriction>(&(sorted_trs[start_pos]),
+                                            stop_pos - start_pos);
+  }
 };
 
 // Sort the turn restrictions by the edge that triggers the

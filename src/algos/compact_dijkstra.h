@@ -174,7 +174,7 @@ class SingleSourceEdgeDijkstra {
           continue;
         }
 #endif
-        if ((tcd.turn_costs.at(off) == TURN_COST_INF_COMPRESSED) ||
+        if ((tcd.turn_costs.at(off) == TURN_COST_INFINITY_COMPRESSED) ||
             (opt.handle_restricted_access &&
              prev_v.in_target_restricted_access_area && !e.restricted_access)) {
           // LOG_S(INFO) << "XX2:" << (int)tcd.turn_costs.at(off);

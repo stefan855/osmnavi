@@ -1263,8 +1263,8 @@ void TestRealAngles() {
   // 4. East:     6165393392, latlon=47.3779501, 8.5267669 angle:320
 
   // All edges go from mid point to outer point. The estimated angles (see
-  // above) have been adjusted to the expected angles (see below) after checking they are
-  // not deviating significantly.
+  // above) have been adjusted to the expected angles (see below) after checking
+  // they are not deviating significantly.
   TestAngle(47.3779735, 8.5267194, 47.3784253, 8.5269862, 68);
   TestAngle(47.3779735, 8.5267194, 47.3779953, 8.5266785, 142);
   TestAngle(47.3779735, 8.5267194, 47.3773794, 8.5263690, 248);
@@ -1421,11 +1421,12 @@ void TestTurningCostCompression() {
 
   CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103300)), 45103400);
   CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103400)), 45103400);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103401)), TURN_COST_INF);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103401)),
+             TURN_COST_INFINITY);
   CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(100'000'000)),
-             TURN_COST_INF);
+             TURN_COST_INFINITY);
   CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(4'000'000'000u)),
-             TURN_COST_INF);
+             TURN_COST_INFINITY);
 }
 
 void TestSmallVector() {

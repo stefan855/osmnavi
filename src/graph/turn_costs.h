@@ -26,9 +26,9 @@ struct TurnCostData {
 };
 #endif
 
-constexpr uint32_t TURN_COST_INF = 1'000'000'000u;  // ~11.5 days
+constexpr uint32_t TURN_COST_INFINITY = 1'000'000'000u;  // ~11.5 days
 constexpr uint32_t TURN_COST_ZERO = 0;
-constexpr uint32_t TURN_COST_U_TURN = 10000;
+constexpr uint32_t TURN_COST_U_TURN = 20000;
 
 namespace {
 // turn costs in milliseconds are compressed into 63 buckets, which
@@ -36,17 +36,22 @@ namespace {
 static constexpr size_t compressed_turn_cost_values_dim = 64;
 static constexpr uint32_t
     compressed_turn_cost_values[compressed_turn_cost_values_dim] = {
-        0,        100,      200,      300,          400,      500,
-        600,      700,      800,      900,          1000,     1100,
-        1200,     1300,     1400,     1500,         1600,     1900,
-        2200,     2500,     2800,     3300,         3800,     4300,
-        5000,     5700,     6600,     7600,         8700,     10000,
-        11500,    13200,    17200,    22400,        29100,    37800,
-        49200,    63900,    83100,    108000,       140400,   182600,
-        237300,   308500,   401100,   521400,       677800,   881200,
-        1145500,  1489200,  1935900,  2516700,      3271700,  4253200,
-        5529200,  7188000,  9344300,  12147700,     15791900, 20529500,
-        26688400, 34694900, 45103400, TURN_COST_INF};
+        0,        100,      200,      300,
+        400,      500,      600,      700,
+        800,      900,      1000,     1100,
+        1200,     1300,     1400,     1500,
+        1600,     1900,     2200,     2500,
+        2800,     3300,     3800,     4300,
+        5000,     5700,     6600,     7600,
+        8700,     10000,    11500,    13200,
+        17200,    22400,    29100,    37800,
+        49200,    63900,    83100,    108000,
+        140400,   182600,   237300,   308500,
+        401100,   521400,   677800,   881200,
+        1145500,  1489200,  1935900,  2516700,
+        3271700,  4253200,  5529200,  7188000,
+        9344300,  12147700, 15791900, 20529500,
+        26688400, 34694900, 45103400, TURN_COST_INFINITY};
 
 };  // namespace
 
@@ -78,9 +83,11 @@ inline constexpr uint32_t compress_turn_cost(uint32_t cost) {
 
 constexpr uint32_t TURN_COST_ZERO_COMPRESSED =
     compress_turn_cost(TURN_COST_ZERO);
-constexpr uint32_t TURN_COST_INF_COMPRESSED = compress_turn_cost(TURN_COST_INF);
+constexpr uint32_t TURN_COST_INFINITY_COMPRESSED =
+    compress_turn_cost(TURN_COST_INFINITY);
 static_assert(TURN_COST_ZERO_COMPRESSED == 0);
-static_assert(TURN_COST_INF_COMPRESSED == compressed_turn_cost_values_dim - 1);
+static_assert(TURN_COST_INFINITY_COMPRESSED ==
+              compressed_turn_cost_values_dim - 1);
 
 inline constexpr uint32_t decompress_turn_cost(uint32_t compressed_cost) {
   if (compressed_cost == 0) return 0;
@@ -213,39 +220,59 @@ uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vh, const GEdge& e1,
   }
 }
 
-// Given a node and an outgoing edge 'out_edge', is it allowed to make a
-// u-turn at out_edge.other_node_idx and return to node_idx? The code checks
-// for situations where a vehicle would be trapped at out_edge.other_node_idx
-// with no way to continue the travel, which is true at the end of a street or
-// when facing a restricted access area.
+// TODO: handle direction of blockage.
+bool VehicleBlockedAtNode(VEHICLE vh, const NodeAttribute* node_attr) {
+  return (node_attr != nullptr && node_attr->has_barrier &&
+          (node_attr->vh_acc[vh] <= ACC_PRIVATE ||
+           node_attr->vh_acc[vh] >= ACC_MAX));
+}
+
+// Is the U-Turn represented by 'n3p' allowed?
+//
+// The code checks for various situations, including when a vehicle would be
+// trapped at the target node with no way to continue the travel, which is true
+// at the end of a street or when facing a restricted access area.
+//
 // TODO: handle vehicle types properly.
-inline bool IsUTurnAllowedEdge(const Graph& g, uint32_t node_idx,
-                               const GEdge& out_edge) {
+inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
+                           const NodeAttribute* node_attr, const N3Path& n3p) {
+  CHECK_EQ_S(n3p.node0_idx, n3p.node2_idx);
+
+  const GEdge& edge0 = n3p.edge0(g);
+  const GWay& way0 = g.ways.at(edge0.way_idx);
+
   // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
-  if (g.ways.at(out_edge.way_idx).highway_label <= HW_TRUNK_LINK) {
+  if (way0.highway_label <= HW_TRUNK_LINK) {
     return false;
   }
-  uint32_t to_idx = out_edge.other_node_idx;
-  bool restr = (out_edge.car_label != GEdge::LABEL_FREE);
-  bool found_u_turn = false;
+
+  // Special case: Way is an area and both edges are on this way.
+  if (way0.area && edge0.way_idx == n3p.edge1(g).way_idx) {
+    return true;
+  }
+
+  // Special case, vehicle is blocked at node and returns on the same way.
+  if (VehicleBlockedAtNode(vh, node_attr) &&
+      edge0.way_idx == n3p.edge1(g).way_idx) {
+    return true;
+  }
+
+  // No check which kind of continuation edges there are.
   bool found_continuation = false;
   bool found_free_continuation = false;
-
-  for (const GEdge& o : gnode_forward_edges(g, to_idx)) {
-    found_u_turn |= (o.other_node_idx == node_idx);
-    if (o.other_node_idx != node_idx && o.other_node_idx != to_idx) {
+  for (const GEdge& out : gnode_forward_edges(g, edge0.other_node_idx)) {
+    if (out.other_node_idx != n3p.node0_idx &&
+        out.other_node_idx != edge0.other_node_idx) {
       found_continuation = true;
-      found_free_continuation |= (o.car_label == GEdge::LABEL_FREE);
+      found_free_continuation |= (out.car_label == GEdge::LABEL_FREE);
     }
   }
 
-  if (found_u_turn) {
-    if (!found_continuation) {
-      return true;
-    }
-    if (!restr && !found_free_continuation) {
-      return true;
-    }
+  if (!found_continuation) {
+    return true;
+  }
+  if (edge0.car_label != GEdge::LABEL_FREE && !found_free_continuation) {
+    return true;
   }
   return false;
 }
@@ -287,12 +314,12 @@ inline void ProcessSimpleTurnRestrictions(
         found = true;
         if (tr.forbidden) {
           // Remove the bit belonging to the edge.
-          tcd->turn_costs.at(offset) = TURN_COST_INF_COMPRESSED;
+          tcd->turn_costs.at(offset) = TURN_COST_INFINITY_COMPRESSED;
         } else {
           for (size_t offset2 = 0; offset2 < num_edges; ++offset2) {
             tcd->turn_costs.at(offset) =
                 (offset2 == offset ? TURN_COST_ZERO_COMPRESSED
-                                   : TURN_COST_INF_COMPRESSED);
+                                   : TURN_COST_INFINITY_COMPRESSED);
           }
         }
       }
@@ -304,121 +331,166 @@ inline void ProcessSimpleTurnRestrictions(
   }
 }
 
+// Check if there is a turn restrictions matching the first edge in n3p.
+//
+// Return TRStatus::EMPTY if no turn restriction was found, or the TRStatus of
+// the second edge in n3p.
+inline TRStatus CheckSimpleTurnRestriction(
+    const Graph& g, const IndexedTurnRestrictions& indexed_trs,
+    const N3Path& n3p) {
+  TRStatus result = TRStatus::EMPTY;
+  const GEdge& e0 = n3p.edge0(g);
+  const std::span<const TurnRestriction> trs =
+      indexed_trs.FindTurnRestrictions({.from_node_idx = n3p.node0_idx,
+                                        .way_idx = e0.way_idx,
+                                        .to_node_idx = e0.other_node_idx});
+  if (trs.empty()) return result;
+  const GEdge& e1 = n3p.edge1(g);
+  for (const TurnRestriction& tr : trs) {
+    CHECK_EQ_S(tr.path.size(), 2) << tr.relation_id;
+    const bool matches_edge = (e1.way_idx == tr.path.back().way_idx &&
+                               e1.other_node_idx == tr.path.back().to_node_idx);
+    if (tr.forbidden == matches_edge) {
+      result = TRStatus::FORBIDDEN;
+    } else {
+      result = TRStatus::ALLOWED;
+    }
+  }
+  if (result == TRStatus::EMPTY) {
+    LOG_S(INFO) << absl::StrFormat(
+        "Warning, no match found for turn restriction %lld",
+        trs.front().relation_id);
+  }
+  return result;
+}
+
+// Compute costs for obstacles that are not blocking but "cost" time.
+uint32_t NodeAttrCost(const Graph& g, N3Path n3p) {
+  uint32_t cost = 0;  // unit is millisecond
+
+  const NodeAttribute* attr = g.FindNodeAttr(n3p.node1(g).node_id);
+  if (attr != nullptr) {
+    // TODO: handle direction
+    if (attr->bit_stop) {
+      cost += 3'000;
+    }
+    // TODO: handle direction
+    if (attr->bit_traffic_signals) {
+      cost += 20'000;
+    }
+    if (attr->bit_crossing) {
+      cost += 3'000;
+    }
+    if (attr->bit_railway_crossing) {
+      if (attr->bit_railway_crossing_barrier) {
+        // Check if the previous node is closer than 50m and already had a
+        // railway barrier. If so, then discount the current "barrier", it
+        // probably doesn't exist.
+        const NodeAttribute* attr_prev = g.FindNodeAttr(n3p.node0(g).node_id);
+        if (attr_prev != nullptr && attr_prev->bit_railway_crossing &&
+            attr_prev->bit_railway_crossing_barrier &&
+            n3p.edge0(g).distance_cm < 5000) {
+          cost += 500;
+        } else {
+          // TODO: Maybe guess how busy the railway is?
+          cost += 20'000;
+        }
+      } else {
+        cost += 500;
+      }
+    }
+    if (attr->bit_traffic_calming) {
+      cost += 1'000;
+    }
+  }
+  return cost;
+}
+
+uint32_t CurveCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
+  const GNode& node0 = n3p.node0(g);
+  const GNode& node1 = n3p.node1(g);
+  const GNode& node2 = n3p.node2(g);
+
+  const int32_t edge0_angle = angle_to_east_degrees(
+      node0.lat, node0.lon, node1.lat, node1.lon, n3p.edge0(g).distance_cm);
+  const int32_t edge1_angle = angle_to_east_degrees(
+      node1.lat, node1.lon, node2.lat, node2.lon, n3p.edge1(g).distance_cm);
+  const int32_t turning_angle = angle_between_edges(edge0_angle, edge1_angle);
+
+  return TurnAngleTimeLoss(g, vh, n3p.edge0(g), n3p.edge1(g), turning_angle);
+}
+
+//
+uint32_t CrossingCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
+  return 0;
+}
+
+// Compute the (uncompressed) turn cost for the specific turn 'n3p'.
+inline uint32_t ComputeTurnCostForN3Path(
+    const Graph& g, VEHICLE vh, const IndexedTurnRestrictions& indexed_trs,
+    const N3Path& n3p) {
+  const TRStatus tr_status = CheckSimpleTurnRestriction(g, indexed_trs, n3p);
+  if (tr_status == TRStatus::FORBIDDEN) {
+    return TURN_COST_INFINITY;
+  }
+
+  // Is this a u-turn that is forbidden, given the type of crossing at the
+  // middle node? Note that a positive turn restriction from above always
+  // allows a u-turn.
+  const NodeAttribute* node_attr = g.FindNodeAttr(n3p.node1(g).node_id);
+  const bool uturn = (n3p.node0_idx == n3p.node2_idx);
+  if (uturn) {
+    if (tr_status == TRStatus::ALLOWED) {
+      return TURN_COST_U_TURN;
+    }
+    if (!IsUTurnAllowed(g, vh, node_attr, n3p)) {
+      return TURN_COST_INFINITY;
+    }
+    return TURN_COST_U_TURN;
+  }
+
+  // Check if we're blocked by the middle node. We know this is not a u-turn.
+  if (VehicleBlockedAtNode(vh, node_attr)) {
+    const GWay& way0 = g.ways.at(n3p.edge0(g).way_idx);
+    if (!way0.area || n3p.edge0(g).way_idx != n3p.edge1(g).way_idx) {
+      return TURN_COST_INFINITY;
+    }
+  }
+
+  // So far we know we can do the turn and it is not a u-turn.
+  //
+  // Compute three time losses and use the maximum:
+  // 1) Time loss because of node (stop sign, signals, etc.)
+  // 2) Time loss because of curve.
+  // 3) Real crossing
+
+  const uint32_t cost_node_attr = NodeAttrCost(g, n3p);
+  const uint32_t cost_curve = CurveCost(g, vh, n3p);
+  const uint32_t cost_crossing = CrossingCost(g, vh, n3p);
+
+  return std::max(cost_node_attr, std::max(cost_curve, cost_crossing));
+}
+
 }  // namespace
 
-// Compute turn costs of an incoming edge at a crossing point.
+// Compute all turn costs for an edge at the target node.
 // vh: type of the vehicle.
-// start_node_idx: start node of the incoming edge
-// edge_idx: incoming edge. edge.other_node_idx is the crossing point.
-// turn_restriction_data:
-// node_attr:
-// tcd: resulting turn costs data. Any incoming data is overwritten.
+// indexed_trs: Container containing the simple turn restrictions.
+// fe: The edge for which we compute turn costs at the target node.
+// Returns the resulting turn costs data for fe.target_node(g).
 inline TurnCostData ComputeTurnCostsForEdge(
-    const Graph& g, VEHICLE vh, uint32_t start_node_idx, uint32_t edge_idx,
-    const IndexedTurnRestrictions& indexed_trs,
-    const NodeAttribute* node_attr) {
-  const GEdge& e = g.edges.at(edge_idx);
-  const GNode& target_node = g.nodes.at(e.other_node_idx);
+    const Graph& g, VEHICLE vh, const IndexedTurnRestrictions& indexed_trs,
+    const FullEdge fe) {
+  // Create a tcd with the needed dimension.
+  const GNode& crossing_node = fe.target_node(g);
+  TurnCostData tcd{
+      {crossing_node.num_edges_forward, TURN_COST_ZERO_COMPRESSED}};
 
-  // Set default.
-  TurnCostData tcd{{target_node.num_edges_forward, TURN_COST_ZERO_COMPRESSED}};
-
-  // Handle automatically allowed u-turns.
-  // TODO: this might contradict a turn restriction or node attributes induced
-  // u-turns. In this case, the others should win.
-  if (!IsUTurnAllowedEdge(g, start_node_idx, e)) {
-    for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
-      if (g.edges.at(target_node.edges_start_pos + off).other_node_idx ==
-          start_node_idx) {
-        tcd.turn_costs.at(off) = TURN_COST_INF_COMPRESSED;
-      }
-    }
+  for (uint32_t off = 0; off < crossing_node.num_edges_forward; ++off) {
+    tcd.turn_costs.at(off) = compress_turn_cost(ComputeTurnCostForN3Path(
+        g, vh, indexed_trs,
+        N3Path::Create(g, fe,
+                       {.start_idx = fe.target_node_idx(g), .offset = off})));
   }
-
-  // Handle node barriers. Check if the vehicle can pass target_node when
-  // entering the node through 'e'.
-  if (node_attr != nullptr && node_attr->has_barrier &&
-      (node_attr->vh_acc[vh] <= ACC_PRIVATE ||
-       node_attr->vh_acc[vh] >= ACC_MAX)) {
-    const bool incoming_way_area = g.ways.at(e.way_idx).area;
-    // Iterate outgoing edges.
-    for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
-      const GEdge& out = g.edges.at(target_node.edges_start_pos + off);
-      // If the out-edge stays on the same way as the in-edge, then there are
-      // two cases when the turn is allowed:
-      //   * the way is an area.
-      //   * out-edge is a u-turn on the same way.
-      //
-      // Consider the following, complicated case. There are several bollard
-      // nodes that are part of two ways marked as areas:
-      // https://www.openstreetmap.org/node/8680967810
-      // Note that there are parallel edges from both ways between the
-      // common bollard nodes. Because of this, allowing only u-turns on the
-      // same way is important, otherwise one could easily change ways at
-      // every bollard node by doing a u-turn on the other way.
-      if ((e.way_idx == out.way_idx) &&
-          (incoming_way_area ||
-           (out.other_node_idx == start_node_idx))) {  // u-turn
-        ;                                              // Allowed, do nothing.
-      } else {
-        // Forbidden.
-        tcd.turn_costs.at(off) = TURN_COST_INF_COMPRESSED;
-      }
-    }
-  }
-
-  ProcessSimpleTurnRestrictions(g, indexed_trs, vh, start_node_idx, edge_idx,
-                                &tcd);
-
-  // ==========================================================================
-  // So far, all turned costs stored in tcd.turn_costs are on/off, i.e. either
-  // TURN_COST_ZERO_COMPRESSED or TURN_COST_INF_COMPRESSED.
-  // Now compute static costs for all non-blocked turns.
-  // ==========================================================================
-
-  uint32_t static_cost = 0;  // unit is millisecond
-  if (node_attr != nullptr) {
-    if (node_attr->bit_stop) {
-      static_cost += 3'000;
-    }
-    if (node_attr->bit_traffic_signals) {
-      static_cost += 10'000;
-    }
-    if (node_attr->bit_crossing) {
-      static_cost += 3'000;
-    }
-    if (node_attr->bit_railway_crossing) {
-      // We don't know how busy the railway is...
-      static_cost += 20'000;
-    }
-    if (node_attr->bit_traffic_calming) {
-      static_cost += 1'000;
-    }
-  }
-
-  // TODO: Compute turn cost for given velocity and angle and assign overall
-  // costs for all turns that aren't blocked.
-  const GNode& start_node = g.nodes.at(start_node_idx);
-  const int32_t edge1_angle =
-      angle_to_east_degrees(start_node.lat, start_node.lon, target_node.lat,
-                            target_node.lon, e.distance_cm);
-  for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
-    if (tcd.turn_costs.at(off) != TURN_COST_INF_COMPRESSED) {
-      const GEdge e2 = g.edges.at(target_node.edges_start_pos + off);
-      const GNode other_node = g.nodes.at(e2.other_node_idx);
-      const int32_t edge2_angle =
-          angle_to_east_degrees(target_node.lat, target_node.lon,
-                                other_node.lat, other_node.lon, e2.distance_cm);
-      const int32_t turning_angle =
-          angle_between_edges(edge1_angle, edge2_angle);
-
-      // TODO: Compute additional static costs for a crossing, for instance
-      // turning left or right depending on left/right traffic in the country.
-
-      tcd.turn_costs.at(off) = compress_turn_cost(
-          static_cost + TurnAngleTimeLoss(g, vh, e, e2, turning_angle));
-    }
-  }
-
   return tcd;
 }

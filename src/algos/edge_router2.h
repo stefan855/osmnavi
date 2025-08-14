@@ -470,7 +470,7 @@ class EdgeRouter2 {
       const GEdge& curr_ge =
           g_.edges.at(expansion_node.edges_start_pos + offset);
 
-      if (turn_cost_data->turn_costs.at(offset) == TURN_COST_INF_COMPRESSED) {
+      if (turn_cost_data->turn_costs.at(offset) == TURN_COST_INFINITY_COMPRESSED) {
         continue;  // Blocked by infinite turn costs.
       }
 

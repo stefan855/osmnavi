@@ -1141,7 +1141,7 @@ void TestBitFunctions() {
 // -1 is returned.
 int64_t GetComprTurnCost(const Graph& g, uint32_t node0_idx, uint32_t node1_idx,
                          uint32_t node2_idx) {
-  PathLen2Data pd = FindPathLen2(g, node0_idx, node1_idx, node2_idx);
+  N3Path pd = FindN3Path(g, node0_idx, node1_idx, node2_idx);
   if (pd.valid) {
     return pd.get_compressed_turn_cost_0to1(g);
   } else {
@@ -1168,7 +1168,7 @@ void TestTurnCosts_UTurns() {
    */
 
   constexpr uint32_t ALLOWED = compress_turn_cost(TURN_COST_U_TURN);
-  constexpr uint32_t FORBIDDEN = TURN_COST_INF_COMPRESSED;
+  constexpr uint32_t FORBIDDEN = TURN_COST_INFINITY_COMPRESSED;
 
   // Check non-existing path.
   CHECK_EQ_S(GetComprTurnCost(g, A, B, D), -1);
@@ -1218,49 +1218,49 @@ void TestTurnCosts_Angles() {
   SetNodeCoords(g, C, 0.0, 0.2);  // 180 degrees, i.e. no curve.
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(0));
 
   SetNodeCoords(g, C, 0.1, 0.2);  // 135 degrees
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(500));
 
   SetNodeCoords(g, C, 0.1, 0.1);  // 90 degrees
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(2000));
 
   SetNodeCoords(g, C, 0.1, 0.0);  // 45 degrees
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(4000));
 
   SetNodeCoords(g, C, 0.0, 0.0);  // 0 degrees, i.e. u-turn
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(TURN_COST_U_TURN));
 
   SetNodeCoords(g, C, -0.1, 0.0);  // 45 degrees
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(4000));
 
   SetNodeCoords(g, C, -0.1, 0.1);  // 90 degrees
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(2000));
 
   SetNodeCoords(g, C, -0.1, 0.2);  // 135 degrees
   RecomputeDistancesForTesting(&g);
   AddTurnCostsForTests({}, VH_MOTORCAR, &g);
-  CHECK_EQ_S(FindPathLen2(g, A, B, C).get_compressed_turn_cost_0to1(g),
+  CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(500));
 }
 
@@ -1275,7 +1275,7 @@ void TestTurnCosts_Angles2() {
   CHECK_BETWEEN(MaxCurveVelocity(4 * 100, 180), 8.9, 9.1);
 }
 
-void   TestTurnCosts_SpeedChange() {
+void TestTurnCosts_SpeedChange() {
   FUNC_TIMER();
   // DistanceForSpeedChange(VH_MOTORCAR, 40, 60)
 }

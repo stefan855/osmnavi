@@ -15,10 +15,10 @@ constexpr const std::string_view kKeyParts[] = {
     "lane",        "lane_markings", "lanes",     "lanes_inner", "layer",
     "left",        "lit",           "maxspeed",  "moped",       "motor_vehicle",
     "motorcar",    "motorcycle",    "motorroad", "name",        "oneway",
-    "practical",   "psv",           "right",     "service",     "sidewalk",
-    "smoothness",  "source",        "surface",   "toll",        "tracktype",
-    "traffic",     "tunnel",        "turn",      "type",        "variable",
-    "vehicle",     "width",         "zone",
+    "practical",   "priority_road", "psv",       "right",       "service",
+    "sidewalk",    "smoothness",    "source",    "surface",     "toll",
+    "tracktype",   "traffic",       "tunnel",    "turn",        "type",
+    "variable",    "vehicle",       "width",     "zone",
 };
 
 namespace {
@@ -75,6 +75,8 @@ constexpr uint8_t KEY_BIT_MOTORROAD = GetMandatoryKeyPartBit("motorroad");
 constexpr uint8_t KEY_BIT_NAME = GetMandatoryKeyPartBit("name");
 constexpr uint8_t KEY_BIT_ONEWAY = GetMandatoryKeyPartBit("oneway");
 constexpr uint8_t KEY_BIT_PRACTICAL = GetMandatoryKeyPartBit("practical");
+constexpr uint8_t KEY_BIT_PRIORITY_ROAD =
+    GetMandatoryKeyPartBit("priority_road");
 constexpr uint8_t KEY_BIT_PSV = GetMandatoryKeyPartBit("psv");
 constexpr uint8_t KEY_BIT_RIGHT = GetMandatoryKeyPartBit("right");
 constexpr uint8_t KEY_BIT_SERVICE = GetMandatoryKeyPartBit("service");
@@ -200,6 +202,8 @@ constexpr int GetKeyPartBitFast(std::string_view k) {
         if (k == "lane") return KEY_BIT_LANE;
         if (k == "lane_markings") return KEY_BIT_LANE_MARKINGS;
         if (k == "lanes") return KEY_BIT_LANES;
+        // This doesn't exist in real data, it is created in ParseTags() when a
+        // "lanes" tag is seen at non-first position.
         if (k == "lanes_inner") return KEY_BIT_LANES_INNER;
         if (k == "layer") return KEY_BIT_LAYER;
       } else {
@@ -231,6 +235,7 @@ constexpr int GetKeyPartBitFast(std::string_view k) {
 
     case 'p':
       if (k == "practical") return KEY_BIT_PRACTICAL;
+      if (k == "priority_road") return KEY_BIT_PRIORITY_ROAD;
       if (k == "psv") return KEY_BIT_PSV;
       break;
 

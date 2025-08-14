@@ -109,7 +109,6 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
                      const HugeBitset& touched_nodes_ids,
                      DataBlockTable* node_table, GraphMetaData* meta) {
   NodeBuilder builder;
-  NodeAttribute node_attr;
 
   for (const OSMPBF::PrimitiveGroup& pg : prim_block.primitivegroup()) {
     const auto& keys_vals = pg.dense().keys_vals();
@@ -131,11 +130,12 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
       CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
 
       if (touched_nodes_ids.GetBit(node.id)) {
-        if (ConsumeNodeTags(tagh, node.id, keys_vals, kv_start, kv_stop,
-                            &node_attr)) {
+        NodeAttribute node_attr =
+            ParseOSMNodeTags(tagh, node.id, keys_vals, kv_start, kv_stop);
+        if (!node_attr.empty()) {
           // Store node_attr for this node.
           std::unique_lock<std::mutex> l(mut);
-          meta->graph.node_attrs.push_back(node_attr);
+          meta->graph.node_attrs_sorted.push_back(node_attr);
         }
         builder.AddNode(node);
         if (builder.pending_nodes() >= 128) {
@@ -417,6 +417,7 @@ std::uint16_t LimitedMaxspeed(const PerCountryConfig::ConfigValue& cv,
   }
   return m;
 }
+
 }  // namespace
 
 inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
@@ -542,6 +543,57 @@ inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
   EncodeUInt(node_ids.size(), node_ids_buff);
   EncodeNodeIds(node_ids, node_ids_buff);
 }
+
+// Get the number of lanes that are declared in the tags.
+// Returns 0 if no tags were found.
+int GetNumLanes(const OSMTagHelper& tagh, const std::vector<ParsedTag>& ptags) {
+  long num_lanes = 0;
+  long sum_lanes_with_dir = 0;
+  for (const ParsedTag& pt : ptags) {
+    if (pt.bits == GetBitMask(KEY_BIT_LANES)) {
+      double val;
+      if (absl::SimpleAtod(tagh.ToString(pt.val_st_idx), &val)) {
+        num_lanes = std::roundl(val);
+      }
+    } else if (pt.bits == GetBitMask(KEY_BIT_LANES, KEY_BIT_FORWARD) ||
+               pt.bits == GetBitMask(KEY_BIT_LANES, KEY_BIT_BACKWARD)) {
+      double val;
+      if (absl::SimpleAtod(tagh.ToString(pt.val_st_idx), &val)) {
+        sum_lanes_with_dir += std::roundl(val);
+      }
+    }
+  }
+  if (num_lanes > 0) {
+    return num_lanes;
+  } else {
+    return sum_lanes_with_dir;
+  }
+}
+
+std::pair<bool, bool> GetPriorityRoadSetting(
+    const OSMTagHelper& tagh, const std::vector<ParsedTag>& ptags) {
+  bool p_forward = false;
+  bool p_backward = false;
+  static const std::string_view yes_prio[] = {"designated", "yes",
+                                              "yes_unposted"};
+
+  for (const ParsedTag& pt : ptags) {
+    if (pt.bits & GetBitMask(KEY_BIT_PRIORITY_ROAD)) {
+      bool prio = SpanContains(yes_prio, tagh.ToString(pt.val_st_idx));
+      if (pt.bits == GetBitMask(KEY_BIT_PRIORITY_ROAD)) {
+        p_forward = p_backward = prio;
+      } else if (pt.bits ==
+                 GetBitMask(KEY_BIT_PRIORITY_ROAD, KEY_BIT_FORWARD)) {
+        p_forward = prio;
+      } else if (pt.bits ==
+                 GetBitMask(KEY_BIT_PRIORITY_ROAD, KEY_BIT_BACKWARD)) {
+        p_backward = prio;
+      }
+    }
+  }
+
+  return {p_forward, p_backward};
+}
 }  // namespace
 
 // Check if osm_way is part of the routable network (routable by car etc.) and
@@ -572,6 +624,13 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
   wc.way.area = tagh.GetValue(osm_way, "area") == "yes";
+  wc.way.roundabout = tagh.GetValue(osm_way, "junction") == "roundabout";
+  wc.way.has_ref = !tagh.GetValue(osm_way, "ref").empty();
+  const std::pair<bool, bool> prios = GetPriorityRoadSetting(tagh, wc.ptags);
+  wc.way.priority_road_forward = prios.first;
+  wc.way.priority_road_backward = prios.second;
+  wc.way.more_than_two_lanes = GetNumLanes(tagh, wc.ptags) > 2;
+
   CHECK_LT_S(wc.way.highway_label, HW_MAX);
 
   bool missing_nodes = false;
@@ -747,7 +806,8 @@ void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
   // Make node table searchable, so we can look up lat/lon by node_id.
   node_table->Sort();
   // Sort graph.node_attrs.
-  std::sort(meta->graph.node_attrs.begin(), meta->graph.node_attrs.end(),
+  std::sort(meta->graph.node_attrs_sorted.begin(),
+            meta->graph.node_attrs_sorted.end(),
             [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
 }
 
@@ -760,7 +820,7 @@ void SortGWays(GraphMetaData* meta) {
 
 void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
   FUNC_TIMER();
-  for (const NodeAttribute& na : meta->graph.node_attrs) {
+  for (const NodeAttribute& na : meta->graph.node_attrs_sorted) {
     if (meta->way_nodes_seen->GetBit(na.node_id)) {
       meta->way_nodes_needed->SetBit(na.node_id, true);
     }
@@ -1296,7 +1356,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
                                  stats.num_turn_restriction_error_connection);
   LOG_S(INFO) << absl::StrFormat("Num node attrs:      %11lld",
-                                 g.node_attrs.size());
+                                 g.node_attrs_sorted.size());
   LOG_S(INFO) << absl::StrFormat("Num node barrier free:%10lld",
                                  stats.num_node_barrier_free);
   LOG_S(INFO) << absl::StrFormat("Num edge barrier block:%9lld",
@@ -1483,14 +1543,10 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
     // For each outgoing edge of this node.
     for (uint32_t off = 0; off < from_node.num_edges_forward; ++off) {
       GEdge& e = g.edges.at(from_node.edges_start_pos + off);
-      const GNode& target_node = g.nodes.at(e.other_node_idx);
-      // Get the node attribute of the target node of the edge.
-      const NodeAttribute* attr = g.FindNodeAttr(target_node.node_id);
-      // Compute the turn costs when continuing at 'target_node' after arriving
-      // there through 'e'.
+      // Compute the turn costs for the target node of 'fe'.
       TurnCostData tcd = ComputeTurnCostsForEdge(
-          g, meta->opt.vehicle_types.front(), from_idx,
-          from_node.edges_start_pos + off, indexed_trs, attr);
+          g, meta->opt.vehicle_types.front(), indexed_trs,
+          {.start_idx = from_idx, .offset = off});
       e.turn_cost_idx = deduper.Add(tcd);
     }
   }
@@ -1602,7 +1658,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 #endif
 
   LoadTurnRestrictions(&reader, &meta, &meta.Stats());
-  StoreNodeBarrierData(&meta.graph, &meta.Stats());
+  StoreNodeBarrierDataObsolete(&meta.graph, &meta.Stats());
   FindLargeComponents(&meta.graph);
   meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);

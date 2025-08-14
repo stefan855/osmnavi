@@ -218,7 +218,7 @@ class CompactDirectedGraph {
         // No turn costs except blocked turns for non-time metrics.
         if (!is_time_metric) {
           for (uint32_t pos = 0; pos < tcd.turn_costs.size(); ++pos) {
-            if (tcd.turn_costs.at(pos) != TURN_COST_INF_COMPRESSED) {
+            if (tcd.turn_costs.at(pos) != TURN_COST_INFINITY_COMPRESSED) {
               tcd.turn_costs.at(pos) = TURN_COST_ZERO_COMPRESSED;
             }
           }

@@ -15,7 +15,9 @@ struct NodeTagExtract {
   std::string_view barrier;
   std::string_view locked;
   std::string_view highway;
+  std::string_view direction;
   std::string_view crossing;
+  std::string_view crossing_barrier;
   std::string_view public_transport;
   std::string_view traffic_calming;
   std::string_view railway;
@@ -47,8 +49,12 @@ NodeTagExtract ExtractNodeTags(
       ex.locked = val;
     } else if (key == "highway") {
       ex.highway = val;
+    } else if (key == "direction") {
+      ex.direction = val;
     } else if (key == "crossing") {
       ex.crossing = val;
+    } else if (key == "crossing:barrier") {
+      ex.crossing_barrier = val;
     } else if (key == "public_transport") {
       ex.public_transport = val;
     } else if (key == "traffic_calming") {
@@ -62,22 +68,21 @@ NodeTagExtract ExtractNodeTags(
 
 void SetNodeAttrBits(const NodeTagExtract& ex, NodeAttribute* a) {
   if (ex.highway == "turning_circle") {
-    a->has_bit_attr = 1;
     a->bit_turning_circle = 1;
   }
 
   if (ex.highway == "stop") {
-    a->has_bit_attr = 1;
     a->bit_stop = 1;
   }
 
+  // Cars. The marker
   if (ex.highway == "traffic_signals") {
-    a->has_bit_attr = 1;
     a->bit_traffic_signals = 1;
   }
 
+  // Pedstrians/bikes: Node in the middle of the crossing that is part of the
+  // way for pedestrians/bikes over the street.
   if (ex.highway == "crossing") {
-    a->has_bit_attr = 1;
     a->bit_crossing = 1;
     if (ex.crossing == "traffic_signals") {
       a->bit_traffic_signals = 1;
@@ -87,26 +92,28 @@ void SetNodeAttrBits(const NodeTagExtract& ex, NodeAttribute* a) {
   if (StrSpanContains({"crossing", "level_crossing", "tram_crossing",
                        "tram_level_crossing"},
                       ex.railway)) {
-    a->has_bit_attr = 1;
     a->bit_railway_crossing = 1;
+    a->bit_railway_crossing_barrier = StrSpanContains(
+        {"yes", "full", "half", "double_half", "gate", "chain", "gates"},
+        ex.crossing_barrier);
   }
 
   if (ex.public_transport == "stop_position" ||
       ex.public_transport == "platform" || ex.public_transport == "station") {
-    a->has_bit_attr = 1;
     a->bit_public_transport = 1;
   }
 
   if (!ex.traffic_calming.empty() && ex.traffic_calming != "no") {
-    a->has_bit_attr = 1;
     a->bit_traffic_calming = 1;
   }
 }
 
-inline void SetBarrier(const OSMTagHelper& tagh, int64_t node_id,
-                       const google::protobuf::RepeatedField<int>& keys_vals,
-                       int kv_start, int kv_stop, const NodeTagExtract& ex,
-                       NodeAttribute* node_attr) {
+// Assign the allowed vehicle types for a barrier. For instance, a turnstile
+// only allows pedestrians.
+inline void SetBarrierToVehicle(
+    const OSMTagHelper& tagh, int64_t node_id,
+    const google::protobuf::RepeatedField<int>& keys_vals, int kv_start,
+    int kv_stop, const NodeTagExtract& ex, NodeAttribute* node_attr) {
   // For barriers, we apply access tags in the following order:
   //   1) "barrier=" type sets the default.
   //   2) "access=" overrides everything that barrier type might have set.
@@ -140,7 +147,7 @@ inline void SetBarrier(const OSMTagHelper& tagh, int64_t node_id,
     std::fill_n(vh_acc, VH_MAX, ACC_NO);
     if (ex.barrier == "stile" || ex.barrier == "turnstile" ||
         ex.barrier == "full-height_turnstile" || ex.barrier == "kerb" ||
-        ex.barrier == "kissing_gate") {
+        ex.barrier == "kissing_gate" || ex.barrier == "log") {
       vh_acc[VH_FOOT] = ACC_YES;
     } else if (ex.barrier == "cycle_barrier" || ex.barrier == "bar" ||
                ex.barrier == "swing_gate") {
@@ -168,6 +175,7 @@ inline void SetBarrier(const OSMTagHelper& tagh, int64_t node_id,
     } else if (SpanContains(no_blocks, ex.barrier)) {
       std::fill_n(vh_acc, VH_MAX, ACC_YES);  // blocks no traffic by default.
     } else {
+      LOG_S(INFO) << "Unknown barrier: " << ex.barrier << ":" << node_id;
       ;  // Assume everything else is blocking. This includes full_blocks.
     }
   }
@@ -207,25 +215,29 @@ inline void SetBarrier(const OSMTagHelper& tagh, int64_t node_id,
 // Extract node attributes including barrier information stored in the keys_vals
 // of nodes. Returns true if relevant attributes were found, false if not.
 // The attributes themselves are returned in 'node_attr'.
-bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
-                     const google::protobuf::RepeatedField<int>& keys_vals,
-                     int kv_start, int kv_stop, NodeAttribute* node_attr) {
+NodeAttribute ParseOSMNodeTags(
+    const OSMTagHelper& tagh, int64_t node_id,
+    const google::protobuf::RepeatedField<int>& keys_vals, int kv_start,
+    int kv_stop) {
+  NodeAttribute attr;
   if (kv_start >= kv_stop) {
-    return false;
+    return attr;
   }
 
-  *node_attr = {.node_id = node_id};
-  std::fill_n(node_attr->vh_acc, VH_MAX, ACC_NO);
+  std::fill_n(attr.vh_acc, VH_MAX, ACC_NO);
 
   const NodeTagExtract ex =
       ExtractNodeTags(tagh, node_id, keys_vals, kv_start, kv_stop);
-  SetNodeAttrBits(ex, node_attr);
+  SetNodeAttrBits(ex, &attr);
 
   if (!ex.barrier.empty()) {
-    SetBarrier(tagh, node_id, keys_vals, kv_start, kv_stop, ex, node_attr);
+    SetBarrierToVehicle(tagh, node_id, keys_vals, kv_start, kv_stop, ex, &attr);
   }
 
-  return node_attr->has_bit_attr || node_attr->has_barrier;
+  if (!attr.empty()) {
+    attr.node_id = node_id;
+  }
+  return attr;
 }
 
 // Iterate through all nodes and check if it has a barrier which blocks traffic.
@@ -235,10 +247,11 @@ bool ConsumeNodeTags(const OSMTagHelper& tagh, int64_t node_id,
 // Note that traffic within ways having the attribute area=yes is not blocked,
 // i.e. it is always possible to continue within the area, even if a border node
 // of the area has a blocking barrier.
-void StoreNodeBarrierData(Graph* g, build_graph::BuildGraphStats* stats) {
+void StoreNodeBarrierDataObsolete(Graph* g,
+                                  build_graph::BuildGraphStats* stats) {
   FUNC_TIMER();
 
-  const std::vector<NodeAttribute>& attrs = g->node_attrs;
+  const std::vector<NodeAttribute>& attrs = g->node_attrs_sorted;
   size_t attr_idx = 0;
   std::set<uint32_t> way_set;
   std::set<uint32_t> way_with_area_set;
@@ -300,7 +313,7 @@ void StoreNodeBarrierData(Graph* g, build_graph::BuildGraphStats* stats) {
       }
 
       // Iterate overall all incoming edges.
-      for (const FullGEdge& in_ge : gnode_incoming_edges(*g, node_idx)) {
+      for (const FullEdge& in_ge : gnode_incoming_edges(*g, node_idx)) {
         const GNode other = g->nodes.at(in_ge.start_idx);
         GEdge& in = g->edges.at(other.edges_start_pos + in_ge.offset);
         CHECK_EQ_S(in.other_node_idx, node_idx);  // Is it really incoming?
