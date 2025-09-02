@@ -31,7 +31,9 @@ add_compile_options(-Wall)
 # add_compile_options(-Wno-unused-but-set-variable)
 # add_compile_options(-Wno-unused-variable)
 add_compile_options(-DLOGURU_WITH_STREAMS=1)
-add_compile_options(-march=native)
+add_compile_options(-march=native -mtune=native -ffast-math)
+# lto=Link Time Optimization
+# add_compile_options(-flto -fwhole-program)
 
 # profiling
 # Running a binary produces gmon.out

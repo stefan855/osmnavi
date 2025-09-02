@@ -38,8 +38,8 @@ void PrintDebugInfoForNode(const Graph& g, int64_t node_id) {
                                      GetGNodeIdSafe(g, key.to_node_idx),
                                      GetGWayIdSafe(g, key.way_idx));
       const GNode& n = g.nodes.at(key.to_node_idx);
-      for (uint32_t offset = 0; offset < gnode_num_edges(g, key.to_node_idx);
-           ++offset) {
+      for (uint32_t offset = 0;
+           offset < gnode_num_all_edges(g, key.to_node_idx); ++offset) {
         if (data.allowed_edge_bits & (1u << offset)) {
           const GEdge& e = g.edges.at(n.edges_start_pos + offset);
           LOG_S(INFO) << absl::StrFormat(
@@ -68,8 +68,10 @@ void PrintStructSizes() {
                                  sizeof(EdgeRouter::VisitedEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
-  LOG_S(INFO) << absl::StrFormat("sizeof(NodeAttribute):          %4u",
-                                 sizeof(NodeAttribute));
+  LOG_S(INFO) << absl::StrFormat("sizeof(NodeTags):          %4u",
+                                 sizeof(NodeTags));
+  LOG_S(INFO) << absl::StrFormat("sizeof(FullEdge):               %4u",
+                                 sizeof(FullEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(RoutingAttrs):           %4u",
                                  sizeof(RoutingAttrs));
   LOG_S(INFO) << absl::StrFormat("sizeof(WayTaggedZones):         %4u",
@@ -518,7 +520,7 @@ int main(int argc, char* argv[]) {
 
        {.name = "n_threads",
         .type = "int",
-        .dflt = absl::StrCat(opt.n_threads),
+        .dflt = "16",
         .desc = "Max . number of threads to use for parallel processing."},
 
        {.name = "log_way_tag_stats",

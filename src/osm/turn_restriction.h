@@ -299,7 +299,7 @@ inline bool CreateSimpleTurnRestrictionData(
   const uint32_t via_node_idx = first_tr.path.front().to_node_idx;
   const GNode& via_node = g.nodes.at(via_node_idx);
   uint32_t num_all_edges =
-      gnode_edge_stop(g, via_node_idx) - via_node.edges_start_pos;
+      gnode_edges_stop(g, via_node_idx) - via_node.edges_start_pos;
   CHECK_GT_S(num_all_edges, 0) << via_node.node_id;
 
   // Set the 'num_all_edges' lowest bits.

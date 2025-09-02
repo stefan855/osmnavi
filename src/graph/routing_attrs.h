@@ -117,9 +117,9 @@ enum DIRECTION : uint8_t {
 namespace {
 std::vector<std::string_view> DirectionStringVector() {
   std::vector<std::string_view> v((size_t)DIR_MAX);
-  v[(size_t)DIR_BOTH] = "both";
   v[(size_t)DIR_FORWARD] = "forward";
   v[(size_t)DIR_BACKWARD] = "backward";
+  v[(size_t)DIR_BOTH] = "both";
   return v;
 }
 }  // namespace
@@ -133,7 +133,8 @@ inline DIRECTION DirectionToEnum(std::string_view dir_str) {
   if (dir_str.empty()) {
     return DIR_MAX;
   }
-  for (DIRECTION dir = DIR_BOTH; dir < DIR_MAX; dir = (DIRECTION)(dir + 1)) {
+  for (DIRECTION dir = (DIRECTION)0; dir < DIR_MAX;
+       dir = (DIRECTION)(dir + 1)) {
     if (dir_str == DirectionToString(dir)) {
       return dir;
     }
@@ -534,7 +535,7 @@ constexpr uint16_t INFINITE_MAXSPEED = 1023;  // 2^10 - 1
 constexpr uint16_t WALK_MAXSPEED = 7;
 
 struct alignas(2) RoutingAttrs {
-  uint8_t dir : 1;  // 1 if the direction of the road is allowed, 0 if not. 
+  uint8_t dir : 1;    // 1 if the direction of the road is allowed, 0 if not.
   ACCESS access : 4;  // no, private, ...
   uint16_t maxspeed : 10;
   uint16_t lit : 1;
@@ -603,8 +604,7 @@ inline bool ParseNumericMaxspeed(std::string_view val,
 
 inline std::string RoutingAttrsDebugString(RoutingAttrs ra) {
   return absl::StrFormat(
-      "dir:%u acc:%s maxsp:%u surface:%s tracktype:%s smoothness:%s",
-      ra.dir,
+      "dir:%u acc:%s maxsp:%u surface:%s tracktype:%s smoothness:%s", ra.dir,
       AccessToString(ra.access).substr(0, 4), ra.maxspeed,
       ra.surface < SURFACE_MAX ? SurfaceToString(ra.surface)
                                : absl::StrCat(ra.surface),

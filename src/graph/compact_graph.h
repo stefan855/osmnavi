@@ -147,7 +147,7 @@ class CompactDirectedGraph {
       const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
       const std::vector<std::uint32_t>& compact_to_graph) const {
     const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
-    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_edges_forward,
+    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_forward_edges,
                g_tcd.turn_costs.size());
 
     const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
@@ -171,7 +171,7 @@ class CompactDirectedGraph {
       const std::vector<std::uint32_t>& compact_to_graph,
       TurnCostData* tcd) const {
     const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
-    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_edges_forward,
+    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_forward_edges,
                g_tcd.turn_costs.size());
 
     const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);

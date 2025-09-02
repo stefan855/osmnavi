@@ -12,7 +12,8 @@
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
-#include "graph/node_attributes.h"
+#include "graph/graph_def_utils.h"
+#include "graph/node_tags.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
 #include "graph/turn_costs.h"
@@ -55,9 +56,9 @@ void ValidateGraph(const Graph& g) {
       // nodes are sorted by increasing OSM node_id.
       CHECK_GT_S(node.node_id, g.nodes.at(node_idx - 1).node_id) << node_idx;
     }
-    for (uint32_t off1 = 0; off1 < node.num_edges_forward; ++off1) {
+    for (uint32_t off1 = 0; off1 < node.num_forward_edges; ++off1) {
       const GEdge& e1 = g.edges.at(node.edges_start_pos + off1);
-      for (uint32_t off2 = off1 + 1; off2 < node.num_edges_forward; ++off2) {
+      for (uint32_t off2 = off1 + 1; off2 < node.num_forward_edges; ++off2) {
         const GEdge& e2 = g.edges.at(node.edges_start_pos + off2);
         if (e1.other_node_idx == e2.other_node_idx &&
             e1.way_idx == e2.way_idx) {
@@ -130,12 +131,12 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
       CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
 
       if (touched_nodes_ids.GetBit(node.id)) {
-        NodeAttribute node_attr =
+        NodeTags node_tags =
             ParseOSMNodeTags(tagh, node.id, keys_vals, kv_start, kv_stop);
-        if (!node_attr.empty()) {
-          // Store node_attr for this node.
+        if (!node_tags.empty()) {
+          // Store node_tags for this node.
           std::unique_lock<std::mutex> l(mut);
-          meta->graph.node_attrs_sorted.push_back(node_attr);
+          meta->graph.node_tags_sorted.push_back(node_tags);
         }
         builder.AddNode(node);
         if (builder.pending_nodes() >= 128) {
@@ -721,21 +722,21 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
       << absl::StrFormat("Node %lld->%lld way %lld", n.node_id, other.node_id,
                          GetGWayIdSafe(g, way_idx));
   const int64_t edge_start = n.edges_start_pos;
-  const int64_t edge_stop = gnode_edge_stop(g, start_idx);
+  const int64_t edges_stop = gnode_edges_stop(g, start_idx);
   int64_t ep;
   if (inverted) {
-    for (ep = edge_stop - 1; ep >= edge_start; --ep) {
+    for (ep = edges_stop - 1; ep >= edge_start; --ep) {
       if (g.edges.at(ep).other_node_idx == INFU32) break;
     }
-    // n.num_edges_inverted++;
+    // n.num_inverted_edges++;
   } else {
-    for (ep = edge_start; ep < edge_stop; ++ep) {
+    for (ep = edge_start; ep < edges_stop; ++ep) {
       if (g.edges.at(ep).other_node_idx == INFU32) break;
     }
-    CHECK_LT_S(n.num_edges_forward, MAX_NUM_EDGES_OUT) << n.node_id;
-    n.num_edges_forward++;
+    CHECK_LT_S(n.num_forward_edges, MAX_NUM_EDGES_OUT) << n.node_id;
+    n.num_forward_edges++;
   }
-  CHECK_S(ep >= edge_start && ep < edge_stop);
+  CHECK_S(ep >= edge_start && ep < edges_stop);
   CHECK_S(other_idx != INFU32);
   GEdge& e = g.edges.at(ep);
   e.other_node_idx = other_idx;
@@ -783,8 +784,10 @@ void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
 // Read the ways that might useful for routing, remember the nodes ids touched
 // by these ways, then read the node coordinates and store them in
 // 'node_table'.
-void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
-                         GraphMetaData* meta) {
+void LoadNodeCoordsAndAttrributes(OsmPbfReader* reader,
+                                  DataBlockTable* node_table,
+                                  GraphMetaData* meta) {
+  FUNC_TIMER();
   HugeBitset touched_nodes_ids;
   // Read ways and remember the touched nodes in 'touched_nodes_ids'.
   reader->ReadWays([&touched_nodes_ids, meta](const OSMTagHelper& tagh,
@@ -805,10 +808,33 @@ void LoadNodeCoordinates(OsmPbfReader* reader, DataBlockTable* node_table,
       });
   // Make node table searchable, so we can look up lat/lon by node_id.
   node_table->Sort();
-  // Sort graph.node_attrs.
-  std::sort(meta->graph.node_attrs_sorted.begin(),
-            meta->graph.node_attrs_sorted.end(),
+  std::sort(meta->graph.node_tags_sorted.begin(),
+            meta->graph.node_tags_sorted.end(),
             [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
+}
+
+void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
+  FUNC_TIMER();
+
+  DeDuperWithIds<WaySharedAttrs> deduper;
+  reader->ReadWays([&deduper, meta](const OSMTagHelper& tagh,
+                                    const OSMPBF::Way& way, int thread_idx,
+                                    std::mutex& mut) {
+    ConsumeWayWorker(tagh, way, mut, &deduper, meta, &meta->Stats(thread_idx));
+  });
+  {
+    // Sort and build the vector with shared way attributes.
+    deduper.SortByPopularity();
+    meta->graph.way_shared_attrs = deduper.GetObjVector();
+    const std::vector<uint32_t> mapping = deduper.GetSortMapping();
+    for (GWay& w : meta->graph.ways) {
+      w.wsa_id = mapping.at(w.wsa_id);
+    }
+    LOG_S(INFO) << absl::StrFormat(
+        "Shared way attributes de-duping %u -> %u (%.2f%%)",
+        deduper.num_added(), deduper.num_unique(),
+        (100.0 * deduper.num_unique()) / std::max(1u, deduper.num_added()));
+  }
 }
 
 void SortGWays(GraphMetaData* meta) {
@@ -820,9 +846,9 @@ void SortGWays(GraphMetaData* meta) {
 
 void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
   FUNC_TIMER();
-  for (const NodeAttribute& na : meta->graph.node_attrs_sorted) {
-    if (meta->way_nodes_seen->GetBit(na.node_id)) {
-      meta->way_nodes_needed->SetBit(na.node_id, true);
+  for (const NodeTags& nt : meta->graph.node_tags_sorted) {
+    if (meta->way_nodes_seen->GetBit(nt.node_id)) {
+      meta->way_nodes_needed->SetBit(nt.node_id, true);
     }
   }
 }
@@ -840,7 +866,7 @@ void AllocateGNodes(GraphMetaData* meta) {
       n.cluster_id = INVALID_CLUSTER_ID;
       n.cluster_border_node = 0;
       n.edges_start_pos = 0;
-      n.num_edges_forward = 0;
+      n.num_forward_edges = 0;
       n.dead_end = 0;
       n.ncc = INVALID_NCC;
       n.simple_turn_restriction_via_node = 0;
@@ -1098,8 +1124,10 @@ inline bool IsUTurnAllowedEdgeOld(const Graph& g, uint32_t node_idx,
   return false;
 }
 
-void LoadTurnRestrictions(OsmPbfReader* reader, GraphMetaData* meta,
-                          BuildGraphStats* stats) {
+void LoadTurnRestrictionsFromRelations(OsmPbfReader* reader,
+                                       GraphMetaData* meta,
+                                       BuildGraphStats* stats) {
+  FUNC_TIMER();
   // Get data.
   std::vector<TRResult> results(reader->n_threads());
   reader->ReadRelations([&meta, &results](const OSMTagHelper& tagh,
@@ -1228,15 +1256,15 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     stats->num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
     stats->num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
     stats->num_edges_at_simple_tr_via +=
-        n.simple_turn_restriction_via_node ? n.num_edges_forward : 0;
+        n.simple_turn_restriction_via_node ? n.num_forward_edges : 0;
 
-    int64_t num_edges_inverted = 0;
-    int64_t num_edges_forward = 0;
-    num_forwards.at(n.num_edges_forward)++;
+    int64_t num_inverted_edges = 0;
+    int64_t num_forward_edges = 0;
+    num_forwards.at(n.num_forward_edges)++;
     if (absl::ToInt64Nanoseconds(absl::Now() - absl::Time()) %
-            num_forwards.at(n.num_edges_forward) ==
+            num_forwards.at(n.num_forward_edges) ==
         0) {
-      num_forwards_node_id.at(n.num_edges_forward) = n.node_id;
+      num_forwards_node_id.at(n.num_forward_edges) = n.node_id;
     }
 
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
@@ -1245,8 +1273,8 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       if (!e.unique_other) {
         stats->num_edges_non_unique++;
       }
-      num_edges_inverted += e.inverted;
-      num_edges_forward += (e.inverted == 0);
+      num_inverted_edges += e.inverted;
+      num_forward_edges += (e.inverted == 0);
 
       if (!e.inverted && e.other_node_idx != node_idx) {
         stats->sum_edge_length_cm += e.distance_cm;
@@ -1295,12 +1323,12 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       }
     }
     stats->max_edges =
-        std::max(stats->max_edges, num_edges_forward + num_edges_inverted);
-    stats->num_edges_forward += num_edges_forward;
-    stats->num_edges_inverted += num_edges_inverted;
-    stats->max_edges_out = std::max(stats->max_edges_out, num_edges_forward);
+        std::max(stats->max_edges, num_forward_edges + num_inverted_edges);
+    stats->num_edges_forward += num_forward_edges;
+    stats->num_edges_inverted += num_inverted_edges;
+    stats->max_edges_out = std::max(stats->max_edges_out, num_forward_edges);
     stats->max_edges_inverted =
-        std::max(stats->max_edges_inverted, num_edges_inverted);
+        std::max(stats->max_edges_inverted, num_inverted_edges);
   }
   for (size_t i = 0; i <= MAX_NUM_EDGES_OUT; ++i) {
     LOG_S(INFO) << absl::StrFormat(
@@ -1356,7 +1384,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
                                  stats.num_turn_restriction_error_connection);
   LOG_S(INFO) << absl::StrFormat("Num node attrs:      %11lld",
-                                 g.node_attrs_sorted.size());
+                                 g.node_tags_sorted.size());
   LOG_S(INFO) << absl::StrFormat("Num node barrier free:%10lld",
                                  stats.num_node_barrier_free);
   LOG_S(INFO) << absl::StrFormat("Num edge barrier block:%9lld",
@@ -1518,11 +1546,164 @@ void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
 }
 }  // namespace
 
-void MarkUTurnAllowedEdges(Graph* g) {
+void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
   FUNC_TIMER();
   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
     for (GEdge& e : gnode_forward_edges(*g, from_idx)) {
       e.car_uturn_allowed = IsUTurnAllowedEdgeOld(*g, from_idx, e);
+    }
+  }
+}
+
+void LabelCrossingEdgeAsMinor(Graph& g, VEHICLE vt, const FullEdge start) {
+  const FullEdge crossing_edge = FollowEdgeToCrossing(g, vt, start);
+  if (!crossing_edge.invalid()) {
+    crossing_edge.gedge(g).bit_minor = 1;
+  }
+}
+
+// Some nodes are marked as "stop". Stops often come with a direction in the
+// tags, but sometimes the direction has to be inferred by looking at the
+// direction of the road or by finding the closest crossing.
+//
+// Find out two things:
+//   * Direction, if necessary find next crossing and infer direction.
+//   * Find next crossing and mark incoming edge as "minor".
+//
+// TODO
+//   * https://wiki.openstreetmap.org/wiki/Tag:highway%3Dstop#Direction
+//   * Also handle give_way:
+//   * https://wiki.openstreetmap.org/wiki/Tag:highway%3Dgive_way
+void LabelStopEdges(GraphMetaData* meta) {
+  FUNC_TIMER();
+  const Graph& g = meta->graph;
+  const VEHICLE vt = VH_MOTORCAR;  // TODO: shouldn't be defined here.
+
+  for (NodeTags& nt : meta->graph.node_tags_sorted) {
+    const size_t node_idx = g.FindNodeIndex(nt.node_id);
+    if (node_idx >= g.nodes.size()) {
+      LOG_S(INFO) << "Node " << nt.node_id << " for stop not found";
+      continue;
+    }
+
+    if (nt.bit_stop) {
+      if (nt.direction == DIR_BOTH || nt.direction == DIR_MAX) {
+        // Missing direction.
+        //
+        // One way this can be missing is because the mapper
+        // put an invalid or no direction. OSM does not allow this for stop
+        // signs, so assume there is no direction given.
+        //
+        // If there are one incoming and an arbitrary number of outgoing
+        // edges at 'node_idx', then we're fine, since the direction of the stop
+        // is given by the direction of the road.
+        //
+        // If there is more than one incoming edge, then there are two cases:
+        //
+        // 2 edges on the same street
+        //    Node is on a single street that is not one-way, i.e. two
+        //    edges are coming in.  Try to find the next
+        //    crossing in both directions and infer the direction from this. See
+        //    for example https://www.openstreetmap.org/node/4459509890
+        // >=3 edges:
+        //    Node is on a crossing with more than two edges.
+        //    This means the stop is on a crossing. Check if "stop=all" is set.
+        //
+        const std::vector<FullEdge> in_edges =
+            gnode_incoming_edges(g, node_idx);
+        LOG_S(INFO) << absl::StrFormat(
+            "Stop-Node %lld without direction has %llu incoming edges",
+            nt.node_id, in_edges.size());
+
+        if (in_edges.size() == 0) {
+          ;  // No edge that is affected by stop.
+        } else if (in_edges.size() == 1) {
+          // We have only one incoming edge (probably a one-way road). Label the
+          // edge.
+          in_edges.front().gedge(meta->graph).bit_stop = 1;
+          LabelCrossingEdgeAsMinor(meta->graph, vt, in_edges.front());
+        } else if (in_edges.size() == 2 &&
+                   gnode_num_unique_edges(g, node_idx,
+                                          /*ignore_loops=*/true) == 2) {
+          // A single street with both directions allowed. Infer direction if we
+          // find a crossing for one edge, but not for the other.
+          const FullEdge cr[2] = {FollowEdgeToCrossing(g, vt, in_edges.at(0)),
+                                  FollowEdgeToCrossing(g, vt, in_edges.at(1))};
+          if (cr[0].invalid() != cr[1].invalid()) {
+            const uint32_t idx = cr[0].invalid() ? 1 : 0;
+            const FullEdge& in_edge = in_edges.at(idx);
+            // Label the edge that leads to the stop.
+            in_edge.gedge(meta->graph).bit_stop = 1;
+            // Label the edge that leads from the stop to the crossing.
+            cr[idx].gedge(meta->graph).bit_minor = 1;
+            LOG_S(INFO) << absl::StrFormat(
+                "Infer direction for stop-edge %lld->%lld and crossing %lld",
+                in_edge.start_node(g).node_id, in_edge.target_node(g).node_id,
+                GetGNodeIdSafe(g, cr[idx].gedge(g).other_node_idx));
+          } else {
+            LOG_S(INFO) << absl::StrFormat(
+                "Can not infer direction for stop node %lld",
+                GetGNodeIdSafe(g, node_idx));
+          }
+        } else {
+          // We have multiple incoming edges. Check if this is marked as an
+          // "all" stop.
+          if (nt.stop_all /* TODO: this is default in a few countries */) {
+            for (const FullEdge in : in_edges) {
+              in.gedge(meta->graph).bit_stop = 1;
+              LabelCrossingEdgeAsMinor(meta->graph, vt, in);
+            }
+          } else {
+            // We don't really know what to do. We don't use the data.
+          }
+        }
+        continue;
+      } else {
+        const bool back_dir = (nt.direction == DIR_BACKWARD);
+        // We have a proper direction.
+        const std::vector<FullEdge> in_edges =
+            gnode_incoming_edges(g, node_idx);
+        if (in_edges.size() == 0) {
+          ;  // No edge that is affected by stop.
+        } else if (in_edges.size() == 1) {
+          // Check that the direction is correct.
+          const FullEdge& in_edge = in_edges.front();
+          if (back_dir == in_edge.gedge(g).contra_way) {
+            in_edge.gedge(meta->graph).bit_stop = 1;
+            LabelCrossingEdgeAsMinor(meta->graph, vt, in_edge);
+            LOG_S(INFO) << absl::StrFormat(
+                "Correct direction for single stop-edge %lld->%lld",
+                in_edge.start_node(g).node_id, in_edge.target_node(g).node_id);
+          } else {
+            LOG_S(INFO) << absl::StrFormat(
+                "Wrong direction for single stop-edge %lld->%lld",
+                in_edge.start_node(g).node_id, in_edge.target_node(g).node_id);
+          }
+        } else if (in_edges.size() == 2 &&
+                   gnode_num_unique_edges(g, node_idx,
+                                          /*ignore_loops=*/true) == 2) {
+          bool good_dir[2];
+          good_dir[0] = back_dir == in_edges.at(0).gedge(g).contra_way;
+          good_dir[1] = back_dir == in_edges.at(1).gedge(g).contra_way;
+          if (good_dir[0] != good_dir[1]) {
+            const uint32_t idx = good_dir[0] ? 0 : 1;
+            const FullEdge& in_edge = in_edges.at(idx);
+            in_edge.gedge(meta->graph).bit_stop = 1;
+            LabelCrossingEdgeAsMinor(meta->graph, vt, in_edge);
+            LOG_S(INFO) << absl::StrFormat(
+                "Correct direction for double stop-edge %lld->%lld",
+                in_edge.start_node(g).node_id, in_edge.target_node(g).node_id);
+          } else {
+            LOG_S(INFO) << absl::StrFormat(
+                "Wrong direction for double stop node %lld",
+                GetGNodeIdSafe(g, node_idx));
+          }
+        } else {
+          LOG_S(INFO) << absl::StrFormat("Can not handle %llu-stop node %lld",
+                                         in_edges.size(),
+                                         GetGNodeIdSafe(g, node_idx));
+        }
+      }
     }
   }
 }
@@ -1541,7 +1722,7 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
   for (uint32_t from_idx = 0; from_idx < g.nodes.size(); ++from_idx) {
     const GNode& from_node = g.nodes.at(from_idx);
     // For each outgoing edge of this node.
-    for (uint32_t off = 0; off < from_node.num_edges_forward; ++off) {
+    for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
       GEdge& e = g.edges.at(from_node.edges_start_pos + off);
       // Compute the turn costs for the target node of 'fe'.
       TurnCostData tcd = ComputeTurnCostsForEdge(
@@ -1581,7 +1762,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   meta.node_table.reset(new DataBlockTable);
 
   // Reading is fastest with 7 threads on my hardware.
-  OsmPbfReader reader(opt.pbf, std::min(7, opt.n_threads));
+  OsmPbfReader reader(opt.pbf, std::min(16, opt.n_threads));
 
   // Combine a few setup operations that can be done in parallel.
   {
@@ -1604,30 +1785,8 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     pool.WaitAllFinished();
   }
 
-  LoadNodeCoordinates(&reader, meta.node_table.get(), &meta);
-
-  {
-    DeDuperWithIds<WaySharedAttrs> deduper;
-    reader.ReadWays([&deduper, &meta](const OSMTagHelper& tagh,
-                                      const OSMPBF::Way& way, int thread_idx,
-                                      std::mutex& mut) {
-      ConsumeWayWorker(tagh, way, mut, &deduper, &meta,
-                       &meta.Stats(thread_idx));
-    });
-    {
-      // Sort and build the vector with shared way attributes.
-      deduper.SortByPopularity();
-      meta.graph.way_shared_attrs = deduper.GetObjVector();
-      const std::vector<uint32_t> mapping = deduper.GetSortMapping();
-      for (GWay& w : meta.graph.ways) {
-        w.wsa_id = mapping.at(w.wsa_id);
-      }
-      LOG_S(INFO) << absl::StrFormat(
-          "Shared way attributes de-duping %u -> %u (%.2f%%)",
-          deduper.num_added(), deduper.num_unique(),
-          (100.0 * deduper.num_unique()) / std::max(1u, deduper.num_added()));
-    }
-  }
+  LoadNodeCoordsAndAttrributes(&reader, meta.node_table.get(), &meta);
+  LoadGWays(&reader, &meta);
   SortGWays(&meta);
   MarkNodesWithAttributesAsNeeded(&meta);
 
@@ -1644,25 +1803,18 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   }
   MarkUniqueEdges(&meta);
 
-  // =========================================================================
+  // ======================================================
+  // Not the basic graph with nodes, edges and ways exists.
+  // ======================================================
 
-#if 0
-  {
-    NodeBuilder::VNode n;
-    bool found = NodeBuilder::FindNode(*meta.node_table, 207718684, &n);
-    LOG_S(INFO) << "Search node 207718684 expect lat:473492652 lon:87012469";
-    LOG_S(INFO) << absl::StrFormat("Find node   %llu        lat:%llu lon:%llu",
-                                   207718684, found ? n.lat : 0,
-                                   found ? n.lon : 0);
-  }
-#endif
-
-  LoadTurnRestrictions(&reader, &meta, &meta.Stats());
-  StoreNodeBarrierDataObsolete(&meta.graph, &meta.Stats());
+  LoadTurnRestrictionsFromRelations(&reader, &meta, &meta.Stats());
+  StoreNodeBarrierData_Obsolete(&meta.graph, &meta.Stats());
   FindLargeComponents(&meta.graph);
   meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
-  MarkUTurnAllowedEdges(&(meta.graph));
+  MarkUTurnAllowedEdges_Obsolete(&(meta.graph));
+
+  LabelStopEdges(&meta);
   ComputeAllTurnCosts(&meta);
 
   ClusterGraph(meta.opt, &meta);

@@ -4,6 +4,7 @@
 #include "base/util.h"
 #include "graph/build_graph.h"
 #include "graph/graph_def.h"
+#include "graph/graph_def_utils.h"
 #include "graph/routing_attrs.h"
 #include "osm/access.h"
 #include "osm/osm_helpers.h"
@@ -12,10 +13,12 @@ namespace {
 struct NodeTagExtract {
   ACCESS access = ACC_MAX;
   ACCESS motor_vehicle_access = ACC_MAX;
+  bool stop_all = false;  // "stop=all".
+  DIRECTION direction = DIR_MAX;
+
   std::string_view barrier;
   std::string_view locked;
   std::string_view highway;
-  std::string_view direction;
   std::string_view crossing;
   std::string_view crossing_barrier;
   std::string_view public_transport;
@@ -49,8 +52,12 @@ NodeTagExtract ExtractNodeTags(
       ex.locked = val;
     } else if (key == "highway") {
       ex.highway = val;
-    } else if (key == "direction") {
-      ex.direction = val;
+    } else if (key == "direction" || key == "traffic_sign:direction" ||
+               key == "traffic_signals:direction") {
+      ex.direction = DirectionToEnum(val);
+      // key == "traffic_sign:forward":
+      // Not handling these kind of tags, often co-occurs with other flags that
+      // have enough information.
     } else if (key == "crossing") {
       ex.crossing = val;
     } else if (key == "crossing:barrier") {
@@ -61,18 +68,27 @@ NodeTagExtract ExtractNodeTags(
       ex.traffic_calming = val;
     } else if (key == "railway") {
       ex.railway = val;
+    } else if (key == "stop") {
+      ex.stop_all = (val == "all");
     }
   }
   return ex;
 }
 
-void SetNodeAttrBits(const NodeTagExtract& ex, NodeAttribute* a) {
+void SetNodeTagBits(const NodeTagExtract& ex, NodeTags* a) {
+  a->direction = ex.direction;
+
   if (ex.highway == "turning_circle") {
     a->bit_turning_circle = 1;
   }
 
   if (ex.highway == "stop") {
     a->bit_stop = 1;
+    a->stop_all = ex.stop_all;
+  }
+
+  if (ex.highway == "give_way") {
+    a->bit_give_way = 1;
   }
 
   // Cars. The marker
@@ -113,7 +129,7 @@ void SetNodeAttrBits(const NodeTagExtract& ex, NodeAttribute* a) {
 inline void SetBarrierToVehicle(
     const OSMTagHelper& tagh, int64_t node_id,
     const google::protobuf::RepeatedField<int>& keys_vals, int kv_start,
-    int kv_stop, const NodeTagExtract& ex, NodeAttribute* node_attr) {
+    int kv_stop, const NodeTagExtract& ex, NodeTags* node_tags) {
   // For barriers, we apply access tags in the following order:
   //   1) "barrier=" type sets the default.
   //   2) "access=" overrides everything that barrier type might have set.
@@ -138,7 +154,7 @@ inline void SetBarrierToVehicle(
       "border_control", "bump_gate", "cattle_grid", "coupure",
       "entrance",       "lift_gate", "sally_port",  "toll_booth"};
 
-  auto& vh_acc = node_attr->vh_acc;
+  auto& vh_acc = node_tags->vh_acc;
   if (ex.access != ACC_MAX) {
     // The barrier type doesn't matter, use access.
     std::fill_n(vh_acc, VH_MAX, ex.access);
@@ -203,9 +219,9 @@ inline void SetBarrierToVehicle(
     }
   }
 
-  for (const ACCESS acc : node_attr->vh_acc) {
+  for (const ACCESS acc : node_tags->vh_acc) {
     if (acc != ACC_YES) {
-      node_attr->has_barrier = 1;
+      node_tags->has_barrier = 1;
       return;
     }
   }
@@ -214,12 +230,11 @@ inline void SetBarrierToVehicle(
 
 // Extract node attributes including barrier information stored in the keys_vals
 // of nodes. Returns true if relevant attributes were found, false if not.
-// The attributes themselves are returned in 'node_attr'.
-NodeAttribute ParseOSMNodeTags(
-    const OSMTagHelper& tagh, int64_t node_id,
-    const google::protobuf::RepeatedField<int>& keys_vals, int kv_start,
-    int kv_stop) {
-  NodeAttribute attr;
+// The attributes themselves are returned in 'node_tags'.
+NodeTags ParseOSMNodeTags(const OSMTagHelper& tagh, int64_t node_id,
+                          const google::protobuf::RepeatedField<int>& keys_vals,
+                          int kv_start, int kv_stop) {
+  NodeTags attr;
   if (kv_start >= kv_stop) {
     return attr;
   }
@@ -228,7 +243,7 @@ NodeAttribute ParseOSMNodeTags(
 
   const NodeTagExtract ex =
       ExtractNodeTags(tagh, node_id, keys_vals, kv_start, kv_stop);
-  SetNodeAttrBits(ex, &attr);
+  SetNodeTagBits(ex, &attr);
 
   if (!ex.barrier.empty()) {
     SetBarrierToVehicle(tagh, node_id, keys_vals, kv_start, kv_stop, ex, &attr);
@@ -247,11 +262,11 @@ NodeAttribute ParseOSMNodeTags(
 // Note that traffic within ways having the attribute area=yes is not blocked,
 // i.e. it is always possible to continue within the area, even if a border node
 // of the area has a blocking barrier.
-void StoreNodeBarrierDataObsolete(Graph* g,
-                                  build_graph::BuildGraphStats* stats) {
+void StoreNodeBarrierData_Obsolete(Graph* g,
+                                   build_graph::BuildGraphStats* stats) {
   FUNC_TIMER();
 
-  const std::vector<NodeAttribute>& attrs = g->node_attrs_sorted;
+  const std::vector<NodeTags>& attrs = g->node_tags_sorted;
   size_t attr_idx = 0;
   std::set<uint32_t> way_set;
   std::set<uint32_t> way_with_area_set;
@@ -269,13 +284,13 @@ void StoreNodeBarrierDataObsolete(Graph* g,
     //             << g->nodes.at(node_idx).node_id;
     if (attrs.at(attr_idx).node_id == g->nodes.at(node_idx).node_id) {
       const GNode& n = g->nodes.at(node_idx);
-      const NodeAttribute na = attrs.at(attr_idx++);
-      if (!na.has_barrier) {
+      const NodeTags nt = attrs.at(attr_idx++);
+      if (!nt.has_barrier) {
         continue;
       }
 
       LOG_S(INFO) << "Examine node " << n.node_id;
-      const uint32_t num_edges = gnode_num_edges(*g, node_idx);
+      const uint32_t num_edges = gnode_num_all_edges(*g, node_idx);
       bool same_target = false;
       bool self_edge = false;
       if (num_edges == 2) {
@@ -298,12 +313,12 @@ void StoreNodeBarrierDataObsolete(Graph* g,
         }
       }
 
-      bool access_allowed = (na.vh_acc[VH_MOTORCAR] > ACC_PRIVATE &&
-                             na.vh_acc[VH_MOTORCAR] < ACC_MAX);
+      bool access_allowed = (nt.vh_acc[VH_MOTORCAR] > ACC_PRIVATE &&
+                             nt.vh_acc[VH_MOTORCAR] < ACC_MAX);
       LOG_S(INFO) << absl::StrFormat(
           "Node barrier on node %lld forward:%u all:%u #w-norm:%llu "
           "#w-area:%llu same-target:%u self-edge:%d acc:%d",
-          n.node_id, n.num_edges_forward, num_edges, way_set.size(),
+          n.node_id, n.num_forward_edges, num_edges, way_set.size(),
           way_with_area_set.size(), same_target, self_edge,
           (int)access_allowed);
 
@@ -320,7 +335,7 @@ void StoreNodeBarrierDataObsolete(Graph* g,
         const bool in_way_area = g->ways.at(in.way_idx).area;
         uint32_t allowed_edge_bits = 0;
         // Iterate outgoing edges at the same node.
-        for (uint32_t offset = 0; offset < n.num_edges_forward; ++offset) {
+        for (uint32_t offset = 0; offset < n.num_forward_edges; ++offset) {
           const GEdge& out = g->edges.at(n.edges_start_pos + offset);
           // If the out-edge stays on the same way as the in-edge then there are
           // two cases when the turn is allowed:

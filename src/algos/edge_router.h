@@ -407,7 +407,7 @@ class EdgeRouter {
     }
 
     // for (const GEdge& curr_ge : gnode_forward_edges(g_, prev.other_idx)) {
-    for (uint64_t offset = 0; offset < expansion_node.num_edges_forward;
+    for (uint64_t offset = 0; offset < expansion_node.num_forward_edges;
          ++offset) {
       const GEdge& curr_ge =
           g_.edges.at(expansion_node.edges_start_pos + offset);

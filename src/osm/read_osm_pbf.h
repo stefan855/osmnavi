@@ -135,7 +135,7 @@ class OsmPbfReader {
   // of the other Read* functions. This might be a little bit slow on hard
   // disks. It was tested only on SSDs.
   void ReadFileStructure() {
-    FUNC_TIMER();
+    FuncTimer timer("OsmPbfReader::ReadFileStructure()",__FILE__, __LINE__);
     CHECK_NE_S(file_handles_.at(0), nullptr);
     CHECK_S(blob_meta_.empty())
         << "ReadFileStructure() has already been called";
@@ -184,7 +184,7 @@ class OsmPbfReader {
   // threads, so you might have to synchronize access to global data from
   // your worker_func.
   void ReadRelations(RelationWorkerFunc worker_func) {
-    FUNC_TIMER();
+    FuncTimer timer("OsmPbfReader::ReadRelations()",__FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -203,7 +203,7 @@ class OsmPbfReader {
   // threads, so you might have to synchronize access to global data from
   // your worker_func.
   void ReadWays(WayWorkerFunc worker_func) {
-    FUNC_TIMER();
+    FuncTimer timer("OsmPbfReader::ReadWays()",__FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -222,7 +222,7 @@ class OsmPbfReader {
   // threads, so you might have to synchronize access to global data from
   // your worker_func.
   void ReadNodes(NodeWorkerFunc worker_func) {
-    FUNC_TIMER();
+    FuncTimer timer("OsmPbfReader::ReadNodes()",__FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -242,7 +242,7 @@ class OsmPbfReader {
   // global data from your worker_func.
   void ReadBlobs(BlobContentType type, BlobWorkerFunc worker_func) {
     FuncTimer timer(
-        absl::StrFormat("ReadBlobs(type=%s)", BlobContentTypeToStr(type)),
+        absl::StrFormat("OsmPbfReader::ReadBlobs(type=%s)", BlobContentTypeToStr(type)),
         __FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;

@@ -6,9 +6,9 @@
 
 void DeterminePriorityRoads(Graph* g) {
   FUNC_TIMER();
-  for (const NodeAttribute& na : graph->node_attrs_sorted) {
-    if (meta->way_nodes_seen->GetBit(na.node_id)) {
-      meta->way_nodes_needed->SetBit(na.node_id, true);
+  for (const NodeTags& nt : graph->node_tags_sorted) {
+    if (meta->way_nodes_seen->GetBit(nt.node_id)) {
+      meta->way_nodes_needed->SetBit(nt.node_id, true);
     }
   }
 }

@@ -395,7 +395,7 @@ class EdgeRouter2 {
   // (partially) travelled edges.
   void InitialiseRoutingFromNode(const Context& ctx, uint32_t start_idx) {
     const GNode& start_node = g_.nodes.at(start_idx);
-    for (uint64_t off = 0; off < start_node.num_edges_forward; ++off) {
+    for (uint64_t off = 0; off < start_node.num_forward_edges; ++off) {
       const GEdge& curr_ge = g_.edges.at(start_node.edges_start_pos + off);
       if (curr_ge.other_node_idx == start_idx) {
         continue;  // Ignore self-edges.
@@ -462,10 +462,10 @@ class EdgeRouter2 {
       turn_cost_data =
           &g_.turn_costs.at(prev_key.GetEdge(g_, ctr_list_).turn_cost_idx);
       CHECK_EQ_S(turn_cost_data->turn_costs.size(),
-                 expansion_node.num_edges_forward);
+                 expansion_node.num_forward_edges);
     }
 
-    for (uint64_t offset = 0; offset < expansion_node.num_edges_forward;
+    for (uint64_t offset = 0; offset < expansion_node.num_forward_edges;
          ++offset) {
       const GEdge& curr_ge =
           g_.edges.at(expansion_node.edges_start_pos + offset);

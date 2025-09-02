@@ -106,7 +106,7 @@ inline void AddNode(Graph& g, uint32_t idx, uint32_t cluster_id = 0) {
                      .cluster_id = cluster_id,
                      .cluster_border_node = 0,
                      .edges_start_pos = 0,
-                     .num_edges_forward = 0,
+                     .num_forward_edges = 0,
                      .dead_end = 0,
                      .ncc = NCC_CH,
                      .lat = 100 + (int32_t)idx,
@@ -158,8 +158,8 @@ inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist_cm,
 }
 
 // Adds turn costs to the graph g. Turn costs depend on node attributes such as
-// "barrier" (g.node_attrs), simple_turn_restrictions and the geometry of the
-// graph (angles). Any previously existing turn costs are overwritten.
+// "barrier" (g.node_tags_sorted), simple_turn_restrictions and the geometry of
+// the graph (angles). Any previously existing turn costs are overwritten.
 void AddTurnCostsForTests(std::vector<TurnRestriction> simple_turn_restrictions,
                           VEHICLE vh, Graph* g) {
   g->turn_costs.clear();
@@ -172,7 +172,7 @@ void AddTurnCostsForTests(std::vector<TurnRestriction> simple_turn_restrictions,
   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
     const GNode& from_node = g->nodes.at(from_idx);
     // For each outgoing edge of this node.
-    for (uint32_t off = 0; off < from_node.num_edges_forward; ++off) {
+    for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
       GEdge& e = g->edges.at(from_node.edges_start_pos + off);
       TurnCostData tcd = ComputeTurnCostsForEdge(
           *g, vh, indexed_trs, {.start_idx = from_idx, .offset = off});
@@ -189,7 +189,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     const uint32_t from_idx = std::get<0>(e);
     const uint32_t to_idx = std::get<1>(e);
     g->nodes.at(from_idx).edges_start_pos += 1;    // Hack: use as counter.
-    g->nodes.at(from_idx).num_edges_forward += 1;  // Hack: use as counter.
+    g->nodes.at(from_idx).num_forward_edges += 1;  // Hack: use as counter.
     g->edges.push_back({.other_node_idx = to_idx,
                         .way_idx = std::get<4>(e),
                         .distance_cm = std::get<2>(e),

@@ -54,7 +54,8 @@ inline void InitLogging(int argc, char* argv[]) {
 // Object that measures time execution time of a function and prints information
 // about start, end and elapsed time.
 // Just put the macro FUNC_TIME() on the first line of you function.
-#define FUNC_TIMER() FuncTimer __func_timer(__func__, __FILE__, __LINE__);
+#define FUNC_TIMER() \
+  FuncTimer __func_timer(std::string(__func__) + "()", __FILE__, __LINE__);
 class FuncTimer {
  public:
   FuncTimer(std::string_view text, std::string_view path, int line)
@@ -62,14 +63,14 @@ class FuncTimer {
         filename_(path.substr(path.find_last_of("/\\") + 1)),
         line_(line),
         start_(absl::Now()) {
-    RAW_LOG_F(INFO, absl::StrFormat(" %s %s:%d | %s() started",
+    RAW_LOG_F(INFO, absl::StrFormat(" %s %s:%d | %s: started",
                                     absl::FormatTime("%H:%M:%E3S", start_,
                                                      absl::LocalTimeZone()),
                                     filename_, line_, text_)
                         .c_str());
   }
   ~FuncTimer() {
-    RAW_LOG_F(INFO, absl::StrFormat(" %s %s:%d | %s() finished >>> secs: %.3f",
+    RAW_LOG_F(INFO, absl::StrFormat(" %s %s:%d | %s: finished >>> secs: %.3f",
                                     absl::FormatTime("%H:%M:%E3S", absl::Now(),
                                                      absl::LocalTimeZone()),
                                     filename_, line_, text_,

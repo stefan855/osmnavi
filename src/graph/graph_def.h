@@ -35,11 +35,15 @@ struct TurnCostData {
 
 // Attributes extracted from node key-val pairs.
 // Currently, only barrier based access restrictions are extracted.
-struct NodeAttribute {
+struct NodeTags {
   int64_t node_id : 40 = 0;
 
+  // "direction=" from the node. DIR_MAX if the tag does not occur.
+  DIRECTION direction : 2 = DIR_MAX;
+  std::uint32_t bit_give_way : 1 = 0;
   std::uint32_t bit_turning_circle : 1 = 0;
   // TODO: Direction of the stop.
+  std::uint32_t stop_all : 1 = 0;
   std::uint32_t bit_stop : 1 = 0;
   // TODO: Direction of the signal.
   std::uint32_t bit_traffic_signals : 1 = 0;
@@ -63,7 +67,7 @@ struct NodeAttribute {
   ACCESS vh_acc[VH_MAX];
 
   constexpr bool empty() const {
-    return node_id == 0 && !bit_turning_circle && !bit_stop &&
+    return node_id == 0 && !bit_give_way && !bit_turning_circle && !bit_stop &&
            !bit_traffic_signals && !bit_crossing && !bit_railway_crossing &&
            !bit_railway_crossing_barrier && !bit_public_transport &&
            !bit_traffic_calming && !has_barrier;
@@ -174,14 +178,14 @@ struct GNode {
   // Position of the first edge of this node in g.edges. The last edge is given
   // by the start position of the next node in g.nodes, or by the length of
   // g.edges if this is the last node in g.nodes.
-  // For easy access, check out helper functions gnode_edge_stop(),
+  // For easy access, check out helper functions gnode_edges_stop(),
   // gnode_all_edges(), gnode_forward_edges() and gnode_inverted_edges() below.
   std::int64_t edges_start_pos : 36;
   // Number of forward edges of this node. These are allocated in
-  // [edges_start_pos, edges_start_pos + num_edges_forward). All other edges are
+  // [edges_start_pos, edges_start_pos + num_forward_edges). All other edges are
   // "inverted", e.g. point to another node that has an forward edge to the
   // current node.
-  std::uint32_t num_edges_forward : NUM_EDGES_OUT_BITS;
+  std::uint32_t num_forward_edges : NUM_EDGES_OUT_BITS;
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
   // node outside of this dead end have to pass through the bridge edge.
@@ -273,6 +277,9 @@ struct GEdge {
   std::uint32_t car_uturn_allowed : 1;
   std::uint32_t complex_turn_restriction_trigger : 1;
 
+  std::uint32_t bit_stop : 1;
+  std::uint32_t bit_minor : 1;
+
   std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
 };
 
@@ -321,7 +328,7 @@ struct Graph {
 
   static constexpr uint32_t kLargeComponentMinSize = 20000;
 
-  std::vector<NodeAttribute> node_attrs_sorted;
+  std::vector<NodeTags> node_tags_sorted;
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<TurnCostData> turn_costs;
   std::vector<GWay> ways;
@@ -374,13 +381,13 @@ struct Graph {
 
   // Find the stored node attribute for a given node_id. Returns the found
   // record or nullptr if it doesn't exist.
-  const NodeAttribute* FindNodeAttr(int64_t node_id) const {
-    auto it = std::lower_bound(node_attrs_sorted.begin(),
-                               node_attrs_sorted.end(), node_id,
-                               [](const NodeAttribute& s, std::int64_t value) {
+  const NodeTags* FindNodeTags(int64_t node_id) const {
+    auto it = std::lower_bound(node_tags_sorted.begin(),
+                               node_tags_sorted.end(), node_id,
+                               [](const NodeTags& s, std::int64_t value) {
                                  return s.node_id < value;
                                });
-    if (it == node_attrs_sorted.end() || it->node_id != node_id) {
+    if (it == node_tags_sorted.end() || it->node_id != node_id) {
       return nullptr;
     } else {
       return &(*it);
@@ -429,7 +436,7 @@ struct Graph {
     return node_idx;
   }
 
-  inline size_t gnode_edge_stop(uint32_t node_idx) const {
+  inline size_t gnode_edges_stop(uint32_t node_idx) const {
     return node_idx + 1 < nodes.size() ? nodes.at(node_idx + 1).edges_start_pos
                                        : edges.size();
   }
@@ -441,9 +448,9 @@ struct Graph {
       const GNode& n = nodes.at(n_idx);
       LOG_S(INFO) << absl::StrFormat(
           "Node:%i id:%lld cl:%u e_start:%u #forw:%u #tot:%u", n_idx, n.node_id,
-          n.cluster_id, n.edges_start_pos, n.num_edges_forward,
-          gnode_edge_stop(n_idx) - n.edges_start_pos);
-      for (uint32_t e_idx = n.edges_start_pos; e_idx < gnode_edge_stop(n_idx);
+          n.cluster_id, n.edges_start_pos, n.num_forward_edges,
+          gnode_edges_stop(n_idx) - n.edges_start_pos);
+      for (uint32_t e_idx = n.edges_start_pos; e_idx < gnode_edges_stop(n_idx);
            ++e_idx) {
         const GEdge& e = edges.at(e_idx);
         LOG_S(INFO) << absl::StrFormat("    Edge to:%u w:%u contra:%u inv:%u",
@@ -472,61 +479,121 @@ inline int64_t GetGWayIdSafe(const Graph& g, uint32_t way_idx) {
   return -1;
 }
 
-inline size_t gnode_edge_stop(const Graph& g, uint32_t node_idx) {
-  return node_idx + 1 < g.nodes.size()
-             ? g.nodes.at(node_idx + 1).edges_start_pos
-             : g.edges.size();
+inline size_t gnode_edges_start(const Graph& g, uint32_t node_idx) {
+  return g.nodes.at(node_idx).edges_start_pos;
 }
 
-inline uint32_t gnode_num_edges(const Graph& g, uint32_t node_idx) {
-  return gnode_edge_stop(g, node_idx) - g.nodes.at(node_idx).edges_start_pos;
+inline size_t gnode_edges_stop(const Graph& g, uint32_t node_idx) {
+  return node_idx + 1 < g.nodes.size() ? gnode_edges_start(g, node_idx + 1)
+                                       : g.edges.size();
+}
+
+inline uint32_t gnode_num_all_edges(const Graph& g, uint32_t node_idx) {
+  return gnode_edges_stop(g, node_idx) - gnode_edges_start(g, node_idx);
+}
+
+inline uint32_t gnode_num_forward_edges(const Graph& g, uint32_t node_idx) {
+  return g.nodes.at(node_idx).num_forward_edges;
+}
+
+inline uint32_t gnode_num_inverted_edges(const Graph& g, uint32_t node_idx) {
+  return gnode_num_all_edges(g, node_idx) -
+         gnode_num_forward_edges(g, node_idx);
 }
 
 inline std::span<GEdge> gnode_all_edges(Graph& g, uint32_t node_idx) {
-  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
-  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  uint32_t e_start = gnode_edges_start(g, node_idx);
+  uint32_t e_stop = gnode_edges_stop(g, node_idx);
   return std::span<GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
 inline std::span<const GEdge> gnode_all_edges(const Graph& g,
                                               uint32_t node_idx) {
-  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
-  uint32_t e_stop = gnode_edge_stop(g, node_idx);
+  uint32_t e_start = gnode_edges_start(g, node_idx);
+  uint32_t e_stop = gnode_edges_stop(g, node_idx);
   return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
+inline uint32_t gnode_num_unique_edges(const Graph& g, uint32_t node_idx,
+                                       bool ignore_loops) {
+  uint32_t count = 0;
+  for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+    if (!ignore_loops || e.other_node_idx != node_idx) {
+      count += (e.unique_other);
+    }
+  }
+  return count;
+}
+
 inline std::span<GEdge> gnode_forward_edges(Graph& g, uint32_t node_idx) {
-  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_start = gnode_edges_start(g, node_idx);
   return std::span<GEdge>(&(g.edges[e_start]),
-                          g.nodes.at(node_idx).num_edges_forward);
+                          g.nodes.at(node_idx).num_forward_edges);
 }
 
 inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
                                                   uint32_t node_idx) {
-  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos;
+  uint32_t e_start = gnode_edges_start(g, node_idx);
   return std::span<const GEdge>(&(g.edges[e_start]),
-                                g.nodes.at(node_idx).num_edges_forward);
+                                g.nodes.at(node_idx).num_forward_edges);
 }
+
+#if 0
 
 // An edges that is specified using the index of the start node and the offset
 // of the edge within the list of edges of this node.
 struct FullEdge final {
-  uint32_t start_idx;  // offset of the start node of the edge in g.nodes
+  uint32_t start_idx = INFU32;  // offset of start node of the edge in g.nodes
   uint32_t offset : NUM_EDGES_OUT_BITS;  // offset of the edge in g.edges.
 
   inline const GNode& start_node(const Graph& g) const {
     return g.nodes.at(start_idx);
   }
   inline const uint32_t target_node_idx(const Graph& g) const {
-    return edge(g).other_node_idx;
+    return gedge(g).other_node_idx;
   }
   inline const GNode& target_node(const Graph& g) const {
     return g.nodes.at(target_node_idx(g));
   }
-  inline const GEdge& edge(const Graph& g) const {
+  inline const GEdge& gedge(const Graph& g) const {
     return g.edges.at(start_node(g).edges_start_pos + offset);
   }
+  inline GEdge& gedge(Graph& g) const {
+    return g.edges.at(start_node(g).edges_start_pos + offset);
+  }
+  bool operator==(const FullEdge& other) const {
+    return start_idx == other.start_idx && offset == other.offset;
+    ;
+  }
+  bool invalid() const { return start_idx == INFU32; }
 };
+
+// Find all unique (by 'e.other_node_idx') forward edges starting at 'node_idx'
+// that lead to 'ignore_node_idx'.
+inline std::vector<FullEdge> gnode_unique_forward_edges(
+    const Graph& g, uint32_t node_idx, bool ignore_loops,
+    uint32_t ignore_node_idx = INFU32) {
+  std::vector<FullEdge> res;
+
+  const GNode& node = g.nodes.at(node_idx);
+  for (uint32_t offset = 0; offset < node.num_forward_edges; ++offset) {
+    const GEdge& e = g.edges.at(node.edges_start_pos + offset);
+    if (!e.unique_other || e.other_node_idx == ignore_node_idx ||
+        (ignore_loops && e.other_node_idx == node_idx)) {
+      continue;
+    }
+    uint32_t found_pos;
+    for (found_pos = 0; found_pos < res.size(); ++found_pos) {
+      if (res.at(found_pos).target_node_idx(g) == e.other_node_idx) {
+        break;
+      }
+    }
+    if (found_pos >= res.size()) {
+      res.emplace_back(node_idx, offset);
+    }
+  }
+  return res;
+}
 
 // Note, this returns a new vector, not a span.
 inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
@@ -538,7 +605,7 @@ inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
     }
 
     const GNode& other = g.nodes.at(out.other_node_idx);
-    for (uint32_t offset = 0; offset < other.num_edges_forward; ++offset) {
+    for (uint32_t offset = 0; offset < other.num_forward_edges; ++offset) {
       const GEdge& incoming = g.edges.at(other.edges_start_pos + offset);
       if (incoming.other_node_idx == node_idx) {
         res.emplace_back(out.other_node_idx, offset);
@@ -547,6 +614,23 @@ inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
   }
   return res;
 }
+#endif
+
+inline uint32_t gnode_num_incoming_edges(const Graph& g, uint32_t node_idx) {
+  uint32_t count = 0;
+  for (const GEdge& out : gnode_all_edges(g, node_idx)) {
+    if (!out.unique_other || out.other_node_idx == node_idx) {
+      continue;
+    }
+
+    const GNode& other = g.nodes.at(out.other_node_idx);
+    for (uint32_t offset = 0; offset < other.num_forward_edges; ++offset) {
+      count += (g.edges.at(other.edges_start_pos + offset).other_node_idx ==
+                node_idx);
+    }
+  }
+  return count;
+}
 
 inline const uint32_t gnode_find_forward_edge_offset(const Graph& g,
                                                      uint32_t from_node_idx,
@@ -554,7 +638,7 @@ inline const uint32_t gnode_find_forward_edge_offset(const Graph& g,
                                                      uint32_t way_idx) {
   const GNode& from = g.nodes.at(from_node_idx);
   uint32_t e_start = from.edges_start_pos;
-  for (uint32_t off = 0; off < from.num_edges_forward; ++off) {
+  for (uint32_t off = 0; off < from.num_forward_edges; ++off) {
     if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
         g.edges.at(e_start + off).way_idx == way_idx) {
       return off;
@@ -570,8 +654,8 @@ inline const uint32_t gnode_find_edge_idx(const Graph& g,
                                           uint32_t from_node_idx,
                                           uint32_t to_node_idx,
                                           uint32_t way_idx) {
-  uint32_t e_start = g.nodes.at(from_node_idx).edges_start_pos;
-  uint32_t num = gnode_edge_stop(g, from_node_idx) - e_start;
+  uint32_t e_start = gnode_edges_start(g, from_node_idx);
+  uint32_t num = gnode_edges_stop(g, from_node_idx) - e_start;
   for (uint32_t off = 0; off < num; ++off) {
     if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
         g.edges.at(e_start + off).way_idx == way_idx) {
@@ -606,35 +690,11 @@ inline GEdge& gnode_find_edge(Graph& g, uint32_t from_node_idx,
       g.ways.at(way_idx).id);
 }
 
-#if 0
-// Find edge between two nodes. If way_idx is >=0, then also checks the way of
-// the edge.
-// Returns a pointer to the edge or nullptr, if the edge couldn't be found.
-const GEdge* FindForwardEdge(uint32_t from_node_idx, uint32_t to_node_idx,
-                             int64_t way_idx = -1) const {
-  for (const GEdge& e : gnode_forward_edges(*this, from_node_idx)) {
-    if (e.other_node_idx == to_node_idx &&
-        (way_idx == -1 || e.way_idx == way_idx)) {
-      return &e;
-    }
-  }
-  return nullptr;
-}
-#endif
-
 inline std::span<const GEdge> gnode_inverted_edges(const Graph& g,
                                                    uint32_t node_idx) {
-  uint32_t e_start = g.nodes.at(node_idx).edges_start_pos +
-                     g.nodes.at(node_idx).num_edges_forward;
-  uint32_t e_stop = gnode_edge_stop(g, node_idx);
-  /*
-  while (e_start < e_stop && !g.edges.at(e_start).inverted) {
-    e_start++;
-  }
-  // Use g.edges[], not g.edges.at(), because this could be outside range if the
-  // last node has no inverted edges.
-  //
-  */
+  uint32_t e_start =
+      gnode_edges_start(g, node_idx) + gnode_num_forward_edges(g, node_idx);
+  uint32_t e_stop = gnode_edges_stop(g, node_idx);
   return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
@@ -646,6 +706,7 @@ inline const WaySharedAttrs& GetWSA(const Graph& g, const GWay& way) {
   return g.way_shared_attrs.at(way.wsa_id);
 }
 
+#if 0
 // Describe a path connecting 3 nodes, using two edges
 // The first edge starts at 'node0_idx' with edge offset 'edge0_off'.
 // The second edge starts at 'node1_idx' with edge offset 'edge1_off'.
@@ -696,10 +757,10 @@ struct N3Path final {
 inline N3Path FindN3Path(const Graph& g, uint32_t node0_idx, uint32_t node1_idx,
                          uint32_t node2_idx) {
   const GNode& n0 = g.nodes.at(node0_idx);
-  for (uint32_t off0 = 0; off0 < n0.num_edges_forward; ++off0) {
+  for (uint32_t off0 = 0; off0 < n0.num_forward_edges; ++off0) {
     if (g.edges.at(n0.edges_start_pos + off0).other_node_idx == node1_idx) {
       const GNode& n1 = g.nodes.at(node1_idx);
-      for (uint32_t off1 = 0; off1 < n1.num_edges_forward; ++off1) {
+      for (uint32_t off1 = 0; off1 < n1.num_forward_edges; ++off1) {
         if (g.edges.at(n1.edges_start_pos + off1).other_node_idx == node2_idx) {
           // Found a path
           return {
@@ -722,7 +783,7 @@ inline N3Path FindN3Path(const Graph& g, uint32_t node0_idx, uint32_t node1_idx,
 inline std::vector<N3Path> GetN3Paths(const Graph& g, FullEdge fe) {
   std::vector<N3Path> result;
   const GNode& target_node = fe.target_node(g);
-  for (uint32_t off = 0; off < target_node.num_edges_forward; ++off) {
+  for (uint32_t off = 0; off < target_node.num_forward_edges; ++off) {
     result.push_back({
         .node0_idx = fe.start_idx,
         .node1_idx = fe.target_node_idx(g),
@@ -735,6 +796,7 @@ inline std::vector<N3Path> GetN3Paths(const Graph& g, FullEdge fe) {
   }
   return result;
 }
+#endif
 
 // Returns the position of routing attrs for vehicle type 'vt' and direction
 // 'dir'. The allowed values for 'vt' are VH_MOTORCAR, VH_BICYCLE,

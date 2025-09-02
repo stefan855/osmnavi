@@ -147,7 +147,7 @@ class Tarjan {
                         std::uint32_t* neighbour) {
     const GNode& n = g_.nodes.at(node_idx);
     size_t current = n.edges_start_pos + (*edge_offset);
-    size_t stop = gnode_edge_stop(g_, node_idx);
+    size_t stop = gnode_edges_stop(g_, node_idx);
 
     while (current < stop) {
       if (g_.edges.at(current).unique_other) {
