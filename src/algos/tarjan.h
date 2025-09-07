@@ -151,7 +151,7 @@ class Tarjan {
 
     while (current < stop) {
       if (g_.edges.at(current).unique_other) {
-        *neighbour = g_.edges.at(current).other_node_idx;
+        *neighbour = g_.edges.at(current).target_idx;
         (*edge_offset) = current + 1 - n.edges_start_pos;
         return true;
       }
@@ -165,7 +165,7 @@ class Tarjan {
     const uint32_t num_edges = gnode_total_edges(n);
     while ((*edge_pos) < num_edges) {
       if (n.edges[*edge_pos].unique_other) {
-        *neighbour = n.edges[*edge_pos].other_node_idx;
+        *neighbour = n.edges[*edge_pos].target_idx;
         (*edge_pos)++;
         return true;
       }
@@ -188,7 +188,7 @@ inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
   for (GEdge& e : gnode_all_edges(g, from_idx)) {
     // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(from); ++edge_pos)
     // { GEdge& e = from.edges[edge_pos];
-    if (e.other_node_idx == to_idx) {
+    if (e.target_idx == to_idx) {
       e.bridge = 1;
     }
   }
@@ -219,17 +219,17 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
       // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
       // { GEdge& e = n.edges[edge_pos];
       if (e.bridge || !e.unique_other) continue;
-      GNode& other = g.nodes.at(e.other_node_idx);
+      GNode& other = g.nodes.at(e.target_idx);
       if (!other.dead_end) {
         other.dead_end = 1;
         num_nodes++;
-        nodes.push_back(e.other_node_idx);
+        nodes.push_back(e.target_idx);
         // Mark to_bridge edges on the other node.
         bool has_to_bridge = false;
-        for (GEdge& e : gnode_all_edges(g, e.other_node_idx)) {
+        for (GEdge& e : gnode_all_edges(g, e.target_idx)) {
           // for (size_t o_pos = 0; o_pos < gnode_total_edges(other); ++o_pos) {
           // GEdge& e = other.edges[o_pos];
-          if (e.other_node_idx == node_pos) {
+          if (e.target_idx == node_pos) {
             e.to_bridge = true;
             has_to_bridge = true;
           }
@@ -260,14 +260,14 @@ inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
       // for (size_t i = 0; i < gnode_total_edges(n); ++i) {
       // const GEdge& e = n.edges[i];
       if (e.to_bridge) {
-        pos = e.other_node_idx;
+        pos = e.target_idx;
         break;
       } else if (e.bridge) {
         // Found the bridge.
         if (node1_idx != nullptr) *node1_idx = pos;
-        if (node2_idx != nullptr) *node2_idx = e.other_node_idx;
-        CHECK_S(!g.nodes.at(e.other_node_idx).dead_end)
-            << g.nodes.at(e.other_node_idx).node_id;
+        if (node2_idx != nullptr) *node2_idx = e.target_idx;
+        CHECK_S(!g.nodes.at(e.target_idx).dead_end)
+            << g.nodes.at(e.target_idx).node_id;
         return;
       }
     }

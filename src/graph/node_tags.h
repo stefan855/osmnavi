@@ -294,8 +294,8 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
       bool same_target = false;
       bool self_edge = false;
       if (num_edges == 2) {
-        uint32_t other1 = g->edges.at(n.edges_start_pos).other_node_idx;
-        uint32_t other2 = g->edges.at(n.edges_start_pos + 1).other_node_idx;
+        uint32_t other1 = g->edges.at(n.edges_start_pos).target_idx;
+        uint32_t other2 = g->edges.at(n.edges_start_pos + 1).target_idx;
         self_edge = (other1 == node_idx || other2 == node_idx);
         same_target = (other1 == other2);
       }
@@ -331,7 +331,7 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
       for (const FullEdge& in_fe : gnode_incoming_edges(*g, node_idx)) {
         const GNode other = g->nodes.at(in_fe.start_idx());
         GEdge& in = g->edges.at(other.edges_start_pos + in_fe.offset());
-        CHECK_EQ_S(in.other_node_idx, node_idx);  // Is it really incoming?
+        CHECK_EQ_S(in.target_idx, node_idx);  // Is it really incoming?
         const bool in_way_area = g->ways.at(in.way_idx).area;
         uint32_t allowed_edge_bits = 0;
         // Iterate outgoing edges at the same node.
@@ -351,7 +351,7 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
           // every bollard node by doing a u-turn on the other way.
           if ((in.way_idx == out.way_idx) &&
               (in_way_area ||
-               (out.other_node_idx == in_fe.start_idx()))) {  // u-turn
+               (out.target_idx == in_fe.start_idx()))) {  // u-turn
             // Allowed, set bit.
             allowed_edge_bits = (allowed_edge_bits | (1u << offset));
           }
@@ -364,7 +364,7 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
           const TurnRestriction::TREdge tr_key = {
               .from_node_idx = in_fe.start_idx(),
               .way_idx = in.way_idx,
-              .to_node_idx = in.other_node_idx,
+              .to_node_idx = in.target_idx,
               .edge_idx = 0};
           auto iter = g->simple_turn_restriction_map.find(tr_key);
           if (iter != g->simple_turn_restriction_map.end()) {

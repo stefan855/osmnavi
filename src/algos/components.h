@@ -77,10 +77,10 @@ class ComponentAnalyzer {
           // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n);
           // ++edge_pos) { GEdge& e = n.edges[edge_pos];
           if (!e.unique_other) continue;
-          GNode& other = g->nodes.at(e.other_node_idx);
+          GNode& other = g->nodes.at(e.target_idx);
           if (other.large_component) continue;
           other.large_component = 1;
-          nodes.push_back(e.other_node_idx);
+          nodes.push_back(e.target_idx);
         }
       }
     }
@@ -102,8 +102,8 @@ class ComponentAnalyzer {
       // const GNode& n = g_.nodes.at(node_idx);
       for (const GEdge& e : gnode_all_edges(g_, node_idx)) {
         // for (uint32_t pos = 0; pos < gnode_total_edges(n); ++pos) {
-        const uint32_t other_idx = e.other_node_idx;
-        // const uint32_t other_idx = n.edges[pos].other_node_idx;
+        const uint32_t other_idx = e.target_idx;
+        // const uint32_t other_idx = n.edges[pos].target_idx;
         if (e.unique_other && label_.at(other_idx) == INFU32) {
           // if (n.edges[pos].unique_other && label_.at(other_idx) == INFU32) {
           queue.push_back(other_idx);
@@ -143,7 +143,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
       if (e.car_label == follow_label) {
         // LOG_S(INFO) << "Set label " << e.car_label << " to " << follow_label;
         e.car_label = set_label;
-        queue.push_back(e.other_node_idx);
+        queue.push_back(e.target_idx);
         res.count += 1;
         const HIGHWAY_LABEL hw = g->ways.at(e.way_idx).highway_label;
         if (hw != HW_TERTIARY && hw != HW_RESIDENTIAL &&

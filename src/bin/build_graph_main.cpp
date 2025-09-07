@@ -44,7 +44,7 @@ void PrintDebugInfoForNode(const Graph& g, int64_t node_id) {
           const GEdge& e = g.edges.at(n.edges_start_pos + offset);
           LOG_S(INFO) << absl::StrFormat(
               "  SELECTED EDGE %lld -> %lld way:%lld %s", n.node_id,
-              GetGNodeIdSafe(g, e.other_node_idx), GetGWayIdSafe(g, e.way_idx),
+              GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx),
               e.inverted ? "inv" : "out");
         }
       }
@@ -265,7 +265,7 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
     for (const GEdge& e : gnode_forward_edges(g, node_idx)) {
       // for (const GEdge& e : std::span(n.edges, n.num_edges_out)) {
       if (!e.unique_other) continue;
-      const GNode& other = g.nodes.at(e.other_node_idx);
+      const GNode& other = g.nodes.at(e.target_idx);
       const GWay& w = g.ways.at(e.way_idx);
       if (!RoutableForward(g, w, vt) && !RoutableBackward(g, w, vt)) {
         continue;
@@ -326,7 +326,7 @@ void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
       if (label != GEdge::LABEL_UNSET && e.car_label != label) continue;
       if (e.car_label_strange != strange) continue;
 
-      const GNode& other = g.nodes.at(e.other_node_idx);
+      const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
                                 n.lon, other.lat, other.lon);
       count++;
@@ -382,7 +382,7 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
       } else {
         CHECK_S(false);
       }
-      const GNode& other = g.nodes.at(e.other_node_idx);
+      const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
                                 n.lon, other.lat, other.lon);
       count++;
@@ -413,6 +413,8 @@ void WriteCrossCountryEdges(const build_graph::GraphMetaData& meta,
         count++;
         myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat, n1.lon,
                                   n2.lat, n2.lon);
+        // LOG_S(INFO) << absl::StrFormat("cross country %lld -> %lld",
+        //                                n1.node_id, n2.node_id);
       }
     }
   }
@@ -437,9 +439,9 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
       // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos)
       // { const GEdge& e = n0.edges[edge_pos];
       if (e.bridge || !e.unique_other) continue;
-      const GNode& n1 = g.nodes.at(e.other_node_idx);
+      const GNode& n1 = g.nodes.at(e.target_idx);
       // Ignore half of the edges and nodes that are not in a cluster.
-      if (e.other_node_idx <= node_pos || n1.cluster_id == INVALID_CLUSTER_ID) {
+      if (e.target_idx <= node_pos || n1.cluster_id == INVALID_CLUSTER_ID) {
         continue;
       }
 

@@ -261,9 +261,8 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
   // No check which kind of continuation edges there are.
   bool found_continuation = false;
   bool found_free_continuation = false;
-  for (const GEdge& out : gnode_forward_edges(g, edge0.other_node_idx)) {
-    if (out.other_node_idx != n3p.node0_idx &&
-        out.other_node_idx != edge0.other_node_idx) {
+  for (const GEdge& out : gnode_forward_edges(g, edge0.target_idx)) {
+    if (out.target_idx != n3p.node0_idx && out.target_idx != edge0.target_idx) {
       found_continuation = true;
       found_free_continuation |= (out.car_label == GEdge::LABEL_FREE);
     }
@@ -284,7 +283,7 @@ inline void ProcessSimpleTurnRestrictions(
   const GEdge& e = g.edges.at(edge_idx);
   const TurnRestriction::TREdge trigger_key = {.from_node_idx = start_node_idx,
                                                .way_idx = e.way_idx,
-                                               .to_node_idx = e.other_node_idx};
+                                               .to_node_idx = e.target_idx};
   auto iter = indexed_trs.map_to_first.find(trigger_key);
   if (iter == indexed_trs.map_to_first.end()) {
     return;
@@ -292,10 +291,10 @@ inline void ProcessSimpleTurnRestrictions(
   CHECK_S(indexed_trs.sorted_trs.at(iter->second).GetTriggerKey() ==
           trigger_key);
 
-  const GNode& via_node = g.nodes.at(e.other_node_idx);
+  const GNode& via_node = g.nodes.at(e.target_idx);
   const uint32_t num_edges = via_node.num_forward_edges;
   CHECK_EQ_S(num_edges, tcd->turn_costs.size())
-      << GetGNodeIdSafe(g, e.other_node_idx);
+      << GetGNodeIdSafe(g, e.target_idx);
 
   for (size_t trs_pos = iter->second;
        trs_pos < indexed_trs.sorted_trs.size() &&
@@ -311,7 +310,7 @@ inline void ProcessSimpleTurnRestrictions(
 
       // Does the edge match the second leg of the turn restriction?
       if (e.way_idx == tr.path.back().way_idx &&
-          e.other_node_idx == tr.path.back().to_node_idx) {
+          e.target_idx == tr.path.back().to_node_idx) {
         found = true;
         if (tr.forbidden) {
           // Remove the bit belonging to the edge.
@@ -344,13 +343,13 @@ inline TRStatus CheckSimpleTurnRestriction(
   const std::span<const TurnRestriction> trs =
       indexed_trs.FindTurnRestrictions({.from_node_idx = n3p.node0_idx,
                                         .way_idx = e0.way_idx,
-                                        .to_node_idx = e0.other_node_idx});
+                                        .to_node_idx = e0.target_idx});
   if (trs.empty()) return result;
   const GEdge& e1 = n3p.edge1(g);
   for (const TurnRestriction& tr : trs) {
     CHECK_EQ_S(tr.path.size(), 2) << tr.relation_id;
     const bool matches_edge = (e1.way_idx == tr.path.back().way_idx &&
-                               e1.other_node_idx == tr.path.back().to_node_idx);
+                               e1.target_idx == tr.path.back().to_node_idx);
     if (tr.forbidden == matches_edge) {
       result = TRStatus::FORBIDDEN;
     } else {
@@ -490,9 +489,8 @@ inline TurnCostData ComputeTurnCostsForEdge(
 
   for (uint32_t off = 0; off < crossing_node.num_forward_edges; ++off) {
     tcd.turn_costs.at(off) = compress_turn_cost(ComputeTurnCostForN3Path(
-        g, vh, indexed_trs,
-        N3Path::Create(g, fe, {fe.target_idx(g), off})));
-                       // {.start_idx = fe.target_idx(g), .offset = off})));
+        g, vh, indexed_trs, N3Path::Create(g, fe, {fe.target_idx(g), off})));
+    // {.start_idx = fe.target_idx(g), .offset = off})));
   }
   return tcd;
 }

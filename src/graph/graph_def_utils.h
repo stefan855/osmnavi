@@ -23,7 +23,7 @@ class FullEdge final {
     return g.nodes.at(start_idx_);
   }
   inline const uint32_t target_idx(const Graph& g) const {
-    return gedge(g).other_node_idx;
+    return gedge(g).target_idx;
   }
   inline const GNode& target_node(const Graph& g) const {
     return g.nodes.at(target_idx(g));
@@ -50,7 +50,7 @@ class FullEdge final {
   uint32_t valid_ : 1;
 };
 
-// Find all unique (by 'e.other_node_idx') forward edges starting at 'node_idx'
+// Find all unique (by 'e.target_idx') forward edges starting at 'node_idx'
 // that lead to 'ignore_node_idx'.
 inline std::vector<FullEdge> gnode_unique_forward_edges(
     const Graph& g, uint32_t node_idx, bool ignore_loops,
@@ -60,13 +60,13 @@ inline std::vector<FullEdge> gnode_unique_forward_edges(
   const GNode& node = g.nodes.at(node_idx);
   for (uint32_t offset = 0; offset < node.num_forward_edges; ++offset) {
     const GEdge& e = g.edges.at(node.edges_start_pos + offset);
-    if (!e.unique_other || e.other_node_idx == ignore_node_idx ||
-        (ignore_loops && e.other_node_idx == node_idx)) {
+    if (!e.unique_other || e.target_idx == ignore_node_idx ||
+        (ignore_loops && e.target_idx == node_idx)) {
       continue;
     }
     uint32_t found_pos;
     for (found_pos = 0; found_pos < res.size(); ++found_pos) {
-      if (res.at(found_pos).target_idx(g) == e.other_node_idx) {
+      if (res.at(found_pos).target_idx(g) == e.target_idx) {
         break;
       }
     }
@@ -82,15 +82,15 @@ inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
                                                   uint32_t node_idx) {
   std::vector<FullEdge> res;
   for (const GEdge& out : gnode_all_edges(g, node_idx)) {
-    if (!out.unique_other || out.other_node_idx == node_idx) {
+    if (!out.unique_other || out.target_idx == node_idx) {
       continue;
     }
 
-    const GNode& other = g.nodes.at(out.other_node_idx);
+    const GNode& other = g.nodes.at(out.target_idx);
     for (uint32_t offset = 0; offset < other.num_forward_edges; ++offset) {
       const GEdge& incoming = g.edges.at(other.edges_start_pos + offset);
-      if (incoming.other_node_idx == node_idx) {
-        res.emplace_back(out.other_node_idx, offset);
+      if (incoming.target_idx == node_idx) {
+        res.emplace_back(out.target_idx, offset);
       }
     }
   }
@@ -200,10 +200,10 @@ inline N3Path FindN3Path(const Graph& g, uint32_t node0_idx, uint32_t node1_idx,
                          uint32_t node2_idx) {
   const GNode& n0 = g.nodes.at(node0_idx);
   for (uint32_t off0 = 0; off0 < n0.num_forward_edges; ++off0) {
-    if (g.edges.at(n0.edges_start_pos + off0).other_node_idx == node1_idx) {
+    if (g.edges.at(n0.edges_start_pos + off0).target_idx == node1_idx) {
       const GNode& n1 = g.nodes.at(node1_idx);
       for (uint32_t off1 = 0; off1 < n1.num_forward_edges; ++off1) {
-        if (g.edges.at(n1.edges_start_pos + off1).other_node_idx == node2_idx) {
+        if (g.edges.at(n1.edges_start_pos + off1).target_idx == node2_idx) {
           // Found a path
           return {
               .node0_idx = node0_idx,
@@ -229,8 +229,7 @@ inline std::vector<N3Path> GetN3Paths(const Graph& g, FullEdge fe) {
     result.push_back({
         .node0_idx = fe.start_idx(),
         .node1_idx = fe.target_idx(g),
-        .node2_idx =
-            g.edges.at(target_node.edges_start_pos + off).other_node_idx,
+        .node2_idx = g.edges.at(target_node.edges_start_pos + off).target_idx,
         .edge0_off = fe.offset(),
         .edge1_off = off,
         .valid = true,

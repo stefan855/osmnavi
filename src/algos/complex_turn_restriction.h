@@ -37,7 +37,7 @@ struct CTRPosition {
     CHECK_LT_S(position + 1, ctr.path.size());
     const TurnRestriction::TREdge& tr_edge = ctr.path.at(position + 1);
     const bool ctr_edge_match = tr_edge.way_idx == edge.way_idx &&
-                                tr_edge.to_node_idx == edge.other_node_idx;
+                                tr_edge.to_node_idx == edge.target_idx;
     return UpdateNewEdge(ctr.path.size(), ctr_edge_match, ctr.forbidden);
   }
 

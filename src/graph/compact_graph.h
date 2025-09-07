@@ -147,7 +147,7 @@ class CompactDirectedGraph {
       const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
       const std::vector<std::uint32_t>& compact_to_graph) const {
     const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
-    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_forward_edges,
+    CHECK_EQ_S(g.nodes.at(in_ge.target_idx).num_forward_edges,
                g_tcd.turn_costs.size());
 
     const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
@@ -158,7 +158,7 @@ class CompactDirectedGraph {
       // Find corresponding edge in graph 'g'.
       const PartialEdge& out_ce = edges_.at(ce_idx);
       uint32_t g_off = gnode_find_forward_edge_offset(
-          g, in_ge.other_node_idx, compact_to_graph.at(out_ce.to_c_idx),
+          g, in_ge.target_idx, compact_to_graph.at(out_ce.to_c_idx),
           out_ce.way_idx);
       // Copy turn cost for this one edge.
       tcd.turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
@@ -171,7 +171,7 @@ class CompactDirectedGraph {
       const std::vector<std::uint32_t>& compact_to_graph,
       TurnCostData* tcd) const {
     const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
-    CHECK_EQ_S(g.nodes.at(in_ge.other_node_idx).num_forward_edges,
+    CHECK_EQ_S(g.nodes.at(in_ge.target_idx).num_forward_edges,
                g_tcd.turn_costs.size());
 
     const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
@@ -182,7 +182,7 @@ class CompactDirectedGraph {
       // Find corresponding edge in graph 'g'.
       const PartialEdge& out_ce = edges_.at(ce_idx);
       uint32_t g_off = gnode_find_forward_edge_offset(
-          g, in_ge.other_node_idx, compact_to_graph.at(out_ce.to_c_idx),
+          g, in_ge.target_idx, compact_to_graph.at(out_ce.to_c_idx),
           out_ce.way_idx);
       // Copy turn cost for this one edge.
       tcd->turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
@@ -271,7 +271,7 @@ class CompactDirectedGraph {
         bits = bits - (1u << g_offset);
 
         const GEdge& g_edge = g.edges.at(g_start + g_offset);
-        const auto iter = graph_to_compact_nodemap.find(g_edge.other_node_idx);
+        const auto iter = graph_to_compact_nodemap.find(g_edge.target_idx);
         if (iter == graph_to_compact_nodemap.end()) {
           error = true;
           break;
@@ -599,7 +599,7 @@ inline void CollectEdgesForCompactGraph(
                             EDGE_DIR(edge))) {
 #if 0
         LOG_S(INFO) << "Reject edge from " << GetGNodeIdSafe(g, node_idx)
-                    << " to " << GetGNodeIdSafe(g, edge.other_node_idx);
+                    << " to " << GetGNodeIdSafe(g, edge.target_idx);
 #endif
 #if 0
         if (GetGNodeIdSafe(g, node_idx) == 3108533807 ||
@@ -607,7 +607,7 @@ inline void CollectEdgesForCompactGraph(
           LOG_S(INFO) << absl::StrFormat(
               "Disallow travel ifrom %lld to node %lld",
               GetGNodeIdSafe(g, node_idx),
-              GetGNodeIdSafe(g, edge.other_node_idx));
+              GetGNodeIdSafe(g, edge.target_idx));
         }
 #endif
         continue;
@@ -617,27 +617,27 @@ inline void CollectEdgesForCompactGraph(
           GetGNodeIdSafe(g, node_idx) == 10679042406) {
         LOG_S(INFO) << absl::StrFormat("Allow travel from %lld to node %lld",
                                        GetGNodeIdSafe(g, node_idx),
-                                       GetGNodeIdSafe(g, edge.other_node_idx));
+                                       GetGNodeIdSafe(g, edge.target_idx));
       }
 #endif
 
       uint32_t other_c_idx;
-      auto iter = graph_to_compact_nodemap->find(edge.other_node_idx);
+      auto iter = graph_to_compact_nodemap->find(edge.target_idx);
       if (iter == graph_to_compact_nodemap->end()) {
         // The node hasn't been seen before. This means we need to allocate a
         // new id, and we need to enqueue the node because it hasn't been
         // handled yet.
         other_c_idx = graph_to_compact_nodemap->size();
-        (*graph_to_compact_nodemap)[edge.other_node_idx] =
+        (*graph_to_compact_nodemap)[edge.target_idx] =
             graph_to_compact_nodemap->size();
-        q.push(edge.other_node_idx);
+        q.push(edge.target_idx);
       } else {
         other_c_idx = iter->second;
       }
 
 #if 0
       LOG_S(INFO) << "Add edge from " << GetGNodeIdSafe(g, node_idx) << " to "
-                  << GetGNodeIdSafe(g, edge.other_node_idx);
+                  << GetGNodeIdSafe(g, edge.target_idx);
 #endif
       full_edges->push_back(
           {.from_c_idx = c_idx,
@@ -660,11 +660,11 @@ inline void CollectEdgesForCompactGraph(
           continue;
         }
 
-        auto iter = graph_to_compact_nodemap->find(edge.other_node_idx);
+        auto iter = graph_to_compact_nodemap->find(edge.target_idx);
         if (iter == graph_to_compact_nodemap->end()) {
-          (*graph_to_compact_nodemap)[edge.other_node_idx] =
+          (*graph_to_compact_nodemap)[edge.target_idx] =
               graph_to_compact_nodemap->size();
-          q.push(edge.other_node_idx);
+          q.push(edge.target_idx);
         }
       }
     }

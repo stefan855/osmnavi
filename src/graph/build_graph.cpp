@@ -60,17 +60,14 @@ void ValidateGraph(const Graph& g) {
       const GEdge& e1 = g.edges.at(node.edges_start_pos + off1);
       for (uint32_t off2 = off1 + 1; off2 < node.num_forward_edges; ++off2) {
         const GEdge& e2 = g.edges.at(node.edges_start_pos + off2);
-        if (e1.other_node_idx == e2.other_node_idx &&
-            e1.way_idx == e2.way_idx) {
+        if (e1.target_idx == e2.target_idx && e1.way_idx == e2.way_idx) {
           LOG_S(INFO) << absl::StrFormat(
               "Duplicate edge %lld to %lld way_id:%lld", node.node_id,
-              GetGNodeIdSafe(g, e1.other_node_idx),
-              GetGWayIdSafe(g, e1.way_idx));
+              GetGNodeIdSafe(g, e1.target_idx), GetGWayIdSafe(g, e1.way_idx));
           for (const GEdge& e : gnode_forward_edges(g, node_idx)) {
-            LOG_S(INFO) << absl::StrFormat("edge %lld to %lld way_id:%lld",
-                                           node.node_id,
-                                           GetGNodeIdSafe(g, e.other_node_idx),
-                                           GetGWayIdSafe(g, e.way_idx));
+            LOG_S(INFO) << absl::StrFormat(
+                "edge %lld to %lld way_id:%lld", node.node_id,
+                GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx));
           }
           // ABORT_S();
         }
@@ -726,11 +723,11 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   int64_t ep;
   if (inverted) {
     for (ep = edges_stop - 1; ep >= edge_start; --ep) {
-      if (g.edges.at(ep).other_node_idx == INFU32) break;
+      if (g.edges.at(ep).target_idx == INFU32) break;
     }
   } else {
     for (ep = edge_start; ep < edges_stop; ++ep) {
-      if (g.edges.at(ep).other_node_idx == INFU32) break;
+      if (g.edges.at(ep).target_idx == INFU32) break;
     }
     CHECK_LT_S(n.num_forward_edges, MAX_NUM_EDGES_OUT) << n.node_id;
     n.num_forward_edges++;
@@ -738,7 +735,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   CHECK_S(ep >= edge_start && ep < edges_stop);
   CHECK_S(other_idx != INFU32);
   GEdge& e = g.edges.at(ep);
-  e.other_node_idx = other_idx;
+  e.target_idx = other_idx;
   e.way_idx = way_idx;
   e.distance_cm = distance_cm;
   e.unique_other = 0;
@@ -768,7 +765,7 @@ void MarkUniqueOther(std::span<GEdge> edges) {
     size_t k = 0;
     while (k < i) {
       // TODO: C++26 allows .at() with bounds checking.
-      if (edges[i].other_node_idx == edges[k].other_node_idx) {
+      if (edges[i].target_idx == edges[k].target_idx) {
         break;
       }
       k++;
@@ -958,7 +955,7 @@ void AllocateEdgeArrays(GraphMetaData* meta) {
   CHECK_S(meta->graph.edges.empty());
 
   meta->graph.edges.reserve(edge_start);
-  meta->graph.edges.resize(edge_start, {.other_node_idx = INFU32});
+  meta->graph.edges.resize(edge_start, {.target_idx = INFU32});
 }
 
 void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
@@ -1096,8 +1093,8 @@ void MarkUniqueEdges(GraphMetaData* meta) {
 }
 
 // Given a node and an outgoing edge 'out_edge', is it allowed to make a
-// u-turn at out_edge.other_node_idx and return to node_idx? The code checks
-// for situations where a vehicle would be trapped at out_edge.other_node_idx
+// u-turn at out_edge.target_idx and return to node_idx? The code checks
+// for situations where a vehicle would be trapped at out_edge.target_idx
 // with no way to continue the travel, which is true at the end of a street or
 // when facing a restricted access area.
 // TODO: handle vehicle types properly.
@@ -1107,15 +1104,15 @@ inline bool IsUTurnAllowedEdgeOld(const Graph& g, uint32_t node_idx,
   if (g.ways.at(out_edge.way_idx).highway_label <= HW_TRUNK_LINK) {
     return false;
   }
-  uint32_t to_idx = out_edge.other_node_idx;
+  uint32_t to_idx = out_edge.target_idx;
   bool restr = (out_edge.car_label != GEdge::LABEL_FREE);
   bool found_u_turn = false;
   bool found_continuation = false;
   bool found_free_continuation = false;
 
   for (const GEdge& o : gnode_forward_edges(g, to_idx)) {
-    found_u_turn |= (o.other_node_idx == node_idx);
-    if (o.other_node_idx != node_idx && o.other_node_idx != to_idx) {
+    found_u_turn |= (o.target_idx == node_idx);
+    if (o.target_idx != node_idx && o.target_idx != to_idx) {
       found_continuation = true;
       found_free_continuation |= (o.car_label == GEdge::LABEL_FREE);
     }
@@ -1276,7 +1273,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     }
 
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
-      const GNode& other = g.nodes.at(e.other_node_idx);
+      const GNode& other = g.nodes.at(e.target_idx);
       // const bool edge_dead_end = n.dead_end || other.dead_end;
       if (!e.unique_other) {
         stats->num_edges_non_unique++;
@@ -1289,7 +1286,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       stats->num_edges_high_priority +=
           (!e.inverted && (e.road_priority == GEdge::PRIO_HIGH));
 
-      if (!e.inverted && e.other_node_idx != node_idx) {
+      if (!e.inverted && e.target_idx != node_idx) {
         stats->sum_edge_length_cm += e.distance_cm;
         if (e.distance_cm == 0) {
           LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
@@ -1314,9 +1311,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
         stats->num_edges_forward_car_forbidden +=
             !RoutableAccess(GetRAFromWSA(g, e, VH_MOTORCAR).access);
       }
-      stats->num_cross_country_edges += (e.contra_way && e.cross_country);
+
+      stats->num_cross_country_edges += (!e.inverted && e.cross_country);
       stats->num_cross_country_restricted +=
-          (e.contra_way && e.cross_country && e.car_label != GEdge::LABEL_FREE);
+          (!e.inverted && e.cross_country && e.car_label != GEdge::LABEL_FREE);
+
       if (n.cluster_id != other.cluster_id &&
           n.cluster_id != INVALID_CLUSTER_ID &&
           other.cluster_id != INVALID_CLUSTER_ID) {
@@ -1649,7 +1648,7 @@ void LabelStopEdges(GraphMetaData* meta) {
               "%lld",
               in_edges.front().start_node(g).node_id,
               in_edges.front().target_node(g).node_id,
-              cr.valid() ? GetGNodeIdSafe(g, cr.gedge(g).other_node_idx) : -1);
+              cr.valid() ? GetGNodeIdSafe(g, cr.gedge(g).target_idx) : -1);
         } else if (in_edges.size() == 2 &&
                    gnode_num_unique_edges(g, node_idx,
                                           /*ignore_loops=*/true) == 2) {
@@ -1671,7 +1670,7 @@ void LabelStopEdges(GraphMetaData* meta) {
                 "Infer direction for bothway stop-edge %lld->%lld and crossing "
                 "%lld",
                 in_edge.start_node(g).node_id, in_edge.target_node(g).node_id,
-                GetGNodeIdSafe(g, cr[idx].gedge(g).other_node_idx));
+                GetGNodeIdSafe(g, cr[idx].gedge(g).target_idx));
           } else {
             LOG_S(INFO) << absl::StrFormat(
                 "Can not infer direction for stop node %lld",
@@ -1831,7 +1830,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   AllocateEdgeArrays(&meta);
   PopulateEdgeArrays(&meta);
   for (const GEdge& e : meta.graph.edges) {
-    CHECK_S(e.other_node_idx != INFU32);
+    CHECK_S(e.target_idx != INFU32);
   }
   MarkUniqueEdges(&meta);
 

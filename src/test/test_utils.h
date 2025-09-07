@@ -127,7 +127,7 @@ void RecomputeDistancesForTesting(Graph* g) {
   for (uint32_t node_idx = 0; node_idx < g->nodes.size(); ++node_idx) {
     const GNode& n1 = g->nodes.at(node_idx);
     for (GEdge& e : gnode_all_edges(*g, node_idx)) {
-      const GNode& n2 = g->nodes.at(e.other_node_idx);
+      const GNode& n2 = g->nodes.at(e.target_idx);
       e.distance_cm = calculate_distance(n1.lat, n1.lon, n2.lat, n2.lon);
     }
   }
@@ -190,7 +190,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     const uint32_t to_idx = std::get<1>(e);
     g->nodes.at(from_idx).edges_start_pos += 1;    // Hack: use as counter.
     g->nodes.at(from_idx).num_forward_edges += 1;  // Hack: use as counter.
-    g->edges.push_back({.other_node_idx = to_idx,
+    g->edges.push_back({.target_idx = to_idx,
                         .way_idx = std::get<4>(e),
                         .distance_cm = std::get<2>(e),
                         .unique_other = 1,
@@ -334,7 +334,7 @@ inline std::vector<uint64_t> SimpleToNodeIds(
   std::vector<uint64_t> v;
   for (auto e_idx : SimpleEdgeIndexes(g, key, data)) {
     const GEdge& e = g.edges.at(e_idx);
-    v.push_back(GetGNodeId(g, e.other_node_idx));
+    v.push_back(GetGNodeId(g, e.target_idx));
   }
   return v;
 }

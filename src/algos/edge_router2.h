@@ -324,7 +324,7 @@ class EdgeRouter2 {
     // Find new triggering turn restrictions.
     TurnRestriction::TREdge key = {.from_node_idx = from_node_idx,
                                    .way_idx = e.way_idx,
-                                   .to_node_idx = e.other_node_idx};
+                                   .to_node_idx = e.target_idx};
     auto it = g_.complex_turn_restriction_map.find(key);
     if (it != g_.complex_turn_restriction_map.end()) {
       uint32_t ctr_idx = it->second;
@@ -397,7 +397,7 @@ class EdgeRouter2 {
     const GNode& start_node = g_.nodes.at(start_idx);
     for (uint64_t off = 0; off < start_node.num_forward_edges; ++off) {
       const GEdge& curr_ge = g_.edges.at(start_node.edges_start_pos + off);
-      if (curr_ge.other_node_idx == start_idx) {
+      if (curr_ge.target_idx == start_idx) {
         continue;  // Ignore self-edges.
       }
       const WaySharedAttrs& wsa = GetWSA(g_, curr_ge.way_idx);
@@ -434,7 +434,7 @@ class EdgeRouter2 {
       // In A* mode, compute heuristic distance from new node to target.
       if (ve.heuristic_to_target == INFU30) {
         ve.heuristic_to_target =
-            ComputeHeuristicToTarget(g_.nodes.at(curr_ge.other_node_idx), ctx);
+            ComputeHeuristicToTarget(g_.nodes.at(curr_ge.target_idx), ctx);
         CHECK_LT_S(ve.heuristic_to_target, INFU30);
       }
       pq_.emplace(ve.min_metric + ve.heuristic_to_target, v_idx);
@@ -470,7 +470,8 @@ class EdgeRouter2 {
       const GEdge& curr_ge =
           g_.edges.at(expansion_node.edges_start_pos + offset);
 
-      if (turn_cost_data->turn_costs.at(offset) == TURN_COST_INFINITY_COMPRESSED) {
+      if (turn_cost_data->turn_costs.at(offset) ==
+          TURN_COST_INFINITY_COMPRESSED) {
         continue;  // Blocked by infinite turn costs.
       }
 
@@ -528,8 +529,8 @@ class EdgeRouter2 {
 
         // In A* mode, compute heuristic distance from new node to target.
         if (ve.heuristic_to_target == INFU30) {
-          ve.heuristic_to_target = ComputeHeuristicToTarget(
-              g_.nodes.at(curr_ge.other_node_idx), ctx);
+          ve.heuristic_to_target =
+              ComputeHeuristicToTarget(g_.nodes.at(curr_ge.target_idx), ctx);
           CHECK_LT_S(ve.heuristic_to_target, INFU30);
         }
         pq_.emplace(new_metric + ve.heuristic_to_target, v_idx);
@@ -629,7 +630,7 @@ class EdgeRouter2 {
         continue;
       }
 
-      std::uint32_t v_idx = FindOrAddVisitedEdge(edge.other_node_idx,
+      std::uint32_t v_idx = FindOrAddVisitedEdge(edge.target_idx,
                                                  ctx.opt.use_astar_heuristic);
       VisitedEdge& vother = visited_edges_.at(v_idx);
       if (vother.done) {
@@ -645,7 +646,7 @@ class EdgeRouter2 {
         // Compute heuristic distance from new node to target.
         if (vother.heuristic_to_target == INFU30) {
           const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx), ctx);
+              ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
           CHECK_LT_S(h, INFU30);
           vother.heuristic_to_target = h;
         }

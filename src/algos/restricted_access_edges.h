@@ -78,7 +78,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
       if (e.car_label == follow_label) {
         e.car_label = set_label;
         e.car_label_strange = set_strange;
-        queue.push_back(e.other_node_idx);
+        queue.push_back(e.target_idx);
         res.count += 1;
         const HIGHWAY_LABEL hw = g->ways.at(e.way_idx).highway_label;
         if (hw != HW_TERTIARY && hw != HW_RESIDENTIAL &&
@@ -187,9 +187,9 @@ inline absl::flat_hash_set<uint32_t> GetRestrictedAccessTransitionNodes(
         has_free = true;
       } else {
         has_restricted = true;
-        if (!done.contains(e.other_node_idx)) {
-          queue.push_back(e.other_node_idx);
-          done.insert(e.other_node_idx);
+        if (!done.contains(e.target_idx)) {
+          queue.push_back(e.target_idx);
+          done.insert(e.target_idx);
         }
       }
     }

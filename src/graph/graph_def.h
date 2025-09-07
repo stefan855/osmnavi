@@ -41,7 +41,6 @@ struct NodeTags {
   // "direction=" from the node. DIR_MAX if the tag does not occur.
   DIRECTION direction : 2 = DIR_MAX;
   std::uint32_t bit_give_way : 1 = 0;
-  std::uint32_t bit_priority : 1 = 0;
   std::uint32_t bit_turning_circle : 1 = 0;
   // TODO: Direction of the stop.
   std::uint32_t stop_all : 1 = 0;
@@ -68,9 +67,8 @@ struct NodeTags {
   ACCESS vh_acc[VH_MAX];
 
   constexpr bool empty() const {
-    return node_id == 0 && !bit_give_way && !bit_priority &&
-           !bit_turning_circle && !bit_stop && !bit_traffic_signals &&
-           !bit_crossing && !bit_railway_crossing &&
+    return node_id == 0 && !bit_give_way && !bit_turning_circle && !bit_stop &&
+           !bit_traffic_signals && !bit_crossing && !bit_railway_crossing &&
            !bit_railway_crossing_barrier && !bit_public_transport &&
            !bit_traffic_calming && !has_barrier;
   }
@@ -231,12 +229,12 @@ struct GEdge {
   };
   enum ROAD_PRIORITY : uint8_t { PRIO_UNSET = 0, PRIO_LOW = 1, PRIO_HIGH = 2 };
 
-  std::uint32_t other_node_idx;
+  std::uint32_t target_idx;
   std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
   // std::uint64_t distance_cm : 40;
   std::uint32_t distance_cm;  // MAX_EDGE_DISTANCE_CM_BITS is 32 anyways.
-  // True iff this is the first time 'other_node_idx' has this value in the list
+  // True iff this is the first time 'target_idx' has this value in the list
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
   std::uint32_t unique_other : 1;
@@ -257,6 +255,10 @@ struct GEdge {
   // direction of the edge relative to the direction of the way. Is not typed
   // 'DIRECTION' because it can not hold all values of that enum. Important for
   // example when selecting forward/backward speed.
+  //
+  // Note that inverted edges have the same 'contra_way' as the non-inverted
+  // edges, although (from, to) of the inverted edge does not exists in the
+  // way's node list!
   std::uint32_t contra_way : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
@@ -276,7 +278,7 @@ struct GEdge {
   // restricted-secondary road that is a highway.
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
   std::uint32_t car_label_strange : 1;
-  // True if at 'other_node_idx' it is allowed to travel back to 'from' node of
+  // True if at 'target_idx' it is allowed to travel back to 'from' node of
   // this edge. There are two cases for this that are selected automatically. It
   // is always allowed to do a u-turn at an endpoint of a street. Additionally,
   // it is allowed to do a u-turn if the edge is non-restricted and one would
@@ -463,7 +465,7 @@ struct Graph {
            ++e_idx) {
         const GEdge& e = edges.at(e_idx);
         LOG_S(INFO) << absl::StrFormat("    Edge to:%u w:%u contra:%u inv:%u",
-                                       e.other_node_idx, e.way_idx,
+                                       e.target_idx, e.way_idx,
                                        e.contra_way, e.inverted);
       }
     }
@@ -527,7 +529,7 @@ inline uint32_t gnode_num_unique_edges(const Graph& g, uint32_t node_idx,
                                        bool ignore_loops) {
   uint32_t count = 0;
   for (const GEdge& e : gnode_all_edges(g, node_idx)) {
-    if (!ignore_loops || e.other_node_idx != node_idx) {
+    if (!ignore_loops || e.target_idx != node_idx) {
       count += (e.unique_other);
     }
   }
@@ -550,13 +552,13 @@ inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
 inline uint32_t gnode_num_incoming_edges(const Graph& g, uint32_t node_idx) {
   uint32_t count = 0;
   for (const GEdge& out : gnode_all_edges(g, node_idx)) {
-    if (!out.unique_other || out.other_node_idx == node_idx) {
+    if (!out.unique_other || out.target_idx == node_idx) {
       continue;
     }
 
-    const GNode& other = g.nodes.at(out.other_node_idx);
+    const GNode& other = g.nodes.at(out.target_idx);
     for (uint32_t offset = 0; offset < other.num_forward_edges; ++offset) {
-      count += (g.edges.at(other.edges_start_pos + offset).other_node_idx ==
+      count += (g.edges.at(other.edges_start_pos + offset).target_idx ==
                 node_idx);
     }
   }
@@ -570,7 +572,7 @@ inline const uint32_t gnode_find_forward_edge_offset(const Graph& g,
   const GNode& from = g.nodes.at(from_node_idx);
   uint32_t e_start = from.edges_start_pos;
   for (uint32_t off = 0; off < from.num_forward_edges; ++off) {
-    if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
+    if (g.edges.at(e_start + off).target_idx == to_node_idx &&
         g.edges.at(e_start + off).way_idx == way_idx) {
       return off;
     }
@@ -588,7 +590,7 @@ inline const uint32_t gnode_find_edge_idx(const Graph& g,
   uint32_t e_start = gnode_edges_start(g, from_node_idx);
   uint32_t num = gnode_edges_stop(g, from_node_idx) - e_start;
   for (uint32_t off = 0; off < num; ++off) {
-    if (g.edges.at(e_start + off).other_node_idx == to_node_idx &&
+    if (g.edges.at(e_start + off).target_idx == to_node_idx &&
         g.edges.at(e_start + off).way_idx == way_idx) {
       return e_start + off;
     }
@@ -602,7 +604,7 @@ inline const uint32_t gnode_find_edge_idx(const Graph& g,
 inline const GEdge& gnode_find_edge(const Graph& g, uint32_t from_node_idx,
                                     uint32_t to_node_idx, uint32_t way_idx) {
   for (const GEdge& e : gnode_all_edges(g, from_node_idx)) {
-    if (e.other_node_idx == to_node_idx && e.way_idx == way_idx) return e;
+    if (e.target_idx == to_node_idx && e.way_idx == way_idx) return e;
   }
   ABORT_S() << absl::StrFormat(
       "Node %lld has no forward edge to node %lld with way %lld",
@@ -613,7 +615,7 @@ inline const GEdge& gnode_find_edge(const Graph& g, uint32_t from_node_idx,
 inline GEdge& gnode_find_edge(Graph& g, uint32_t from_node_idx,
                               uint32_t to_node_idx, uint32_t way_idx) {
   for (GEdge& e : gnode_all_edges(g, from_node_idx)) {
-    if (e.other_node_idx == to_node_idx && e.way_idx == way_idx) return e;
+    if (e.target_idx == to_node_idx && e.way_idx == way_idx) return e;
   }
   ABORT_S() << absl::StrFormat(
       "Node %lld has no forward edge to node %lld with way %lld",

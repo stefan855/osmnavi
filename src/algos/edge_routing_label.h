@@ -56,7 +56,7 @@ class alignas(2) EdgeRoutingLabel final {
 
   uint32_t GetToIdx(const Graph& g, const CTRList& ctr_list) const {
     if (type_ == GRAPH) {
-      return GetEdge(g, ctr_list).other_node_idx;
+      return GetEdge(g, ctr_list).target_idx;
     } else if (type_ == CLUSTER) {
       const GCluster& cluster = g.clusters.at(FromNode(g, ctr_list).cluster_id);
       return cluster.border_nodes.at(GetOffset());
@@ -90,9 +90,9 @@ class alignas(2) EdgeRoutingLabel final {
     uint32_t offset =
         (&e - &g.edges.front()) - g.nodes.at(from_idx).edges_start_pos;
     CHECK_LT_S(offset, 1024);
-    CHECK_EQ_S(e.other_node_idx,
+    CHECK_EQ_S(e.target_idx,
                g.edges.at(g.nodes.at(from_idx).edges_start_pos + offset)
-                   .other_node_idx)
+                   .target_idx)
         << offset;
     return EdgeRoutingLabel(GRAPH, from_idx, offset, bit);
   }

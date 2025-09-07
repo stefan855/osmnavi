@@ -57,11 +57,11 @@ inline TGVec CreateInitalLouvainGraph(
     const GNode& n = graph.nodes.at(gnode_pos);
 
     for (const GEdge& e : gnode_all_edges(graph, gnode_pos)) {
-      const GNode& other = graph.nodes.at(e.other_node_idx);
+      const GNode& other = graph.nodes.at(e.target_idx);
 
       if (ncc == INVALID_NCC) {
-        if (e.other_node_idx != gnode_pos && EligibleNodeForLouvain(other)) {
-          auto it = np_to_louvain_pos.find(e.other_node_idx);
+        if (e.target_idx != gnode_pos && EligibleNodeForLouvain(other)) {
+          auto it = np_to_louvain_pos.find(e.target_idx);
           CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
           if (e.unique_other) {
             lg->AddEdge(it->second, /*weight=*/1);
@@ -82,9 +82,9 @@ inline TGVec CreateInitalLouvainGraph(
         }
       } else {
         CHECK_S(false);
-        if (e.unique_other && e.other_node_idx != gnode_pos &&
+        if (e.unique_other && e.target_idx != gnode_pos &&
             EligibleNodeForLouvain(other, n.ncc)) {
-          auto it = np_to_louvain_pos.find(e.other_node_idx);
+          auto it = np_to_louvain_pos.find(e.target_idx);
           CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
           lg->AddEdge(it->second, /*weight=*/n.ncc != other.ncc ? 1 : 1);
           // If the edge is restricted then we want to precluster the node.
@@ -230,8 +230,8 @@ inline void ExecuteLouvain(int n_threads, bool align_clusters_to_ncc,
     if (EligibleNodeForLouvain(n)) {
       for (const GEdge& e : gnode_all_edges(*graph, gnode_pos)) {
         // Check if this edge is in the louvain graph.
-        if (e.unique_other && e.other_node_idx != gnode_pos &&
-            EligibleNodeForLouvain(graph->nodes.at(e.other_node_idx))) {
+        if (e.unique_other && e.target_idx != gnode_pos &&
+            EligibleNodeForLouvain(graph->nodes.at(e.target_idx))) {
           // Edge between two eligible nodes.
           // Node 'n' at position 'gnode_pos' is good to use.
           const auto ncc = align_clusters_to_ncc ? n.ncc : INVALID_NCC;
@@ -282,7 +282,7 @@ inline void UpdateGraphClusterInformation(bool align_clusters_to_ncc,
     for (const GEdge& e : gnode_all_edges(*g, node_pos)) {
       // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
       // { GEdge& e = n.edges[edge_pos];
-      GNode& other = g->nodes.at(e.other_node_idx);
+      GNode& other = g->nodes.at(e.target_idx);
 
       // By construction, any connection to an non-clustered node must be
       // through a bridge.
@@ -504,7 +504,7 @@ void AssignClusterColors(Graph* g) {
     GCluster* cluster = &(g->clusters.at(cluster_id));
     for (uint32_t n_idx : cluster->border_nodes) {
       for (const GEdge& e : gnode_all_edges(*g, n_idx)) {
-        uint32_t other_cluster_id = g->nodes.at(e.other_node_idx).cluster_id;
+        uint32_t other_cluster_id = g->nodes.at(e.target_idx).cluster_id;
         // Make sure we don't collide with clusters before the current cluster.
         if (other_cluster_id != INVALID_CLUSTER_ID &&
             other_cluster_id < cluster_id) {

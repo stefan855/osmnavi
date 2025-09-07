@@ -232,7 +232,7 @@ class Router {
         continue;
       }
 
-      std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx,
+      std::uint32_t v_idx = FindOrAddVisitedNode(edge.target_idx,
                                                  ctx.opt.use_astar_heuristic);
       VisitedNode& vother = visited_nodes_.at(v_idx);
       if (vother.done) {
@@ -247,7 +247,7 @@ class Router {
             "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
             "old-metric:%d",
             node.node_id, qnode.metric,
-            g_.nodes.at(edge.other_node_idx).node_id, vother.done, new_metric,
+            g_.nodes.at(edge.target_idx).node_id, vother.done, new_metric,
             vother.min_metric);
       }
 
@@ -258,7 +258,7 @@ class Router {
         // Compute heuristic distance from new node to target.
         if (vother.heuristic_to_target == INFU30) {
           const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx), ctx);
+              ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
           CHECK_LT_S(h, INFU30);
           vother.heuristic_to_target = h;
         }
@@ -345,7 +345,7 @@ class Router {
         continue;
       }
 
-      std::uint32_t v_idx = FindOrAddVisitedNode(edge.other_node_idx,
+      std::uint32_t v_idx = FindOrAddVisitedNode(edge.target_idx,
                                                  ctx.opt.use_astar_heuristic);
       VisitedNode& vother = visited_nodes_.at(v_idx);
       if (vother.done) {
@@ -361,7 +361,7 @@ class Router {
         // Compute heuristic distance from new node to target.
         if (vother.heuristic_to_target == INFU30) {
           const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.other_node_idx), ctx);
+              ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
           CHECK_LT_S(h, INFU30);
           vother.heuristic_to_target = h;
         }

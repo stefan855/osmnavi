@@ -110,7 +110,7 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
     return true;
   }
 
-  const GNode& other = g.nodes.at(edge.other_node_idx);
+  const GNode& other = g.nodes.at(edge.target_idx);
   if (opt.restrict_to_cluster && other.cluster_id != opt.restrict_cluster_id) {
     return true;
   }

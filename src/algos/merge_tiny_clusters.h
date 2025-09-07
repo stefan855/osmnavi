@@ -115,9 +115,9 @@ void CheckCrossEdges(const WorkData& wd, std::uint32_t cluster_id) {
         continue;
       }
       bool same_cluster =
-          GetRedirectedClusterId(wd, e.other_node_idx) == r_cluster_id;
+          GetRedirectedClusterId(wd, e.target_idx) == r_cluster_id;
       if (!same_cluster) {
-        const GNode& other = wd.g.nodes.at(e.other_node_idx);
+        const GNode& other = wd.g.nodes.at(e.target_idx);
         CHECK_S(e.cross_country == 1) << absl::StrFormat(
             "edge from %u to %u should be cross_country (ncc %u vs. %u)",
             n.node_id, other.node_id, n.ncc, other.ncc);
@@ -177,7 +177,7 @@ void AddClusterBorderEdges(const GCluster& c, WorkData* wd) {
   for (uint32_t node_idx : c.border_nodes) {
     const GNode& n = wd->g.nodes.at(node_idx);
     for (const GEdge& e : gnode_all_edges(wd->g, node_idx)) {
-      MayAddEdgeToWorkQueue(e, n, wd->g.nodes.at(e.other_node_idx), wd);
+      MayAddEdgeToWorkQueue(e, n, wd->g.nodes.at(e.target_idx), wd);
     }
   }
 }
@@ -216,7 +216,7 @@ void MayMergeCluster(const CrossEdge& ce, WorkData* wd) {
       if (!e.unique_other || e.bridge) {
         continue;
       }
-      const GNode& other = wd->g.nodes.at(e.other_node_idx);
+      const GNode& other = wd->g.nodes.at(e.target_idx);
       // if (other.cluster_id == INVALID_CLUSTER_ID) {
       //   continue;
       // }

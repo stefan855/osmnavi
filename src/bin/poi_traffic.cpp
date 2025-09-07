@@ -71,7 +71,7 @@ const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
   for (const GEdge& edge : gnode_forward_edges(g, n1_idx)) {
     // for (size_t i = 0; i < n1.num_edges_out; ++i) {
     // const GEdge& edge = n1.edges[i];
-    if (edge.other_node_idx != n2_idx) {
+    if (edge.target_idx != n2_idx) {
       continue;
     }
     const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);

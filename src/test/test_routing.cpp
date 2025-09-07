@@ -35,7 +35,7 @@ CompactDirectedGraph CreateCompactGraph(const Graph& g) {
     for (const GEdge& e : gnode_forward_edges(g, from_idx)) {
       full_edges.push_back(
           {.from_c_idx = from_idx,
-           .to_c_idx = e.other_node_idx,
+           .to_c_idx = e.target_idx,
            .weight = (uint32_t)e.distance_cm,
            .restricted_access = (e.car_label != GEdge::LABEL_FREE)});
     }
@@ -84,8 +84,8 @@ void TestGEdgeKey() {
   g.edges.push_back({});
   g.edges.push_back({});
   // Edges of node 101.
-  g.edges.push_back({.other_node_idx = 2});
-  g.edges.push_back({.other_node_idx = 3});
+  g.edges.push_back({.target_idx = 2});
+  g.edges.push_back({.target_idx = 3});
 
   GEdgeKey a = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(2), 1);
   GEdgeKey b = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(3), 0);
@@ -96,8 +96,8 @@ void TestGEdgeKey() {
   CHECK_EQ_S(a.GetBit(), 1);
   CHECK_EQ_S(b.GetBit(), 0);
 
-  CHECK_EQ_S(a.GetEdge(g, dd).other_node_idx, 2);
-  CHECK_EQ_S(b.GetEdge(g, dd).other_node_idx, 3);
+  CHECK_EQ_S(a.GetEdge(g, dd).target_idx, 2);
+  CHECK_EQ_S(b.GetEdge(g, dd).target_idx, 3);
 
   CHECK_EQ_S(a.FromNode(g, dd).node_id, 101);
   CHECK_EQ_S(b.FromNode(g, dd).node_id, 101);

@@ -224,7 +224,7 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       entry.edge_idx = gnode_find_edge_idx(g, entry.from_node_idx,
                                            entry.to_node_idx, entry.way_idx);
       const GEdge& edge = g.edges.at(entry.edge_idx);
-      if (edge.inverted || edge.other_node_idx != entry.to_node_idx) {
+      if (edge.inverted || edge.target_idx != entry.to_node_idx) {
         if (verbosity >= Verbosity::Warning) {
           LOG_S(INFO) << absl::StrFormat(
               "TR: edge %lld -> %lld on way %lld not found (relation %lld)",
@@ -316,7 +316,7 @@ inline bool CreateSimpleTurnRestrictionData(
         // Remove the bit belonging to the edge.
         d->allowed_edge_bits = d->allowed_edge_bits & ~(1u << offset);
       } else if (e.way_idx == tr.path.back().way_idx &&
-                 e.other_node_idx == tr.path.back().to_node_idx) {
+                 e.target_idx == tr.path.back().to_node_idx) {
         found = true;
         if (tr.forbidden) {
           // Remove the bit belonging to the edge.
@@ -339,7 +339,7 @@ inline bool CreateSimpleTurnRestrictionData(
   if (!from_edge.car_uturn_allowed) {
     for (size_t offset = 0; offset < num_all_edges; ++offset) {
       const GEdge& e = g.edges.at(via_node.edges_start_pos + offset);
-      if (!e.inverted && e.other_node_idx == from_node_idx &&
+      if (!e.inverted && e.target_idx == from_node_idx &&
           e.way_idx == from_way_idx) {
         // Remove the bit belonging to the edge.
         d->allowed_edge_bits = d->allowed_edge_bits & ~(1u << offset);
