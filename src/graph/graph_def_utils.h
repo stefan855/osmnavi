@@ -5,30 +5,49 @@
 
 // An edge that is specified using the index of the start node and the offset
 // of the edge within the list of edges of this node.
-struct FullEdge final {
-  uint32_t start_idx = INFU32;  // offset of start node of the edge in g.nodes
-  uint32_t offset : NUM_EDGES_OUT_BITS;  // offset of the edge in g.edges.
+// Storing an edge this way uses more space and is a little bit slower for most
+// operations. But it allows access to the start node of the edge much more
+// easily. Note that accessing the start node is almost impossible when only the
+// edge index is stored.
+class FullEdge final {
+ public:
+  FullEdge() : valid_(0) {}
+  FullEdge(const FullEdge& e)
+      : start_idx_(e.start_idx_), offset_(e.offset_), valid_(e.valid_) {}
+  FullEdge(uint32_t start_idx, uint32_t offset)
+      : start_idx_(start_idx), offset_(offset), valid_(1) {}
 
+  inline const uint32_t start_idx() const { return start_idx_; }
+  inline const uint32_t offset() const { return offset_; }
   inline const GNode& start_node(const Graph& g) const {
-    return g.nodes.at(start_idx);
+    return g.nodes.at(start_idx_);
   }
-  inline const uint32_t target_node_idx(const Graph& g) const {
+  inline const uint32_t target_idx(const Graph& g) const {
     return gedge(g).other_node_idx;
   }
   inline const GNode& target_node(const Graph& g) const {
-    return g.nodes.at(target_node_idx(g));
+    return g.nodes.at(target_idx(g));
   }
   inline const GEdge& gedge(const Graph& g) const {
-    return g.edges.at(start_node(g).edges_start_pos + offset);
+    return g.edges.at(start_node(g).edges_start_pos + offset_);
   }
+  // Second version that returns non-const GEdge reference.
   inline GEdge& gedge(Graph& g) const {
-    return g.edges.at(start_node(g).edges_start_pos + offset);
+    return g.edges.at(start_node(g).edges_start_pos + offset_);
+  }
+  inline uint32_t gedge_idx(const Graph& g) const {
+    return start_node(g).edges_start_pos + offset_;
   }
   bool operator==(const FullEdge& other) const {
-    return start_idx == other.start_idx && offset == other.offset;
+    return start_idx_ == other.start_idx_ && offset_ == other.offset_;
     ;
   }
-  bool invalid() const { return start_idx == INFU32; }
+  bool valid() const { return valid_; }
+
+ private:
+  uint32_t start_idx_;
+  uint32_t offset_ : NUM_EDGES_OUT_BITS;
+  uint32_t valid_ : 1;
 };
 
 // Find all unique (by 'e.other_node_idx') forward edges starting at 'node_idx'
@@ -47,7 +66,7 @@ inline std::vector<FullEdge> gnode_unique_forward_edges(
     }
     uint32_t found_pos;
     for (found_pos = 0; found_pos < res.size(); ++found_pos) {
-      if (res.at(found_pos).target_node_idx(g) == e.other_node_idx) {
+      if (res.at(found_pos).target_idx(g) == e.other_node_idx) {
         break;
       }
     }
@@ -83,23 +102,15 @@ inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
 inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
                                      const FullEdge start,
                                      uint32_t max_distance_cm = 20 * 100) {
-  LOG_S(INFO) << "AA0";
   uint32_t dist_cm = 0;
   FullEdge curr = start;
   while (dist_cm <= max_distance_cm) {
-    LOG_S(INFO) << "AA1";
-    uint32_t target_idx = curr.target_node_idx(g);
+    uint32_t target_idx = curr.target_idx(g);
     const uint32_t num_unique =
         gnode_num_unique_edges(g, target_idx, /*ignore_loops=*/true);
     // 'num_unique' counts the nodes connected to 'target_idx' by edges with
     // arbitrary direction.
     if (num_unique < 2) {
-      LOG_S(INFO) << "AA2"
-                  << absl::StrFormat(
-                         " No crossing but can't continue. edge %lld -> %lld",
-                         curr.start_node(g).node_id,
-                         curr.target_node(g).node_id);
-      ;
       // Should be one, because otherwise we wouldn't have gotten here.
       CHECK_EQ_S(num_unique, 1) << curr.target_node(g).node_id;
       // Seems to be the end of a street.
@@ -107,7 +118,6 @@ inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
     }
 
     if (num_unique >= 3) {
-      LOG_S(INFO) << "AA3";
       // There are three different nodes connected somehow. Let's assume this is
       // a crossing, although it could be something different, for instance a
       // road fork in only one direction.
@@ -117,17 +127,15 @@ inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
     // Edges leading to other nodes except to the node we're coming from.
     std::vector<FullEdge> unique_forward =
         gnode_unique_forward_edges(g, target_idx, /*ignore_loops=*/true,
-                                   /*ignore_node_idx=*/curr.start_idx);
+                                   /*ignore_node_idx=*/curr.start_idx());
 
     if (unique_forward.size() == 1 && num_unique == 2) {
-      LOG_S(INFO) << "AA4";
       // We can continue on the way, it has no branches.
       curr = unique_forward.front();
       dist_cm += curr.gedge(g).distance_cm;
       continue;
     }
 
-    LOG_S(INFO) << "AA5";
     // No crossing, but we can't continue.
     LOG_S(INFO) << absl::StrFormat(
         "No crossing but can't continue. edge %lld -> %lld",
@@ -154,10 +162,12 @@ struct N3Path final {
   const GNode& node1(const Graph& g) const { return g.nodes.at(node1_idx); }
   const GNode& node2(const Graph& g) const { return g.nodes.at(node2_idx); }
   const FullEdge full_edge0() const {
-    return {.start_idx = node0_idx, .offset = edge0_off};
+    // return {.start_idx = node0_idx, .offset = edge0_off};
+    return FullEdge(node0_idx, edge0_off);
   }
   const FullEdge full_edge1() const {
-    return {.start_idx = node1_idx, .offset = edge1_off};
+    // return {.start_idx = node1_idx, .offset = edge1_off};
+    return FullEdge(node1_idx, edge1_off);
   }
   const GEdge& edge0(const Graph& g) const {
     return g.edges.at(node0(g).edges_start_pos + edge0_off);
@@ -172,12 +182,12 @@ struct N3Path final {
 
   static N3Path Create(const Graph& g, const FullEdge& fe0,
                        const FullEdge& fe1) {
-    CHECK_EQ_S(fe0.target_node_idx(g), fe1.start_idx);
-    return {.node0_idx = fe0.start_idx,
-            .node1_idx = fe1.start_idx,
-            .node2_idx = fe1.target_node_idx(g),
-            .edge0_off = fe0.offset,
-            .edge1_off = fe1.offset,
+    CHECK_EQ_S(fe0.target_idx(g), fe1.start_idx());
+    return {.node0_idx = fe0.start_idx(),
+            .node1_idx = fe1.start_idx(),
+            .node2_idx = fe1.target_idx(g),
+            .edge0_off = fe0.offset(),
+            .edge1_off = fe1.offset(),
             .valid = true};
   }
 };
@@ -217,11 +227,11 @@ inline std::vector<N3Path> GetN3Paths(const Graph& g, FullEdge fe) {
   const GNode& target_node = fe.target_node(g);
   for (uint32_t off = 0; off < target_node.num_forward_edges; ++off) {
     result.push_back({
-        .node0_idx = fe.start_idx,
-        .node1_idx = fe.target_node_idx(g),
+        .node0_idx = fe.start_idx(),
+        .node1_idx = fe.target_idx(g),
         .node2_idx =
             g.edges.at(target_node.edges_start_pos + off).other_node_idx,
-        .edge0_off = fe.offset,
+        .edge0_off = fe.offset(),
         .edge1_off = off,
         .valid = true,
     });

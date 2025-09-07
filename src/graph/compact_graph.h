@@ -228,7 +228,7 @@ class CompactDirectedGraph {
       }
     }
 
-    CHECK_LE_S(deduper.num_unique(), MAX_TURN_COST_IDX);
+    CHECK_LT_S(deduper.num_unique(), MAX_TURN_COST_IDX);
     deduper.SortByPopularity();
     auto sort_mapping = deduper.GetSortMapping();
     for (PartialEdge& ce : edges_) {

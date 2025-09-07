@@ -728,7 +728,6 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
     for (ep = edges_stop - 1; ep >= edge_start; --ep) {
       if (g.edges.at(ep).other_node_idx == INFU32) break;
     }
-    // n.num_inverted_edges++;
   } else {
     for (ep = edge_start; ep < edges_stop; ++ep) {
       if (g.edges.at(ep).other_node_idx == INFU32) break;
@@ -746,13 +745,22 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.bridge = 0;
   e.to_bridge = 0;
   e.contra_way = contra_way ? 1 : 0;
+  e.cross_country = n.ncc != other.ncc;
   e.inverted = inverted ? 1 : 0;
   e.both_directions = both_directions ? 1 : 0;
-  e.cross_country = n.ncc != other.ncc;
   e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
   e.car_label_strange = 0;
   e.car_uturn_allowed = 0;
   e.complex_turn_restriction_trigger = 0;
+  e.stop_sign = 0;
+  e.road_priority = GEdge::PRIO_UNSET;
+  e.turn_cost_idx = INVALID_TURN_COST_IDX;
+
+  const GWay& way = g.ways.at(way_idx);
+  if ((way.priority_road_forward && !contra_way) ||
+      (way.priority_road_backward && contra_way)) {
+    e.road_priority = GEdge::PRIO_HIGH;
+  }
 }
 
 void MarkUniqueOther(std::span<GEdge> edges) {
@@ -1041,7 +1049,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
               AddEdge(graph, idx2, idx1, /*inverted=*/true,
-                      /*contra_way=*/true,
+                      /*contra_way=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
             } else {
@@ -1051,7 +1059,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
               AddEdge(graph, idx1, idx2, /*inverted=*/true,
-                      /*contra_way=*/false,
+                      /*contra_way=*/true,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
             }
@@ -1276,6 +1284,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       num_inverted_edges += e.inverted;
       num_forward_edges += (e.inverted == 0);
 
+      stats->num_edges_low_priority +=
+          (!e.inverted && (e.road_priority == GEdge::PRIO_LOW));
+      stats->num_edges_high_priority +=
+          (!e.inverted && (e.road_priority == GEdge::PRIO_HIGH));
+
       if (!e.inverted && e.other_node_idx != node_idx) {
         stats->sum_edge_length_cm += e.distance_cm;
         if (e.distance_cm == 0) {
@@ -1471,6 +1484,11 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("  Car forbidden:    %12lld",
                                  stats.num_edges_forward_car_forbidden);
 
+  LOG_S(INFO) << absl::StrFormat("  Low priority:     %12lld",
+                                 stats.num_edges_low_priority);
+  LOG_S(INFO) << absl::StrFormat("  High priority:    %12lld",
+                                 stats.num_edges_high_priority);
+
   LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
                                  stats.min_edge_length_cm);
   LOG_S(INFO) << absl::StrFormat("  Max edge length:  %12lld",
@@ -1546,7 +1564,7 @@ void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
 }
 }  // namespace
 
-void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
+inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
   FUNC_TIMER();
   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
     for (GEdge& e : gnode_forward_edges(*g, from_idx)) {
@@ -1555,20 +1573,24 @@ void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
   }
 }
 
-void LabelCrossingEdgeAsMinor(Graph& g, VEHICLE vt, const FullEdge start) {
+inline FullEdge LabelCrossingEdgeAsMinor(Graph& g, VEHICLE vt,
+                                         const FullEdge start) {
   const FullEdge crossing_edge = FollowEdgeToCrossing(g, vt, start);
-  if (!crossing_edge.invalid()) {
-    crossing_edge.gedge(g).bit_minor = 1;
+  if (crossing_edge.valid()) {
+    crossing_edge.gedge(g).road_priority = GEdge::PRIO_LOW;
   }
+  return crossing_edge;
 }
 
-// Some nodes are marked as "stop". Stops often come with a direction in the
-// tags, but sometimes the direction has to be inferred by looking at the
-// direction of the road or by finding the closest crossing.
+// Some nodes are marked as "stop" or "give_way". They often come with a
+// direction in the tags, but sometimes the direction has to be inferred by
+// looking at the direction of the road or by finding the closest crossing.
 //
-// Find out two things:
-//   * Direction, if necessary find next crossing and infer direction.
-//   * Find next crossing and mark incoming edge as "minor".
+// For both tags we try to find the next crossing and mark the edge arriving at
+// the crossing as low priority (GEdge::LOW_PRIO).
+//
+// For "stop", we additionally label the edge leading to the node marked as
+// "stop", because this costs some time.
 //
 // TODO
 //   * https://wiki.openstreetmap.org/wiki/Tag:highway%3Dstop#Direction
@@ -1586,7 +1608,12 @@ void LabelStopEdges(GraphMetaData* meta) {
       continue;
     }
 
-    if (nt.bit_stop) {
+    const std::vector<FullEdge> in_edges = gnode_incoming_edges(g, node_idx);
+    if (in_edges.size() == 0) {
+      continue;  // No edge that is affected.
+    }
+
+    if (nt.bit_stop || nt.bit_give_way) {
       if (nt.direction == DIR_BOTH || nt.direction == DIR_MAX) {
         // Missing direction.
         //
@@ -1609,19 +1636,20 @@ void LabelStopEdges(GraphMetaData* meta) {
         //    Node is on a crossing with more than two edges.
         //    This means the stop is on a crossing. Check if "stop=all" is set.
         //
-        const std::vector<FullEdge> in_edges =
-            gnode_incoming_edges(g, node_idx);
-        LOG_S(INFO) << absl::StrFormat(
-            "Stop-Node %lld without direction has %llu incoming edges",
-            nt.node_id, in_edges.size());
-
-        if (in_edges.size() == 0) {
-          ;  // No edge that is affected by stop.
-        } else if (in_edges.size() == 1) {
-          // We have only one incoming edge (probably a one-way road). Label the
-          // edge.
-          in_edges.front().gedge(meta->graph).bit_stop = 1;
-          LabelCrossingEdgeAsMinor(meta->graph, vt, in_edges.front());
+        if (in_edges.size() == 1) {
+          // We have only one incoming edge, so the direction is given. This is
+          // probably a one way road. Label the edge.
+          if (nt.bit_stop) {
+            in_edges.front().gedge(meta->graph).stop_sign = 1;
+          }
+          const FullEdge cr =
+              LabelCrossingEdgeAsMinor(meta->graph, vt, in_edges.front());
+          LOG_S(INFO) << absl::StrFormat(
+              "Infer direction for oneway stop-edge %lld->%lld crossing node "
+              "%lld",
+              in_edges.front().start_node(g).node_id,
+              in_edges.front().target_node(g).node_id,
+              cr.valid() ? GetGNodeIdSafe(g, cr.gedge(g).other_node_idx) : -1);
         } else if (in_edges.size() == 2 &&
                    gnode_num_unique_edges(g, node_idx,
                                           /*ignore_loops=*/true) == 2) {
@@ -1629,15 +1657,19 @@ void LabelStopEdges(GraphMetaData* meta) {
           // find a crossing for one edge, but not for the other.
           const FullEdge cr[2] = {FollowEdgeToCrossing(g, vt, in_edges.at(0)),
                                   FollowEdgeToCrossing(g, vt, in_edges.at(1))};
-          if (cr[0].invalid() != cr[1].invalid()) {
-            const uint32_t idx = cr[0].invalid() ? 1 : 0;
+          if (cr[0].valid() != cr[1].valid()) {
+            // Found a crossing in on direction, but not in the other.
+            const uint32_t idx = cr[0].valid() ? 0 : 1;
             const FullEdge& in_edge = in_edges.at(idx);
             // Label the edge that leads to the stop.
-            in_edge.gedge(meta->graph).bit_stop = 1;
+            if (nt.bit_stop) {
+              in_edge.gedge(meta->graph).stop_sign = 1;
+            }
             // Label the edge that leads from the stop to the crossing.
-            cr[idx].gedge(meta->graph).bit_minor = 1;
+            cr[idx].gedge(meta->graph).road_priority = GEdge::PRIO_LOW;
             LOG_S(INFO) << absl::StrFormat(
-                "Infer direction for stop-edge %lld->%lld and crossing %lld",
+                "Infer direction for bothway stop-edge %lld->%lld and crossing "
+                "%lld",
                 in_edge.start_node(g).node_id, in_edge.target_node(g).node_id,
                 GetGNodeIdSafe(g, cr[idx].gedge(g).other_node_idx));
           } else {
@@ -1645,12 +1677,12 @@ void LabelStopEdges(GraphMetaData* meta) {
                 "Can not infer direction for stop node %lld",
                 GetGNodeIdSafe(g, node_idx));
           }
-        } else {
+        } else if (nt.bit_stop) {
           // We have multiple incoming edges. Check if this is marked as an
           // "all" stop.
           if (nt.stop_all /* TODO: this is default in a few countries */) {
-            for (const FullEdge in : in_edges) {
-              in.gedge(meta->graph).bit_stop = 1;
+            for (const FullEdge& in : in_edges) {
+              in.gedge(meta->graph).stop_sign = 1;
               LabelCrossingEdgeAsMinor(meta->graph, vt, in);
             }
           } else {
@@ -1659,17 +1691,15 @@ void LabelStopEdges(GraphMetaData* meta) {
         }
         continue;
       } else {
-        const bool back_dir = (nt.direction == DIR_BACKWARD);
-        // We have a proper direction.
-        const std::vector<FullEdge> in_edges =
-            gnode_incoming_edges(g, node_idx);
-        if (in_edges.size() == 0) {
-          ;  // No edge that is affected by stop.
-        } else if (in_edges.size() == 1) {
+        // Valid direction.
+        const bool contra_way = (nt.direction == DIR_BACKWARD);
+        if (in_edges.size() == 1) {
           // Check that the direction is correct.
           const FullEdge& in_edge = in_edges.front();
-          if (back_dir == in_edge.gedge(g).contra_way) {
-            in_edge.gedge(meta->graph).bit_stop = 1;
+          if (contra_way == in_edge.gedge(g).contra_way) {
+            if (nt.bit_stop) {
+              in_edge.gedge(meta->graph).stop_sign = 1;
+            }
             LabelCrossingEdgeAsMinor(meta->graph, vt, in_edge);
             LOG_S(INFO) << absl::StrFormat(
                 "Correct direction for single stop-edge %lld->%lld",
@@ -1683,12 +1713,14 @@ void LabelStopEdges(GraphMetaData* meta) {
                    gnode_num_unique_edges(g, node_idx,
                                           /*ignore_loops=*/true) == 2) {
           bool good_dir[2];
-          good_dir[0] = back_dir == in_edges.at(0).gedge(g).contra_way;
-          good_dir[1] = back_dir == in_edges.at(1).gedge(g).contra_way;
+          good_dir[0] = (contra_way == in_edges.at(0).gedge(g).contra_way);
+          good_dir[1] = (contra_way == in_edges.at(1).gedge(g).contra_way);
           if (good_dir[0] != good_dir[1]) {
             const uint32_t idx = good_dir[0] ? 0 : 1;
             const FullEdge& in_edge = in_edges.at(idx);
-            in_edge.gedge(meta->graph).bit_stop = 1;
+            if (nt.bit_stop) {
+              in_edge.gedge(meta->graph).stop_sign = 1;
+            }
             LabelCrossingEdgeAsMinor(meta->graph, vt, in_edge);
             LOG_S(INFO) << absl::StrFormat(
                 "Correct direction for double stop-edge %lld->%lld",
@@ -1726,12 +1758,12 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
       GEdge& e = g.edges.at(from_node.edges_start_pos + off);
       // Compute the turn costs for the target node of 'fe'.
       TurnCostData tcd = ComputeTurnCostsForEdge(
-          g, meta->opt.vehicle_types.front(), indexed_trs,
-          {.start_idx = from_idx, .offset = off});
+          g, meta->opt.vehicle_types.front(), indexed_trs, {from_idx, off});
+      // {.start_idx = from_idx, .offset = off});
       e.turn_cost_idx = deduper.Add(tcd);
     }
   }
-  CHECK_LE_S(deduper.num_unique(), MAX_TURN_COST_IDX);
+  CHECK_LT_S(deduper.num_unique(), MAX_TURN_COST_IDX);
 
   deduper.SortByPopularity();
   auto sort_mapping = deduper.GetSortMapping();

@@ -138,7 +138,7 @@ inline void SetBarrierToVehicle(
   //      types.
 
   /*
-  These attributes are assumed to block passage through the node for all vehicle
+  These tags are assumed to block passage through the node for all vehicle
   types. Since this is the default also for unknown barrier types, the list
   isn't actually needed.
 
@@ -228,63 +228,63 @@ inline void SetBarrierToVehicle(
 }
 }  // namespace
 
-// Extract node attributes including barrier information stored in the keys_vals
-// of nodes. Returns true if relevant attributes were found, false if not.
-// The attributes themselves are returned in 'node_tags'.
+// Extract node tags including barrier information stored in the keys_vals
+// of nodes. Returns true if relevant tags were found, false if not.
+// The tags themselves are returned in 'node_tags'.
 NodeTags ParseOSMNodeTags(const OSMTagHelper& tagh, int64_t node_id,
                           const google::protobuf::RepeatedField<int>& keys_vals,
                           int kv_start, int kv_stop) {
-  NodeTags attr;
+  NodeTags nt;
   if (kv_start >= kv_stop) {
-    return attr;
+    return nt;
   }
 
-  std::fill_n(attr.vh_acc, VH_MAX, ACC_NO);
+  std::fill_n(nt.vh_acc, VH_MAX, ACC_NO);
 
   const NodeTagExtract ex =
       ExtractNodeTags(tagh, node_id, keys_vals, kv_start, kv_stop);
-  SetNodeTagBits(ex, &attr);
+  SetNodeTagBits(ex, &nt);
 
   if (!ex.barrier.empty()) {
-    SetBarrierToVehicle(tagh, node_id, keys_vals, kv_start, kv_stop, ex, &attr);
+    SetBarrierToVehicle(tagh, node_id, keys_vals, kv_start, kv_stop, ex, &nt);
   }
 
-  if (!attr.empty()) {
-    attr.node_id = node_id;
+  if (!nt.empty()) {
+    nt.node_id = node_id;
   }
-  return attr;
+  return nt;
 }
 
 // Iterate through all nodes and check if it has a barrier which blocks traffic.
 // If it does, then add a simple turn restriction that forbids passing the
 // obstacle.
 //
-// Note that traffic within ways having the attribute area=yes is not blocked,
+// Note that traffic within ways having the tag area=yes is not blocked,
 // i.e. it is always possible to continue within the area, even if a border node
 // of the area has a blocking barrier.
 void StoreNodeBarrierData_Obsolete(Graph* g,
                                    build_graph::BuildGraphStats* stats) {
   FUNC_TIMER();
 
-  const std::vector<NodeTags>& attrs = g->node_tags_sorted;
-  size_t attr_idx = 0;
+  const std::vector<NodeTags>& v_tags = g->node_tags_sorted;
+  size_t nt_idx = 0;
   std::set<uint32_t> way_set;
   std::set<uint32_t> way_with_area_set;
 
   for (size_t node_idx = 0; node_idx < g->nodes.size(); ++node_idx) {
-    while (attr_idx < attrs.size() &&
-           attrs.at(attr_idx).node_id < g->nodes.at(node_idx).node_id) {
-      attr_idx++;
+    while (nt_idx < v_tags.size() &&
+           v_tags.at(nt_idx).node_id < g->nodes.at(node_idx).node_id) {
+      nt_idx++;
     }
-    if (attr_idx >= attrs.size()) {
+    if (nt_idx >= v_tags.size()) {
       break;
     }
 
-    // LOG_S(INFO) << "Compare " << attrs.at(attr_idx).node_id << " to "
+    // LOG_S(INFO) << "Compare " << v_tags.at(nt_idx).node_id << " to "
     //             << g->nodes.at(node_idx).node_id;
-    if (attrs.at(attr_idx).node_id == g->nodes.at(node_idx).node_id) {
+    if (v_tags.at(nt_idx).node_id == g->nodes.at(node_idx).node_id) {
       const GNode& n = g->nodes.at(node_idx);
-      const NodeTags nt = attrs.at(attr_idx++);
+      const NodeTags nt = v_tags.at(nt_idx++);
       if (!nt.has_barrier) {
         continue;
       }
@@ -328,9 +328,9 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
       }
 
       // Iterate overall all incoming edges.
-      for (const FullEdge& in_ge : gnode_incoming_edges(*g, node_idx)) {
-        const GNode other = g->nodes.at(in_ge.start_idx);
-        GEdge& in = g->edges.at(other.edges_start_pos + in_ge.offset);
+      for (const FullEdge& in_fe : gnode_incoming_edges(*g, node_idx)) {
+        const GNode other = g->nodes.at(in_fe.start_idx());
+        GEdge& in = g->edges.at(other.edges_start_pos + in_fe.offset());
         CHECK_EQ_S(in.other_node_idx, node_idx);  // Is it really incoming?
         const bool in_way_area = g->ways.at(in.way_idx).area;
         uint32_t allowed_edge_bits = 0;
@@ -351,7 +351,7 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
           // every bollard node by doing a u-turn on the other way.
           if ((in.way_idx == out.way_idx) &&
               (in_way_area ||
-               (out.other_node_idx == in_ge.start_idx))) {  // u-turn
+               (out.other_node_idx == in_fe.start_idx()))) {  // u-turn
             // Allowed, set bit.
             allowed_edge_bits = (allowed_edge_bits | (1u << offset));
           }
@@ -362,7 +362,7 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
         } else {
           // Add/merge a pseudo turn restriction.
           const TurnRestriction::TREdge tr_key = {
-              .from_node_idx = in_ge.start_idx,
+              .from_node_idx = in_fe.start_idx(),
               .way_idx = in.way_idx,
               .to_node_idx = in.other_node_idx,
               .edge_idx = 0};

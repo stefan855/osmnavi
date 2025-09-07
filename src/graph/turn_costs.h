@@ -387,6 +387,7 @@ uint32_t NodeTagsCost(const Graph& g, N3Path n3p) {
         // Check if the previous node is closer than 50m and already had a
         // railway barrier. If so, then discount the current "barrier", it
         // probably doesn't exist.
+        // See https://www.openstreetmap.org/node/103007646
         const NodeTags* attr_prev = g.FindNodeTags(n3p.node0(g).node_id);
         if (attr_prev != nullptr && attr_prev->bit_railway_crossing &&
             attr_prev->bit_railway_crossing_barrier &&
@@ -490,8 +491,8 @@ inline TurnCostData ComputeTurnCostsForEdge(
   for (uint32_t off = 0; off < crossing_node.num_forward_edges; ++off) {
     tcd.turn_costs.at(off) = compress_turn_cost(ComputeTurnCostForN3Path(
         g, vh, indexed_trs,
-        N3Path::Create(g, fe,
-                       {.start_idx = fe.target_node_idx(g), .offset = off})));
+        N3Path::Create(g, fe, {fe.target_idx(g), off})));
+                       // {.start_idx = fe.target_idx(g), .offset = off})));
   }
   return tcd;
 }

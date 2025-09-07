@@ -107,6 +107,8 @@ struct BuildGraphStats {
   int64_t num_edges_forward_car_forbidden = 0;
   int64_t num_edges_non_unique = 0;
   int64_t num_edges_at_simple_tr_via = 0;
+  int64_t num_edges_low_priority = 0;
+  int64_t num_edges_high_priority = 0;
   int64_t max_edges = 0;
   int64_t max_edges_out = 0;
   int64_t max_edges_inverted = 0;
@@ -172,6 +174,8 @@ struct BuildGraphStats {
     num_edges_forward_car_forbidden += other.num_edges_forward_car_forbidden;
     num_edges_non_unique += other.num_edges_non_unique;
     num_edges_at_simple_tr_via += other.num_edges_at_simple_tr_via;
+    num_edges_low_priority += other.num_edges_low_priority;
+    num_edges_high_priority += other.num_edges_high_priority;
     max_edges = std::max(max_edges, other.max_edges);
     max_edges_out = std::max(max_edges_out, other.max_edges_out);
     max_edges_inverted +=

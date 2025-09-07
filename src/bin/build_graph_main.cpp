@@ -68,7 +68,7 @@ void PrintStructSizes() {
                                  sizeof(EdgeRouter::VisitedEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
-  LOG_S(INFO) << absl::StrFormat("sizeof(NodeTags):          %4u",
+  LOG_S(INFO) << absl::StrFormat("sizeof(NodeTags):               %4u",
                                  sizeof(NodeTags));
   LOG_S(INFO) << absl::StrFormat("sizeof(FullEdge):               %4u",
                                  sizeof(FullEdge));
