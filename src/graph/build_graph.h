@@ -97,6 +97,10 @@ struct BuildGraphStats {
   int64_t num_nodes_in_small_component = 0;
   int64_t num_nodes_no_country = 0;
   int64_t num_nodes_simple_tr_via = 0;
+
+  static const uint32_t num_nodes_unique_edges_dim = 7;
+  int64_t num_nodes_unique_edges[num_nodes_unique_edges_dim] = {0};  // All 0
+
   int64_t num_edges_inverted = 0;
   int64_t num_edges_forward = 0;
   int64_t num_edges_forward_car_restr_unset = 0;
@@ -162,6 +166,11 @@ struct BuildGraphStats {
     num_nodes_in_small_component += other.num_nodes_in_small_component;
     num_nodes_no_country += other.num_nodes_no_country;
     num_nodes_simple_tr_via += other.num_nodes_simple_tr_via;
+
+    for (size_t i = 0; i < num_nodes_unique_edges_dim; ++i) {
+      num_nodes_unique_edges[i] += other.num_nodes_unique_edges[i];
+    }
+
     num_edges_inverted += other.num_edges_inverted;
     num_edges_forward += other.num_edges_forward;
     num_edges_forward_car_restr_unset +=

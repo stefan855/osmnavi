@@ -11,7 +11,7 @@ namespace {
 inline void SetSurface(const ParsedTag& pt, std::string_view tag_val,
                        RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
   SURFACE surface = SURFACE_MAX;
-  if (!BitIsContained(KEY_BIT_LANES_INNER, pt.bits)) {
+  if (!pt.bits.test(KEY_BIT_LANES_INNER)) {
     surface = SurfaceToEnum(tag_val);
   } else {
     // Parse lanes and use best surface found.
@@ -20,10 +20,10 @@ inline void SetSurface(const ParsedTag& pt, std::string_view tag_val,
       if (x < surface) surface = x;
     }
   }
-  if (!BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
+  if (!pt.bits.test(KEY_BIT_BACKWARD)) {
     ra_forw->surface = surface;
   }
-  if (!BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
+  if (!pt.bits.test(KEY_BIT_FORWARD)) {
     ra_backw->surface = surface;
   }
 }
@@ -31,7 +31,7 @@ inline void SetSurface(const ParsedTag& pt, std::string_view tag_val,
 inline void SetSmoothness(const ParsedTag& pt, std::string_view tag_val,
                           RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
   SMOOTHNESS smoothness = SMOOTHNESS_MAX;
-  if (!BitIsContained(KEY_BIT_LANES_INNER, pt.bits)) {
+  if (!pt.bits.test(KEY_BIT_LANES_INNER)) {
     smoothness = SmoothnessToEnum(tag_val);
   } else {
     // Parse lanes and use best smoothness found.
@@ -40,10 +40,10 @@ inline void SetSmoothness(const ParsedTag& pt, std::string_view tag_val,
       if (x < smoothness) smoothness = x;
     }
   }
-  if (!BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
+  if (!pt.bits.test(KEY_BIT_BACKWARD)) {
     ra_forw->smoothness = smoothness;
   }
-  if (!BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
+  if (!pt.bits.test(KEY_BIT_FORWARD)) {
     ra_backw->smoothness = smoothness;
   }
 }
@@ -79,12 +79,11 @@ inline void CarRoadSurface(const OSMTagHelper& tagh, int64_t way_id,
   // Surface and smoothness look the same in terms of used combinations.
   // But tracktype isn't combined with other keys.
 
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_SURFACE) |
-                                     GetBitMask(KEY_BIT_SMOOTHNESS) |
-                                     GetBitMask(KEY_BIT_TRACKTYPE);
-  constexpr uint64_t modifier_bits = GetBitMask(KEY_BIT_LANES_INNER) |
-                                     GetBitMask(KEY_BIT_FORWARD) |
-                                     GetBitMask(KEY_BIT_BACKWARD);
+  constexpr KeySet selector_bits(
+      {KEY_BIT_SURFACE, KEY_BIT_SMOOTHNESS, KEY_BIT_TRACKTYPE});
+
+  constexpr KeySet modifier_bits(
+      {KEY_BIT_LANES_INNER, KEY_BIT_FORWARD, KEY_BIT_BACKWARD});
 
   for (const ParsedTag& pt : ptags) {
     if (!BitsetsOverlap(pt.bits, selector_bits)) {
@@ -97,12 +96,12 @@ inline void CarRoadSurface(const OSMTagHelper& tagh, int64_t way_id,
 
     const std::string_view tag_val = tagh.ToString(pt.val_st_idx);
 
-    if (BitIsContained(KEY_BIT_SURFACE, pt.bits)) {
+    if (pt.bits.test(KEY_BIT_SURFACE)) {
       SetSurface(pt, tag_val, ra_forw, ra_backw);
-    } else if (BitIsContained(KEY_BIT_SMOOTHNESS, pt.bits)) {
+    } else if (pt.bits.test(KEY_BIT_SMOOTHNESS)) {
       SetSmoothness(pt, tag_val, ra_forw, ra_backw);
     } else {
-      CHECK_S(BitIsContained(KEY_BIT_TRACKTYPE, pt.bits));
+      CHECK_S(pt.bits.test(KEY_BIT_TRACKTYPE));
       SetTracktype(pt, tag_val, ra_forw, ra_backw);
     }
   }
@@ -131,12 +130,10 @@ inline void BicycleRoadSurface(const OSMTagHelper& tagh, int64_t way_id,
   // Surface and smoothness look the same in terms of used combinations.
   // But tracktype isn't combined with other keys.
 
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_SURFACE) |
-                                     GetBitMask(KEY_BIT_SMOOTHNESS) |
-                                     GetBitMask(KEY_BIT_TRACKTYPE);
-  constexpr uint64_t modifier_bits = GetBitMask(KEY_BIT_LANES_INNER) |
-                                     GetBitMask(KEY_BIT_FORWARD) |
-                                     GetBitMask(KEY_BIT_BACKWARD);
+  constexpr KeySet selector_bits(
+      {KEY_BIT_SURFACE, KEY_BIT_SMOOTHNESS, KEY_BIT_TRACKTYPE});
+  constexpr KeySet modifier_bits(
+      {KEY_BIT_LANES_INNER, KEY_BIT_FORWARD, KEY_BIT_BACKWARD});
 
   for (const ParsedTag& pt : ptags) {
     if (!BitsetsOverlap(pt.bits, selector_bits)) {
@@ -149,12 +146,12 @@ inline void BicycleRoadSurface(const OSMTagHelper& tagh, int64_t way_id,
 
     const std::string_view tag_val = tagh.ToString(pt.val_st_idx);
 
-    if (BitIsContained(KEY_BIT_SURFACE, pt.bits)) {
+    if (pt.bits.test(KEY_BIT_SURFACE)) {
       SetSurface(pt, tag_val, ra_forw, ra_backw);
-    } else if (BitIsContained(KEY_BIT_SMOOTHNESS, pt.bits)) {
+    } else if (pt.bits.test(KEY_BIT_SMOOTHNESS)) {
       SetSmoothness(pt, tag_val, ra_forw, ra_backw);
     } else {
-      CHECK_S(BitIsContained(KEY_BIT_TRACKTYPE, pt.bits));
+      CHECK_S(pt.bits.test(KEY_BIT_TRACKTYPE));
       SetTracktype(pt, tag_val, ra_forw, ra_backw);
     }
   }

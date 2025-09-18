@@ -46,23 +46,41 @@ inline void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
                                std::uint16_t* maxspeed_forw,
                                std::uint16_t* maxspeed_backw) {
   // Special (hard) cases:
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
-  // ":both_ways" is not used here. It means a lane that is for both directions, not both ":forward" and ":backward" for the road. See
+  constexpr KeySet selector_bits = KeySet({KEY_BIT_MAXSPEED});
+  // ":both_ways" is not used here. It means a lane that is for both directions,
+  // not both ":forward" and ":backward" for the road. See
   // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
-  constexpr uint64_t modifier_bits =
-      GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_LANES_INNER) | GetBitMask(KEY_BIT_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
+  constexpr KeySet modifier_bits =
+      KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_LANES_INNER,
+              KEY_BIT_VEHICLE, KEY_BIT_MOTOR_VEHICLE, KEY_BIT_MOTORCAR});
   *maxspeed_forw = 0;
   *maxspeed_backw = 0;
 
   for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
+    if ((pt.bits & selector_bits).none()) {
       continue;
     }
 
+    if ((pt.bits & ~modifier_bits) == KeySet({KEY_BIT_MAXSPEED})) {
+      std::string_view val = tagh.ToString(pt.val_st_idx);
+      int maxspeed =
+          InterpretMaxspeedValue(val, pt.bits.test(KEY_BIT_LANES_INNER));
+      if (maxspeed > 0 && maxspeed <= INFINITE_MAXSPEED) {
+        if (pt.bits.test(KEY_BIT_FORWARD)) {
+          *maxspeed_forw = maxspeed;
+        } else if (pt.bits.test(KEY_BIT_BACKWARD)) {
+          *maxspeed_backw = maxspeed;
+        } else {
+          // If forward/backward are missing, then set both.
+          *maxspeed_forw = maxspeed;
+          *maxspeed_backw = maxspeed;
+        }
+      }
+    }
+
+#if 0
     switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_MAXSPEED): {
+      case KeySet({KEY_BIT_MAXSPEED}): {
         std::string_view val = tagh.ToString(pt.val_st_idx);
         int maxspeed = InterpretMaxspeedValue(
             val, BitIsContained(KEY_BIT_LANES_INNER, pt.bits));
@@ -82,6 +100,7 @@ inline void CarMaxspeedFromWay(const OSMTagHelper& tagh, std::int64_t way_id,
       default:
         break;
     }
+#endif
   }
 }
 
@@ -91,21 +110,39 @@ inline void BicycleMaxspeedFromWay(const OSMTagHelper& tagh,
                                    std::uint16_t* maxspeed_forw,
                                    std::uint16_t* maxspeed_backw) {
   // Special (hard) cases:
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_MAXSPEED);
-  constexpr uint64_t modifier_bits =
-      GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_LANES_INNER) | GetBitMask(KEY_BIT_VEHICLE) |
-      GetBitMask(KEY_BIT_BICYCLE);
+  constexpr KeySet selector_bits = KeySet({KEY_BIT_MAXSPEED});
+  constexpr KeySet modifier_bits =
+      KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_LANES_INNER,
+              KEY_BIT_VEHICLE, KEY_BIT_BICYCLE});
   *maxspeed_forw = 0;
   *maxspeed_backw = 0;
 
   for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
+    if ((pt.bits & selector_bits).none()) {
       continue;
     }
 
+    if ((pt.bits & ~modifier_bits) == KeySet({KEY_BIT_MAXSPEED})) {
+      std::string_view val = tagh.ToString(pt.val_st_idx);
+      int maxspeed =
+          InterpretMaxspeedValue(val, pt.bits.test(KEY_BIT_LANES_INNER));
+      if (maxspeed > 0 && maxspeed <= INFINITE_MAXSPEED) {
+        if (pt.bits.test(KEY_BIT_FORWARD)) {
+          *maxspeed_forw = maxspeed;
+        } else if (pt.bits.test(KEY_BIT_BACKWARD)) {
+          *maxspeed_backw = maxspeed;
+        } else {
+          // forward/backward are missing, either nothing or both_ways is
+          // specified, so set both.
+          *maxspeed_forw = maxspeed;
+          *maxspeed_backw = maxspeed;
+        }
+      }
+    }
+
+#if 0
     switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_MAXSPEED): {
+      case KeySet({KEY_BIT_MAXSPEED}): {
         std::string_view val = tagh.ToString(pt.val_st_idx);
         int maxspeed = InterpretMaxspeedValue(
             val, BitIsContained(KEY_BIT_LANES_INNER, pt.bits));
@@ -126,5 +163,6 @@ inline void BicycleMaxspeedFromWay(const OSMTagHelper& tagh,
       default:
         break;
     }
+#endif
   }
 }

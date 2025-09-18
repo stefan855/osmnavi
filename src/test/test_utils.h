@@ -193,7 +193,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     g->edges.push_back({.target_idx = to_idx,
                         .way_idx = std::get<4>(e),
                         .distance_cm = std::get<2>(e),
-                        .unique_other = 1,
+                        .unique_target = 1,
                         .bridge = 0,
                         .to_bridge = 0,
                         .contra_way = std::get<5>(e),

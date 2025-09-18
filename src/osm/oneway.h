@@ -22,7 +22,7 @@ inline DIRECTION DefaultDirection(const OSMTagHelper& tagh,
   // https://wiki.openstreetmap.org/wiki/DE:Tag:junction=roundabout See
   // https://wiki.openstreetmap.org/wiki/DE:Tag:junction=circular
   for (const ParsedTag& pt : ptags) {
-    if (pt.bits == GetBitMask(KEY_BIT_JUNCTION) &&
+    if (pt.bits.test(KEY_BIT_JUNCTION) &&
         (tagh.ToString(pt.val_st_idx) == "roundabout" ||
          tagh.ToString(pt.val_st_idx) == "circular")) {
       return DIR_FORWARD;
@@ -38,9 +38,8 @@ inline DIRECTION DefaultDirection(const OSMTagHelper& tagh,
 // "cycleway:*:oneway=", because this might be for a separate way.
 inline bool HasCyclewayOppositeTag(const OSMTagHelper& tagh,
                                    const std::vector<ParsedTag>& ptags) {
-  constexpr uint64_t cycleway_bits = GetBitMask(KEY_BIT_CYCLEWAY) |
-                                     GetBitMask(KEY_BIT_LEFT) |
-                                     GetBitMask(KEY_BIT_RIGHT);
+  constexpr KeySet cycleway_bits(
+      {KEY_BIT_CYCLEWAY, KEY_BIT_LEFT, KEY_BIT_RIGHT});
   for (const ParsedTag& pt : ptags) {
     if (pt.first == KEY_BIT_CYCLEWAY &&
         BitsetContainedIn(pt.bits, cycleway_bits)) {
@@ -71,10 +70,8 @@ inline DIRECTION ExtractOnewayValue(std::string_view oneway_val) {
 inline DIRECTION CarRoadDirection(const OSMTagHelper& tagh,
                                   const HIGHWAY_LABEL hw, int64_t way_id,
                                   const std::vector<ParsedTag>& ptags) {
-  constexpr uint64_t selector_bits =
-      GetBitMask(KEY_BIT_ONEWAY) | GetBitMask(KEY_BIT_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
-
+  constexpr KeySet selector_bits({KEY_BIT_ONEWAY, KEY_BIT_VEHICLE,
+                                  KEY_BIT_MOTOR_VEHICLE, KEY_BIT_MOTORCAR});
   DIRECTION dir = DefaultDirection(tagh, hw, ptags);
   for (const ParsedTag& pt : ptags) {
     if (pt.first == KEY_BIT_ONEWAY) {
@@ -119,9 +116,8 @@ inline DIRECTION CarRoadDirection(const OSMTagHelper& tagh,
 inline DIRECTION BicycleRoadDirection(const OSMTagHelper& tagh,
                                       const HIGHWAY_LABEL hw, int64_t way_id,
                                       const std::vector<ParsedTag>& ptags) {
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_ONEWAY) |
-                                     GetBitMask(KEY_BIT_VEHICLE) |
-                                     GetBitMask(KEY_BIT_BICYCLE);
+  constexpr KeySet selector_bits(
+      {KEY_BIT_ONEWAY, KEY_BIT_VEHICLE, KEY_BIT_BICYCLE});
 
   DIRECTION dir = DefaultDirection(tagh, hw, ptags);
   for (const ParsedTag& pt : ptags) {

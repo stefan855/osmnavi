@@ -226,18 +226,33 @@ inline void SetBarrierToVehicle(
     }
   }
 }
+
+void ParseCrossing(const ParsedTagInfo& pti, int64_t node_id, NodeTags* nt) {
+  if (pti.FindValue({KEY_BIT_HIGHWAY}) != "crossing") {
+    return;
+  }
+  std::string_view cr_val = pti.FindValue({KEY_BIT_CROSSING});
+  // LOG_S(INFO) << "DD1 node:" << node_id << " " << cr_val;
+  if (cr_val == "traffic_signals") {
+    // A crossing with light signals.
+  }
+}
 }  // namespace
 
 // Extract node tags including barrier information stored in the keys_vals
 // of nodes. Returns true if relevant tags were found, false if not.
 // The tags themselves are returned in 'node_tags'.
-NodeTags ParseOSMNodeTags(const OSMTagHelper& tagh, int64_t node_id,
+NodeTags ParseOSMNodeTags(const ParsedTagInfo& pti, const OSMTagHelper& tagh,
+                          int64_t node_id,
                           const google::protobuf::RepeatedField<int>& keys_vals,
                           int kv_start, int kv_stop) {
   NodeTags nt;
   if (kv_start >= kv_stop) {
     return nt;
   }
+
+  // LOG_S(INFO) << "BB node:" << node_id;
+  ParseCrossing(pti, node_id, &nt);
 
   std::fill_n(nt.vh_acc, VH_MAX, ACC_NO);
 

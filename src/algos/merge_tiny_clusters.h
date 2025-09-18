@@ -111,7 +111,7 @@ void CheckCrossEdges(const WorkData& wd, std::uint32_t cluster_id) {
     const GNode& n = wd.g.nodes.at(node_idx);
     uint32_t r_cluster_id = GetRedirectedClusterId(wd, n);
     for (const GEdge& e : gnode_all_edges(wd.g, node_idx)) {
-      if (!e.unique_other || e.bridge) {
+      if (!e.unique_target || e.bridge) {
         continue;
       }
       bool same_cluster =
@@ -145,7 +145,7 @@ bool ComputeIsTinyCluster(const WorkData& wd, std::uint32_t cluster_id) {
 // added.
 void MayAddEdgeToWorkQueue(const GEdge& e, const GNode& n1, const GNode& n2,
                            WorkData* wd) {
-  if (!e.unique_other || e.bridge || n1.node_id == n2.node_id) {
+  if (!e.unique_target || e.bridge || n1.node_id == n2.node_id) {
     return;
   }
   const uint32_t cid1 = GetRedirectedClusterId(*wd, n1);
@@ -213,7 +213,7 @@ void MayMergeCluster(const CrossEdge& ce, WorkData* wd) {
 
     // Iterate edges and add eligible ones to work queue.
     for (const GEdge& e : gnode_all_edges(wd->g, node_idx)) {
-      if (!e.unique_other || e.bridge) {
+      if (!e.unique_target || e.bridge) {
         continue;
       }
       const GNode& other = wd->g.nodes.at(e.target_idx);

@@ -30,7 +30,7 @@
 struct OsmWayWrapper {
   std::unique_ptr<OSMPBF::StringTable> t;
   std::unique_ptr<OSMTagHelper> tagh;
-  std::vector<ParsedTag> ptags;
+  std::unique_ptr<ParsedTagInfo> pti;
   OSMPBF::Way osm_way;
 
   int FindStringPos(std::string_view str) const {
@@ -87,7 +87,8 @@ OsmWayWrapper FillWayData(std::string_view xml_tags, int num_nodes = 2) {
     wr.osm_way.add_refs(1);  // Add a node with id + 1, i.e. 1,2,.,num_nodes.
   }
   wr.tagh.reset(new OSMTagHelper(*wr.t));
-  wr.ptags = ParseTags(*wr.tagh, wr.osm_way);
+  wr.pti.reset(
+      new ParsedTagInfo(*wr.tagh, ParseTags(*wr.tagh, wr.osm_way).tags()));
   return wr;
 }
 

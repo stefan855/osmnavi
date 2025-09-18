@@ -76,7 +76,7 @@ class ComponentAnalyzer {
         for (const GEdge& e : gnode_all_edges(*g, node_idx)) {
           // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n);
           // ++edge_pos) { GEdge& e = n.edges[edge_pos];
-          if (!e.unique_other) continue;
+          if (!e.unique_target) continue;
           GNode& other = g->nodes.at(e.target_idx);
           if (other.large_component) continue;
           other.large_component = 1;
@@ -104,8 +104,8 @@ class ComponentAnalyzer {
         // for (uint32_t pos = 0; pos < gnode_total_edges(n); ++pos) {
         const uint32_t other_idx = e.target_idx;
         // const uint32_t other_idx = n.edges[pos].target_idx;
-        if (e.unique_other && label_.at(other_idx) == INFU32) {
-          // if (n.edges[pos].unique_other && label_.at(other_idx) == INFU32) {
+        if (e.unique_target && label_.at(other_idx) == INFU32) {
+          // if (n.edges[pos].unique_target && label_.at(other_idx) == INFU32) {
           queue.push_back(other_idx);
           label_.at(other_idx) = start_idx;
         }

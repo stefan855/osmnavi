@@ -36,7 +36,7 @@ struct NodeCountry {
 struct WayContext {
   GWay way;
   const OSMPBF::Way& osm_way;
-  const std::vector<ParsedTag> ptags;
+  const ParsedTagInfo pti;
   PerCountryConfig::ConfigValue config_forw;
   PerCountryConfig::ConfigValue config_backw;
 };
@@ -110,32 +110,52 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
 
   for (const OSMPBF::PrimitiveGroup& pg : prim_block.primitivegroup()) {
     const auto& keys_vals = pg.dense().keys_vals();
-    NodeBuilder::VNode node = {.id = 0, .lat = 0, .lon = 0};
+    // NodeBuilder::VNode node = {.id = 0, .lat = 0, .lon = 0};
+    OsmPbfReader::NodeWithTags node;
 
     // kv_start points to terminating 0-element of previous node. Before the
     // loop it is therefore on position -1.
     int kv_start = -1;
     for (int i = 0; i < pg.dense().id_size(); ++i) {
-      node.id += pg.dense().id(i);
-      node.lat += pg.dense().lat(i);
-      node.lon += pg.dense().lon(i);
+      node.id_ += pg.dense().id(i);
+      node.lat_ += pg.dense().lat(i);
+      node.lon_ += pg.dense().lon(i);
+      const int kv_stop =
+          OsmPbfReader::NodeWithTags::AdvanceKVWindow(keys_vals, &kv_start);
 
-      int kv_stop = ++kv_start;
-      while (kv_stop < keys_vals.size() && keys_vals.at(kv_stop) != 0) {
-        kv_stop++;
-      }
-      // Difference is even.
-      CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
+      if (touched_nodes_ids.GetBit(node.id_)) {
+        if (kv_start < kv_stop) {
+          node.AddKeyVals(pg.dense().keys_vals(), kv_start, kv_stop);
 
-      if (touched_nodes_ids.GetBit(node.id)) {
-        NodeTags node_tags =
-            ParseOSMNodeTags(tagh, node.id, keys_vals, kv_start, kv_stop);
-        if (!node_tags.empty()) {
-          // Store node_tags for this node.
-          std::unique_lock<std::mutex> l(mut);
-          meta->graph.node_tags_sorted.push_back(node_tags);
+          const ParsedTagInfo pti = ParseTags(tagh, node);
+#if 0
+          {
+            std::unique_lock<std::mutex> l(mut);
+            LOG_S(INFO) << absl::StrFormat(
+                "Node %lld all: <%s>", node.id_,
+                KeySetToSymbolicString(pti.CollectedBits()));
+            for (const auto& pt : pti.tags()) {
+              LOG_S(INFO) << absl::StrFormat("  <%s>=<%s>",
+                                             KeySetToSymbolicString(pt.bits),
+                                             tagh.ToString(pt.val_st_idx));
+            }
+          }
+#endif
+
+          NodeTags node_tags = ParseOSMNodeTags(pti, tagh, node.id_, keys_vals,
+                                                kv_start, kv_stop);
+          if (!node_tags.empty()) {
+            // Store node_tags for this node.
+            std::unique_lock<std::mutex> l(mut);
+            meta->graph.node_tags_sorted.push_back(node_tags);
+          }
+          node.keys_.clear();
+          node.vals_.clear();
         }
-        builder.AddNode(node);
+
+        CHECK_GT_S(node.id_, 0);
+        builder.AddNode(
+            {.id = (uint64_t)node.id_, .lat = node.lat_, .lon = node.lon_});
         if (builder.pending_nodes() >= 128) {
           std::unique_lock<std::mutex> l(mut);
           builder.AddBlockToTable(node_table);
@@ -152,24 +172,62 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
 
 WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
                                const std::vector<ParsedTag>& ptags) {
-  constexpr uint64_t selector_bits =
-      GetBitMask(KEY_BIT_MAXSPEED) | GetBitMask(KEY_BIT_ZONE) |
-      GetBitMask(KEY_BIT_TRAFFIC) | GetBitMask(KEY_BIT_MOTORROAD);
-  constexpr uint64_t modifier_bits = GetBitMask(KEY_BIT_FORWARD) |
-                                     GetBitMask(KEY_BIT_BACKWARD) |
-                                     GetBitMask(KEY_BIT_BOTH_WAYS);
+  constexpr KeySet selector_bits = KeySet({
+      KEY_BIT_MAXSPEED, KEY_BIT_ZONE, KEY_BIT_TRAFFIC, KEY_BIT_MOTORROAD});
+  constexpr KeySet modifier_bits =
+      KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_BOTH_WAYS});
+
   WayTaggedZones info;
   for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
+    if ((pt.bits & selector_bits).none()) {
       continue;
     }
 
+    const KeySet ks = pt.bits & ~modifier_bits;
+    if (ks == KeySet({KEY_BIT_MAXSPEED}) ||
+        ks == KeySet({KEY_BIT_MAXSPEED, KEY_BIT_SOURCE}) ||
+        ks == KeySet({KEY_BIT_MAXSPEED, KEY_BIT_TYPE}) ||
+        ks == KeySet({KEY_BIT_MAXSPEED, KEY_BIT_ZONE}) ||
+        ks == KeySet({KEY_BIT_ZONE, KEY_BIT_TRAFFIC})) {
+      uint16_t ncc = INVALID_NCC;
+      ENVIRONMENT_TYPE et = ET_ANY;
+      std::string_view val = tagh.ToString(pt.val_st_idx);
+      if (ParseCountrySpeedParts(val, &ncc, &et)) {
+        if (et == ET_RURAL || et == ET_URBAN) {
+          if (pt.bits.test(KEY_BIT_FORWARD)) {
+            info.et_forw = et;
+          } else if (pt.bits.test(KEY_BIT_BACKWARD)) {
+            info.et_backw = et;
+          } else {
+            info.et_forw = et;
+            info.et_backw = et;
+          }
+        }
+        if (ncc != INVALID_NCC) {
+          info.ncc = ncc;
+        }
+      }
+    }
+
+    if (ks == KeySet({KEY_BIT_MOTORROAD})) {
+      IS_MOTORROAD im = tagh.ToString(pt.val_st_idx) == "yes" ? IM_YES : IM_NO;
+      if (pt.bits.test(KEY_BIT_FORWARD)) {
+        info.im_forw = im;
+      } else if (pt.bits.test(KEY_BIT_BACKWARD)) {
+        info.im_backw = im;
+      } else {
+        info.im_forw = im;
+        info.im_backw = im;
+      }
+    }
+
+#if 0
     switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_MAXSPEED):
-      case GetBitMask(KEY_BIT_MAXSPEED, KEY_BIT_SOURCE):
-      case GetBitMask(KEY_BIT_MAXSPEED, KEY_BIT_TYPE):
-      case GetBitMask(KEY_BIT_MAXSPEED, KEY_BIT_ZONE):
-      case GetBitMask(KEY_BIT_ZONE, KEY_BIT_TRAFFIC): {
+      case KeySet({KEY_BIT_MAXSPEED}):
+      case KeySet({KEY_BIT_MAXSPEED, KEY_BIT_SOURCE}):
+      case KeySet({KEY_BIT_MAXSPEED, KEY_BIT_TYPE}):
+      case KeySet({KEY_BIT_MAXSPEED, KEY_BIT_ZONE}):
+      case KeySet({KEY_BIT_ZONE, KEY_BIT_TRAFFIC}): {
         uint16_t ncc = INVALID_NCC;
         ENVIRONMENT_TYPE et = ET_ANY;
         std::string_view val = tagh.ToString(pt.val_st_idx);
@@ -189,7 +247,7 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
           }
         }
       }
-      case GetBitMask(KEY_BIT_MOTORROAD): {
+      case KeySet({KEY_BIT_MOTORROAD}): {
         IS_MOTORROAD im =
             tagh.ToString(pt.val_st_idx) == "yes" ? IM_YES : IM_NO;
         if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
@@ -202,6 +260,7 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
         }
       }
     }
+#endif
   }
   return info;
 }
@@ -425,16 +484,16 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   RoutingAttrs ra_backw = wc.config_backw.dflt;
 
   const DIRECTION direction =
-      CarRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.ptags);
+      CarRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.pti.tags());
   if (direction == DIR_MAX) {
     return;  // For instance wrong vehicle type or some tagging error.
   }
   ra_forw.dir = IsDirForward(direction);
   ra_backw.dir = IsDirBackward(direction);
-  CarRoadSurface(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
+  CarRoadSurface(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
 
   // Set access.
-  CarAccess(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
+  CarAccess(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
   bool acc_forw = RoutableAccess(ra_forw.access);
   bool acc_backw = RoutableAccess(ra_backw.access);
   if ((!IsDirForward(direction) || !acc_forw) &&
@@ -450,7 +509,7 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   // Set maxspeed.
   std::uint16_t maxspeed_forw;
   std::uint16_t maxspeed_backw;
-  CarMaxspeedFromWay(tagh, wc.way.id, wc.ptags, &maxspeed_forw,
+  CarMaxspeedFromWay(tagh, wc.way.id, wc.pti.tags(), &maxspeed_forw,
                      &maxspeed_backw);
   ra_forw.maxspeed = LimitedMaxspeed(wc.config_forw, maxspeed_forw);
   ra_backw.maxspeed = LimitedMaxspeed(wc.config_backw, maxspeed_backw);
@@ -471,8 +530,8 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
   RoutingAttrs ra_forw = wc.config_forw.dflt;
   RoutingAttrs ra_backw = wc.config_backw.dflt;
 
-  const DIRECTION direction =
-      BicycleRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.ptags);
+  const DIRECTION direction = BicycleRoadDirection(tagh, wc.way.highway_label,
+                                                   wc.way.id, wc.pti.tags());
   if (direction == DIR_MAX) {
     return;  // For instance wrong vehicle type or some tagging error.
   }
@@ -480,7 +539,7 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
   ra_backw.dir = IsDirBackward(direction);
 
   // Set access.
-  BicycleAccess(tagh, wc.way.id, wc.ptags, &ra_forw, &ra_backw);
+  BicycleAccess(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
   bool acc_forw = RoutableAccess(ra_forw.access);
   bool acc_backw = RoutableAccess(ra_backw.access);
   if ((!IsDirForward(direction) || !acc_forw) &&
@@ -496,7 +555,7 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
   // Set maxspeed.
   std::uint16_t maxspeed_forw;
   std::uint16_t maxspeed_backw;
-  BicycleMaxspeedFromWay(tagh, wc.way.id, wc.ptags, &maxspeed_forw,
+  BicycleMaxspeedFromWay(tagh, wc.way.id, wc.pti.tags(), &maxspeed_forw,
                          &maxspeed_backw);
   ra_forw.maxspeed = LimitedMaxspeed(wc.config_forw, maxspeed_forw);
   ra_backw.maxspeed = LimitedMaxspeed(wc.config_backw, maxspeed_backw);
@@ -548,13 +607,13 @@ int GetNumLanes(const OSMTagHelper& tagh, const std::vector<ParsedTag>& ptags) {
   long num_lanes = 0;
   long sum_lanes_with_dir = 0;
   for (const ParsedTag& pt : ptags) {
-    if (pt.bits == GetBitMask(KEY_BIT_LANES)) {
+    if (pt.bits == KeySet({KEY_BIT_LANES})) {
       double val;
       if (absl::SimpleAtod(tagh.ToString(pt.val_st_idx), &val)) {
         num_lanes = std::roundl(val);
       }
-    } else if (pt.bits == GetBitMask(KEY_BIT_LANES, KEY_BIT_FORWARD) ||
-               pt.bits == GetBitMask(KEY_BIT_LANES, KEY_BIT_BACKWARD)) {
+    } else if (pt.bits == KeySet({KEY_BIT_LANES, KEY_BIT_FORWARD}) ||
+               pt.bits == KeySet({KEY_BIT_LANES, KEY_BIT_BACKWARD})) {
       double val;
       if (absl::SimpleAtod(tagh.ToString(pt.val_st_idx), &val)) {
         sum_lanes_with_dir += std::roundl(val);
@@ -576,15 +635,15 @@ std::pair<bool, bool> GetPriorityRoadSetting(
                                               "yes_unposted"};
 
   for (const ParsedTag& pt : ptags) {
-    if (pt.bits & GetBitMask(KEY_BIT_PRIORITY_ROAD)) {
+    if (pt.bits.test(KEY_BIT_PRIORITY_ROAD)) {
       bool prio = SpanContains(yes_prio, tagh.ToString(pt.val_st_idx));
-      if (pt.bits == GetBitMask(KEY_BIT_PRIORITY_ROAD)) {
+      if (pt.bits == KeySet({KEY_BIT_PRIORITY_ROAD})) {
         p_forward = p_backward = prio;
       } else if (pt.bits ==
-                 GetBitMask(KEY_BIT_PRIORITY_ROAD, KEY_BIT_FORWARD)) {
+                 KeySet({KEY_BIT_PRIORITY_ROAD, KEY_BIT_FORWARD})) {
         p_forward = prio;
       } else if (pt.bits ==
-                 GetBitMask(KEY_BIT_PRIORITY_ROAD, KEY_BIT_BACKWARD)) {
+                 KeySet({KEY_BIT_PRIORITY_ROAD, KEY_BIT_BACKWARD})) {
         p_backward = prio;
       }
     }
@@ -618,16 +677,17 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     return;  // Not interesting for routing, ignore.
   }
 
-  WayContext wc = {.osm_way = osm_way, .ptags = ParseTags(tagh, osm_way)};
+  WayContext wc = {.osm_way = osm_way, .pti = ParseTags(tagh, osm_way)};
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
   wc.way.area = tagh.GetValue(osm_way, "area") == "yes";
   wc.way.roundabout = tagh.GetValue(osm_way, "junction") == "roundabout";
   wc.way.has_ref = !tagh.GetValue(osm_way, "ref").empty();
-  const std::pair<bool, bool> prios = GetPriorityRoadSetting(tagh, wc.ptags);
+  const std::pair<bool, bool> prios =
+      GetPriorityRoadSetting(tagh, wc.pti.tags());
   wc.way.priority_road_forward = prios.first;
   wc.way.priority_road_backward = prios.second;
-  wc.way.more_than_two_lanes = GetNumLanes(tagh, wc.ptags) > 2;
+  wc.way.more_than_two_lanes = GetNumLanes(tagh, wc.pti.tags()) > 2;
 
   CHECK_LT_S(wc.way.highway_label, HW_MAX);
 
@@ -642,7 +702,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   // Sets way.ncc and way.uniform_country.
   SetWayCountryCode(node_countries, &wc.way);
   wc.way.closed_way = (node_countries.front().id == node_countries.back().id);
-  const WayTaggedZones rural = ExtractWayZones(tagh, wc.ptags);
+  const WayTaggedZones rural = ExtractWayZones(tagh, wc.pti.tags());
   LogCountryConflict(rural, wc.way);
 
   WaySharedAttrs wsa;
@@ -738,7 +798,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.target_idx = other_idx;
   e.way_idx = way_idx;
   e.distance_cm = distance_cm;
-  e.unique_other = 0;
+  e.unique_target = 0;
   e.bridge = 0;
   e.to_bridge = 0;
   e.contra_way = contra_way ? 1 : 0;
@@ -750,6 +810,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.car_uturn_allowed = 0;
   e.complex_turn_restriction_trigger = 0;
   e.stop_sign = 0;
+  e.traffic_signal = 0;
   e.road_priority = GEdge::PRIO_UNSET;
   e.turn_cost_idx = INVALID_TURN_COST_IDX;
 
@@ -770,7 +831,7 @@ void MarkUniqueOther(std::span<GEdge> edges) {
       }
       k++;
     }
-    edges[i].unique_other = (i == k);
+    edges[i].unique_target = (i == k);
   }
 }
 
@@ -1260,6 +1321,21 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     }
     stats->num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
     stats->num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
+
+    {
+      uint32_t unique_edges = gnode_num_unique_edges(g, node_idx);
+      uint32_t idx = (unique_edges >= stats->num_nodes_unique_edges_dim)
+                         ? stats->num_nodes_unique_edges_dim - 1
+                         : unique_edges;
+      stats->num_nodes_unique_edges[idx]++;
+#if 0
+      if (unique_edges > 4) {
+        LOG_S(INFO) << "Node with " << unique_edges
+                    << " unique edges: " << n.node_id;
+      }
+#endif
+    }
+
     stats->num_edges_at_simple_tr_via +=
         n.simple_turn_restriction_via_node ? n.num_forward_edges : 0;
 
@@ -1275,7 +1351,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
       const GNode& other = g.nodes.at(e.target_idx);
       // const bool edge_dead_end = n.dead_end || other.dead_end;
-      if (!e.unique_other) {
+      if (!e.unique_target) {
         stats->num_edges_non_unique++;
       }
       num_inverted_edges += e.inverted;
@@ -1442,7 +1518,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("  Total Bytes:      %12lld",
                                  way_bytes + way_added_bytes);
 
-  LOG_S(INFO) << absl::StrFormat("Needed nodes:       %12lld", g.nodes.size());
+  LOG_S(INFO) << absl::StrFormat("Nodes needed:       %12lld", g.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  stats.num_dead_end_nodes);
   LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld",
@@ -1451,6 +1527,11 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_nodes_in_small_component);
   LOG_S(INFO) << absl::StrFormat("  Nodes no country: %12lld",
                                  stats.num_nodes_no_country);
+
+  for (uint32_t idx = 0; idx < stats.num_nodes_unique_edges_dim; ++idx) {
+    LOG_S(INFO) << absl::StrFormat("  Has %u unique edges: %10lld", idx,
+                                   stats.num_nodes_unique_edges[idx]);
+  }
 
   std::int64_t node_bytes = g.nodes.size() * sizeof(GNode);
   std::int64_t edge_memory = g.edges.size() * sizeof(GEdge);
@@ -1572,13 +1653,27 @@ inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
   }
 }
 
-inline FullEdge LabelCrossingEdgeAsMinor(Graph& g, VEHICLE vt,
-                                         const FullEdge start) {
-  const FullEdge crossing_edge = FollowEdgeToCrossing(g, vt, start);
-  if (crossing_edge.valid()) {
-    crossing_edge.gedge(g).road_priority = GEdge::PRIO_LOW;
+// Label the current edge and the edge at trhe next crossing according to some
+// node tags. Note that at least on of nt.bit_traffic_signals, nt.bit_stop,
+// nt.bit_give_way has to be true.
+inline void LabelEdgeAndNextCrossing(Graph& g, const NodeTags& nt, FullEdge fe,
+                                     FullEdge crossing_fe) {
+  CHECK_S(fe.valid());
+  if (nt.bit_traffic_signals) {
+    fe.gedge(g).traffic_signal = 1;
+    if (crossing_fe.valid()) {
+      crossing_fe.gedge(g).road_priority = GEdge::PRIO_SIGNALS;
+    }
+  } else if (nt.bit_stop || nt.bit_give_way) {
+    if (nt.bit_stop) {
+      fe.gedge(g).stop_sign = 1;
+    }
+    if (crossing_fe.valid()) {
+      crossing_fe.gedge(g).road_priority = GEdge::PRIO_LOW;
+    }
+  } else {
+    CHECK_S(false);
   }
-  return crossing_edge;
 }
 
 // Some nodes are marked as "stop" or "give_way". They often come with a
@@ -1612,83 +1707,83 @@ void LabelStopEdges(GraphMetaData* meta) {
       continue;  // No edge that is affected.
     }
 
-    if (nt.bit_stop || nt.bit_give_way) {
+    if (nt.bit_stop || nt.bit_give_way || nt.bit_traffic_signals) {
       if (nt.direction == DIR_BOTH || nt.direction == DIR_MAX) {
-        // Missing direction.
-        //
-        // One way this can be missing is because the mapper
-        // put an invalid or no direction. OSM does not allow this for stop
-        // signs, so assume there is no direction given.
-        //
-        // If there are one incoming and an arbitrary number of outgoing
-        // edges at 'node_idx', then we're fine, since the direction of the stop
-        // is given by the direction of the road.
-        //
-        // If there is more than one incoming edge, then there are two cases:
-        //
-        // 2 edges on the same street
-        //    Node is on a single street that is not one-way, i.e. two
-        //    edges are coming in.  Try to find the next
-        //    crossing in both directions and infer the direction from this. See
-        //    for example https://www.openstreetmap.org/node/4459509890
-        // >=3 edges:
-        //    Node is on a crossing with more than two edges.
-        //    This means the stop is on a crossing. Check if "stop=all" is set.
-        //
+        // Missing direction or direction "both".
         if (in_edges.size() == 1) {
           // We have only one incoming edge, so the direction is given. This is
           // probably a one way road. Label the edge.
-          if (nt.bit_stop) {
-            in_edges.front().gedge(meta->graph).stop_sign = 1;
-          }
-          const FullEdge cr =
-              LabelCrossingEdgeAsMinor(meta->graph, vt, in_edges.front());
+          const FullEdge cr = FollowEdgeToCrossing(g, vt, in_edges.front());
+          LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.front(), cr);
           LOG_S(INFO) << absl::StrFormat(
-              "Infer direction for oneway stop-edge %lld->%lld crossing node "
-              "%lld",
+              "Infer direction for 1-stop-edge %lld->%lld crossing node %lld",
               in_edges.front().start_node(g).node_id,
               in_edges.front().target_node(g).node_id,
               cr.valid() ? GetGNodeIdSafe(g, cr.gedge(g).target_idx) : -1);
         } else if (in_edges.size() == 2 &&
                    gnode_num_unique_edges(g, node_idx,
                                           /*ignore_loops=*/true) == 2) {
-          // A single street with both directions allowed. Infer direction if we
-          // find a crossing for one edge, but not for the other.
-          const FullEdge cr[2] = {FollowEdgeToCrossing(g, vt, in_edges.at(0)),
-                                  FollowEdgeToCrossing(g, vt, in_edges.at(1))};
-          if (cr[0].valid() != cr[1].valid()) {
-            // Found a crossing in on direction, but not in the other.
-            const uint32_t idx = cr[0].valid() ? 0 : 1;
-            const FullEdge& in_edge = in_edges.at(idx);
-            // Label the edge that leads to the stop.
-            if (nt.bit_stop) {
-              in_edge.gedge(meta->graph).stop_sign = 1;
-            }
-            // Label the edge that leads from the stop to the crossing.
-            cr[idx].gedge(meta->graph).road_priority = GEdge::PRIO_LOW;
+          // A single street with both directions allowed. Infer direction if
+          // we find a crossing for one edge, but not for the other.
+          if (nt.bit_traffic_signals ||
+              (nt.bit_stop && nt.direction == DIR_BOTH)) {
+            // Assume it is both ways and there is no crossing to look for.
+            // TODO: Some cases might not be handled correctly, for instance a
+            // bicycle way crossing a car-road might be invisible here because
+            // we ignored the bicycle ways.
+            LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.at(0), {});
+            LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.at(1), {});
             LOG_S(INFO) << absl::StrFormat(
-                "Infer direction for bothway stop-edge %lld->%lld and crossing "
-                "%lld",
-                in_edge.start_node(g).node_id, in_edge.target_node(g).node_id,
-                GetGNodeIdSafe(g, cr[idx].gedge(g).target_idx));
-          } else {
-            LOG_S(INFO) << absl::StrFormat(
-                "Can not infer direction for stop node %lld",
+                "Assume both ways direction for 2-stop-edges at crossing %lld",
                 GetGNodeIdSafe(g, node_idx));
+
+          } else {
+            // Try to infer direction from the next crossing.
+            const FullEdge cr[2] = {
+                FollowEdgeToCrossing(g, vt, in_edges.at(0)),
+                FollowEdgeToCrossing(g, vt, in_edges.at(1))};
+            if (cr[0].valid() != cr[1].valid()) {
+              // Found a crossing in on direction, but not in the other, so we
+              // can use the found crossing to infer direction.
+              const uint32_t idx = cr[0].valid() ? 0 : 1;
+              const FullEdge& in_edge = in_edges.at(idx);
+              LabelEdgeAndNextCrossing(meta->graph, nt, in_edge, cr[idx]);
+              LOG_S(INFO) << absl::StrFormat(
+                  "Infer direction for 2-stop-edge %lld->%lld and crossing "
+                  "%lld",
+                  in_edge.start_node(g).node_id, in_edge.target_node(g).node_id,
+                  GetGNodeIdSafe(g, cr[idx].gedge(g).target_idx));
+            } else if (!cr[0].valid() &&
+                       (nt.bit_stop || nt.bit_traffic_signals)) {
+              // Didn't find a crossing in both directions.
+              LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.at(0), {});
+              LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.at(1), {});
+              LOG_S(INFO) << absl::StrFormat(
+                  "Can't infer direction, assume both ways direction at "
+                  "crossing %lld",
+                  GetGNodeIdSafe(g, node_idx));
+            } else {
+              LOG_S(INFO) << absl::StrFormat(
+                  "Can not infer direction for 2-stop node %lld",
+                  GetGNodeIdSafe(g, node_idx));
+            }
           }
-        } else if (nt.bit_stop) {
-          // We have multiple incoming edges. Check if this is marked as an
-          // "all" stop.
-          if (nt.stop_all /* TODO: this is default in a few countries */) {
+        } else {
+          // Looks like a crossing. If this is a traffic signals, or an
+          // all-way stop, then label all incoming edges.
+          if (nt.bit_traffic_signals || (nt.bit_stop && nt.stop_all)) {
             for (const FullEdge& in : in_edges) {
-              in.gedge(meta->graph).stop_sign = 1;
-              LabelCrossingEdgeAsMinor(meta->graph, vt, in);
+              LabelEdgeAndNextCrossing(meta->graph, nt, in, in);
             }
           } else {
             // We don't really know what to do. We don't use the data.
+            LOG_S(INFO) << absl::StrFormat(
+                "Can not handle crossing with no dir and stop=%u all=%u "
+                "give_way=%u traffic_signals=%u at node %lld",
+                nt.bit_stop, nt.stop_all, nt.bit_give_way,
+                nt.bit_traffic_signals, GetGNodeIdSafe(g, node_idx));
           }
         }
-        continue;
       } else {
         // Valid direction.
         const bool contra_way = (nt.direction == DIR_BACKWARD);
@@ -1696,10 +1791,8 @@ void LabelStopEdges(GraphMetaData* meta) {
           // Check that the direction is correct.
           const FullEdge& in_edge = in_edges.front();
           if (contra_way == in_edge.gedge(g).contra_way) {
-            if (nt.bit_stop) {
-              in_edge.gedge(meta->graph).stop_sign = 1;
-            }
-            LabelCrossingEdgeAsMinor(meta->graph, vt, in_edge);
+            const FullEdge cr = FollowEdgeToCrossing(g, vt, in_edge);
+            LabelEdgeAndNextCrossing(meta->graph, nt, in_edge, cr);
             LOG_S(INFO) << absl::StrFormat(
                 "Correct direction for single stop-edge %lld->%lld",
                 in_edge.start_node(g).node_id, in_edge.target_node(g).node_id);
@@ -1717,10 +1810,8 @@ void LabelStopEdges(GraphMetaData* meta) {
           if (good_dir[0] != good_dir[1]) {
             const uint32_t idx = good_dir[0] ? 0 : 1;
             const FullEdge& in_edge = in_edges.at(idx);
-            if (nt.bit_stop) {
-              in_edge.gedge(meta->graph).stop_sign = 1;
-            }
-            LabelCrossingEdgeAsMinor(meta->graph, vt, in_edge);
+            const FullEdge cr = FollowEdgeToCrossing(g, vt, in_edge);
+            LabelEdgeAndNextCrossing(meta->graph, nt, in_edge, cr);
             LOG_S(INFO) << absl::StrFormat(
                 "Correct direction for double stop-edge %lld->%lld",
                 in_edge.start_node(g).node_id, in_edge.target_node(g).node_id);
@@ -1730,9 +1821,11 @@ void LabelStopEdges(GraphMetaData* meta) {
                 GetGNodeIdSafe(g, node_idx));
           }
         } else {
-          LOG_S(INFO) << absl::StrFormat("Can not handle %llu-stop node %lld",
-                                         in_edges.size(),
-                                         GetGNodeIdSafe(g, node_idx));
+          LOG_S(INFO) << absl::StrFormat(
+              "Can not handle crossing with dir and stop=%u all=%u "
+              "give_way=%u traffic_signals=%u at %llu-stop node %lld",
+              nt.bit_stop, nt.stop_all, nt.bit_give_way, nt.bit_traffic_signals,
+              in_edges.size(), GetGNodeIdSafe(g, node_idx));
         }
       }
     }

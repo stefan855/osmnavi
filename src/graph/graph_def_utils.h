@@ -50,8 +50,8 @@ class FullEdge final {
   uint32_t valid_ : 1;
 };
 
-// Find all unique (by 'e.target_idx') forward edges starting at 'node_idx'
-// that lead to 'ignore_node_idx'.
+// Find all unique (deduped by 'e.target_idx') forward edges starting at
+// 'node_idx'. e.target_idx==ignore_node_idx is ignored.
 inline std::vector<FullEdge> gnode_unique_forward_edges(
     const Graph& g, uint32_t node_idx, bool ignore_loops,
     uint32_t ignore_node_idx = INFU32) {
@@ -60,7 +60,7 @@ inline std::vector<FullEdge> gnode_unique_forward_edges(
   const GNode& node = g.nodes.at(node_idx);
   for (uint32_t offset = 0; offset < node.num_forward_edges; ++offset) {
     const GEdge& e = g.edges.at(node.edges_start_pos + offset);
-    if (!e.unique_other || e.target_idx == ignore_node_idx ||
+    if (!e.unique_target || e.target_idx == ignore_node_idx ||
         (ignore_loops && e.target_idx == node_idx)) {
       continue;
     }
@@ -82,7 +82,7 @@ inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
                                                   uint32_t node_idx) {
   std::vector<FullEdge> res;
   for (const GEdge& out : gnode_all_edges(g, node_idx)) {
-    if (!out.unique_other || out.target_idx == node_idx) {
+    if (!out.unique_target || out.target_idx == node_idx) {
       continue;
     }
 

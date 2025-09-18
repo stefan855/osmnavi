@@ -64,6 +64,12 @@ class OSMTagHelper {
 
   const OSMPBF::StringTable& GetStringTable() const { return string_table_; }
 
+  static const OSMTagHelper& SingletonEmpty() {
+    static const OSMPBF::StringTable st;
+    static const OSMTagHelper s_tagh(st);
+    return s_tagh;
+  }
+
  private:
   // Needed first for the initialization of the tag fields.
   const OSMPBF::StringTable& string_table_;

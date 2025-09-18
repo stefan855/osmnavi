@@ -74,70 +74,100 @@ OsmWayWrapper FillWayData(std::string_view tags) {
   }
   w.osm_way.set_id(1);
   w.tagh.reset(new OSMTagHelper(*w.t));
-  w.ptags = ParseTags(*w.tagh, w.osm_way);
+  w.ptags = ParseTags(*w.tagh, w.osm_way).tags();
   return w;
+}
+
+void CheckBitKey(uint8_t bit, std::string_view str) {
+  LOG_S(INFO) << absl::StrFormat("Check bit %d is <%s>", (int)bit, str);
+  CHECK_EQ_S(bit, GetKeyPartBit(str));
+  CHECK_EQ_S(bit, GetKeyPartBitFast(str));
 }
 
 void TestKeyPartBits() {
   FUNC_TIMER();
 
-  CHECK_EQ_S(KEY_BIT_ACCESS, GetKeyPartBitFast("access"));
-  CHECK_EQ_S(KEY_BIT_ADVISORY, GetKeyPartBitFast("advisory"));
-  CHECK_EQ_S(KEY_BIT_BACKWARD, GetKeyPartBitFast("backward"));
-  CHECK_EQ_S(KEY_BIT_BICYCLE, GetKeyPartBitFast("bicycle"));
-  CHECK_EQ_S(KEY_BIT_BICYCLE_ROAD, GetKeyPartBitFast("bicycle_road"));
-  CHECK_EQ_S(KEY_BIT_BOTH, GetKeyPartBitFast("both"));
-  CHECK_EQ_S(KEY_BIT_BOTH_WAYS, GetKeyPartBitFast("both_ways"));
-  CHECK_EQ_S(KEY_BIT_BRIDGE, GetKeyPartBitFast("bridge"));
-  CHECK_EQ_S(KEY_BIT_BUS, GetKeyPartBitFast("bus"));
-  CHECK_EQ_S(KEY_BIT_CHANGE, GetKeyPartBitFast("change"));
-  CHECK_EQ_S(KEY_BIT_CONDITIONAL, GetKeyPartBitFast("conditional"));
-  CHECK_EQ_S(KEY_BIT_CYCLEWAY, GetKeyPartBitFast("cycleway"));
-  CHECK_EQ_S(KEY_BIT_FOOT, GetKeyPartBitFast("foot"));
-  CHECK_EQ_S(KEY_BIT_FOOTWAY, GetKeyPartBitFast("footway"));
-  CHECK_EQ_S(KEY_BIT_FORWARD, GetKeyPartBitFast("forward"));
-  CHECK_EQ_S(KEY_BIT_HGV, GetKeyPartBitFast("hgv"));
-  CHECK_EQ_S(KEY_BIT_HIGHWAY, GetKeyPartBitFast("highway"));
-  CHECK_EQ_S(KEY_BIT_HORSE, GetKeyPartBitFast("horse"));
-  CHECK_EQ_S(KEY_BIT_INCLINE, GetKeyPartBitFast("incline"));
-  CHECK_EQ_S(KEY_BIT_JUNCTION, GetKeyPartBitFast("junction"));
-  CHECK_EQ_S(KEY_BIT_LANE, GetKeyPartBitFast("lane"));
-  CHECK_EQ_S(KEY_BIT_LANE_MARKINGS, GetKeyPartBitFast("lane_markings"));
-  CHECK_EQ_S(KEY_BIT_LANES, GetKeyPartBitFast("lanes"));
-  CHECK_EQ_S(KEY_BIT_LANES_INNER, GetKeyPartBitFast("lanes_inner"));
-  CHECK_EQ_S(KEY_BIT_LAYER, GetKeyPartBitFast("layer"));
-  CHECK_EQ_S(KEY_BIT_LEFT, GetKeyPartBitFast("left"));
-  CHECK_EQ_S(KEY_BIT_LIT, GetKeyPartBitFast("lit"));
-  CHECK_EQ_S(KEY_BIT_MAXSPEED, GetKeyPartBitFast("maxspeed"));
-  CHECK_EQ_S(KEY_BIT_MOPED, GetKeyPartBitFast("moped"));
-  CHECK_EQ_S(KEY_BIT_MOTOR_VEHICLE, GetKeyPartBitFast("motor_vehicle"));
-  CHECK_EQ_S(KEY_BIT_MOTORCAR, GetKeyPartBitFast("motorcar"));
-  CHECK_EQ_S(KEY_BIT_MOTORCYCLE, GetKeyPartBitFast("motorcycle"));
-  CHECK_EQ_S(KEY_BIT_MOTORROAD, GetKeyPartBitFast("motorroad"));
-  CHECK_EQ_S(KEY_BIT_NAME, GetKeyPartBitFast("name"));
-  CHECK_EQ_S(KEY_BIT_ONEWAY, GetKeyPartBitFast("oneway"));
-  CHECK_EQ_S(KEY_BIT_PRACTICAL, GetKeyPartBitFast("practical"));
-  CHECK_EQ_S(KEY_BIT_PSV, GetKeyPartBitFast("psv"));
-  CHECK_EQ_S(KEY_BIT_RIGHT, GetKeyPartBitFast("right"));
-  CHECK_EQ_S(KEY_BIT_SERVICE, GetKeyPartBitFast("service"));
-  CHECK_EQ_S(KEY_BIT_SIDEWALK, GetKeyPartBitFast("sidewalk"));
-  CHECK_EQ_S(KEY_BIT_SMOOTHNESS, GetKeyPartBitFast("smoothness"));
-  CHECK_EQ_S(KEY_BIT_SOURCE, GetKeyPartBitFast("source"));
-  CHECK_EQ_S(KEY_BIT_SURFACE, GetKeyPartBitFast("surface"));
-  CHECK_EQ_S(KEY_BIT_TOLL, GetKeyPartBitFast("toll"));
-  CHECK_EQ_S(KEY_BIT_TRACKTYPE, GetKeyPartBitFast("tracktype"));
-  CHECK_EQ_S(KEY_BIT_TRAFFIC, GetKeyPartBitFast("traffic"));
-  CHECK_EQ_S(KEY_BIT_TUNNEL, GetKeyPartBitFast("tunnel"));
-  CHECK_EQ_S(KEY_BIT_TURN, GetKeyPartBitFast("turn"));
-  CHECK_EQ_S(KEY_BIT_TYPE, GetKeyPartBitFast("type"));
-  CHECK_EQ_S(KEY_BIT_VARIABLE, GetKeyPartBitFast("variable"));
-  CHECK_EQ_S(KEY_BIT_VEHICLE, GetKeyPartBitFast("vehicle"));
-  CHECK_EQ_S(KEY_BIT_WIDTH, GetKeyPartBitFast("width"));
-  CHECK_EQ_S(KEY_BIT_ZONE, GetKeyPartBitFast("zone"));
+  CheckBitKey(KEY_BIT_ACCESS, "access");
+  CheckBitKey(KEY_BIT_ADVISORY, "advisory");
+  CheckBitKey(KEY_BIT_BACKWARD, "backward");
+  CheckBitKey(KEY_BIT_BARRIER, "barrier");
+  CheckBitKey(KEY_BIT_BICYCLE, "bicycle");
+  CheckBitKey(KEY_BIT_BICYCLE_ROAD, "bicycle_road");
+  CheckBitKey(KEY_BIT_BOTH, "both");
+  CheckBitKey(KEY_BIT_BOTH_WAYS, "both_ways");
+  CheckBitKey(KEY_BIT_BRIDGE, "bridge");
+  CheckBitKey(KEY_BIT_BUS, "bus");
+  CheckBitKey(KEY_BIT_CHANGE, "change");
+  CheckBitKey(KEY_BIT_CONDITIONAL, "conditional");
+  CheckBitKey(KEY_BIT_CROSSING, "crossing");
+  CheckBitKey(KEY_BIT_CYCLEWAY, "cycleway");
+  CheckBitKey(KEY_BIT_DIRECTION, "direction");
+  CheckBitKey(KEY_BIT_FOOT, "foot");
+  CheckBitKey(KEY_BIT_FOOTWAY, "footway");
+  CheckBitKey(KEY_BIT_FORWARD, "forward");
+  CheckBitKey(KEY_BIT_HGV, "hgv");
+  CheckBitKey(KEY_BIT_HIGHWAY, "highway");
+  CheckBitKey(KEY_BIT_HORSE, "horse");
+  CheckBitKey(KEY_BIT_INCLINE, "incline");
+  CheckBitKey(KEY_BIT_JUNCTION, "junction");
+  CheckBitKey(KEY_BIT_LANE, "lane");
+  CheckBitKey(KEY_BIT_LANE_MARKINGS, "lane_markings");
+  CheckBitKey(KEY_BIT_LANES, "lanes");
+  CheckBitKey(KEY_BIT_LANES_INNER, "lanes_inner");
+  CheckBitKey(KEY_BIT_LAYER, "layer");
+  CheckBitKey(KEY_BIT_LEFT, "left");
+  CheckBitKey(KEY_BIT_LIT, "lit");
+  CheckBitKey(KEY_BIT_LOCKED, "locked");
+  CheckBitKey(KEY_BIT_MARKINGS, "markings");
+  CheckBitKey(KEY_BIT_MAXSPEED, "maxspeed");
+  CheckBitKey(KEY_BIT_MOPED, "moped");
+  CheckBitKey(KEY_BIT_MOTOR_VEHICLE, "motor_vehicle");
+  CheckBitKey(KEY_BIT_MOTORCAR, "motorcar");
+  CheckBitKey(KEY_BIT_MOTORCYCLE, "motorcycle");
+  CheckBitKey(KEY_BIT_MOTORROAD, "motorroad");
+  CheckBitKey(KEY_BIT_NAME, "name");
+  CheckBitKey(KEY_BIT_ONEWAY, "oneway");
+  CheckBitKey(KEY_BIT_PRACTICAL, "practical");
+  CheckBitKey(KEY_BIT_PRIORITY_ROAD, "priority_road");
+  CheckBitKey(KEY_BIT_PSV, "psv");
+  CheckBitKey(KEY_BIT_PUBLIC_TRANSPORT, "public_transport");
+  CheckBitKey(KEY_BIT_RAILWAY, "railway");
+  CheckBitKey(KEY_BIT_RIGHT, "right");
+  CheckBitKey(KEY_BIT_SERVICE, "service");
+  CheckBitKey(KEY_BIT_SIDEWALK, "sidewalk");
+  CheckBitKey(KEY_BIT_SIGNALS, "signals");
+  CheckBitKey(KEY_BIT_SMOOTHNESS, "smoothness");
+  CheckBitKey(KEY_BIT_SOURCE, "source");
+  CheckBitKey(KEY_BIT_STOP, "stop");
+  CheckBitKey(KEY_BIT_SURFACE, "surface");
+  CheckBitKey(KEY_BIT_TOLL, "toll");
+  CheckBitKey(KEY_BIT_TRACKTYPE, "tracktype");
+  CheckBitKey(KEY_BIT_TRAFFIC, "traffic");
+  CheckBitKey(KEY_BIT_TRAFFIC_CALMING, "traffic_calming");
+  CheckBitKey(KEY_BIT_TRAFFIC_SIGN, "traffic_sign");
+  CheckBitKey(KEY_BIT_TRAFFIC_SIGNALS, "traffic_signals");
+  CheckBitKey(KEY_BIT_TUNNEL, "tunnel");
+  CheckBitKey(KEY_BIT_TURN, "turn");
+  CheckBitKey(KEY_BIT_TYPE, "type");
+  CheckBitKey(KEY_BIT_VARIABLE, "variable");
+  CheckBitKey(KEY_BIT_VEHICLE, "vehicle");
+  CheckBitKey(KEY_BIT_WIDTH, "width");
+  CheckBitKey(KEY_BIT_ZONE, "zone");
 
   for (auto part : kKeyParts) {
     CHECK_EQ_S(GetKeyPartBit(part), GetKeyPartBitFast(part));
+    CHECK_S(KeySet({(uint8_t)GetKeyPartBitFast(part)}).any());
+    LOG_S(INFO) << "i:" << GetKeyPartBitFast(part) << " set:"
+                << KeySetToString(KeySet({(uint8_t)GetKeyPartBitFast(part)}))
+                << " "
+                << KeySetToSymbolicString(
+                       KeySet({(uint8_t)GetKeyPartBitFast(part)}));
   }
+
+  KeySet a{KEY_BIT_TUNNEL, KEY_BIT_ZONE};
+
+  CHECK_S(KeySet({KEY_BIT_TUNNEL, KEY_BIT_ZONE}) ==
+          KeySet({KEY_BIT_TUNNEL, KEY_BIT_ZONE}));
 }
 
 void TestParseTags() {
@@ -156,8 +186,8 @@ void TestParseTags() {
   {
     w = FillWayData("maxspeed:forward:lanes=50|60");
     CHECK_EQ_S(w.ptags.size(), 1u);
-    CHECK_EQ_S(w.ptags.at(0).bits, GetBitMask(KEY_BIT_MAXSPEED, KEY_BIT_FORWARD,
-                                              KEY_BIT_LANES_INNER));
+    CHECK_S(w.ptags.at(0).bits ==
+            KeySet({KEY_BIT_MAXSPEED, KEY_BIT_FORWARD, KEY_BIT_LANES_INNER}));
     CHECK_EQ_S((int)w.ptags.at(0).val_st_idx, w.FindStringPos("50|60"));
   }
 
@@ -165,24 +195,22 @@ void TestParseTags() {
     w = FillWayData("lanes:hgv=0");
     // Special case, first lanes is "normal", i.e. KEY_BIT_LANES
     CHECK_EQ_S(w.ptags.size(), 1u);
-    CHECK_EQ_S(w.ptags.at(0).bits, GetBitMask(KEY_BIT_LANES, KEY_BIT_HGV));
+    CHECK_S(w.ptags.at(0).bits == KeySet({KEY_BIT_LANES, KEY_BIT_HGV}));
   }
 
   {
     w = FillWayData("hgv:lanes=0");
     // Special case, non-first lanes is "inner", i.e. KEY_BIT_LANES_INNER
     CHECK_EQ_S(w.ptags.size(), 1u);
-    CHECK_EQ_S(w.ptags.at(0).bits,
-               GetBitMask(KEY_BIT_LANES_INNER, KEY_BIT_HGV));
+    CHECK_S(w.ptags.at(0).bits == KeySet({KEY_BIT_LANES_INNER, KEY_BIT_HGV}));
   }
 
   {
     w = FillWayData("maxspeed:forward=20 :: maxspeed=10");
     CHECK_EQ_S(w.ptags.size(), 2u);
     // Should be sorted:
-    CHECK_EQ_S(w.ptags.at(0).bits, GetBitMask(KEY_BIT_MAXSPEED));
-    CHECK_EQ_S(w.ptags.at(1).bits,
-               GetBitMask(KEY_BIT_MAXSPEED, KEY_BIT_FORWARD));
+    CHECK_S(w.ptags.at(0).bits == KeySet({KEY_BIT_MAXSPEED}));
+    CHECK_S(w.ptags.at(1).bits == KeySet({KEY_BIT_MAXSPEED, KEY_BIT_FORWARD}));
     CHECK_EQ_S((int)w.ptags.at(0).val_st_idx, w.FindStringPos("10"));
     CHECK_EQ_S((int)w.ptags.at(1).val_st_idx, w.FindStringPos("20"));
   }
@@ -214,26 +242,24 @@ void TestParseTags() {
     // 10: access:motorcar:lanes:forward
     CHECK_EQ_S(w.ptags.size(), 11u);
     // Should be sorted:
-    CHECK_EQ_S(w.ptags.at(0).bits, GetBitMask(KEY_BIT_MAXSPEED));
-    CHECK_EQ_S(w.ptags.at(1).bits, GetBitMask(KEY_BIT_ACCESS));
-    CHECK_EQ_S(w.ptags.at(2).bits, GetBitMask(KEY_BIT_ACCESS, KEY_BIT_FORWARD));
-    CHECK_EQ_S(w.ptags.at(3).bits,
-               GetBitMask(KEY_BIT_ACCESS, KEY_BIT_LANES_INNER));
-    CHECK_EQ_S(
-        w.ptags.at(4).bits,
-        GetBitMask(KEY_BIT_ACCESS, KEY_BIT_LANES_INNER, KEY_BIT_FORWARD));
-    CHECK_EQ_S(w.ptags.at(5).bits, GetBitMask(KEY_BIT_ACCESS, KEY_BIT_VEHICLE));
-    CHECK_EQ_S(w.ptags.at(6).bits,
-               GetBitMask(KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_FORWARD));
-    CHECK_EQ_S(w.ptags.at(7).bits, GetBitMask(KEY_BIT_ACCESS, KEY_BIT_VEHICLE,
-                                              KEY_BIT_LANES_INNER));
-    CHECK_EQ_S(w.ptags.at(8).bits,
-               GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTORCAR));
-    CHECK_EQ_S(w.ptags.at(9).bits, GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTORCAR,
-                                              KEY_BIT_LANES_INNER));
-    CHECK_EQ_S(w.ptags.at(10).bits,
-               GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTORCAR, KEY_BIT_LANES_INNER,
-                          KEY_BIT_FORWARD));
+    CHECK_S(w.ptags.at(0).bits == KeySet({KEY_BIT_MAXSPEED}));
+    CHECK_S(w.ptags.at(1).bits == KeySet({KEY_BIT_ACCESS}));
+    CHECK_S(w.ptags.at(2).bits == KeySet({KEY_BIT_ACCESS, KEY_BIT_FORWARD}));
+    CHECK_S(w.ptags.at(3).bits ==
+            KeySet({KEY_BIT_ACCESS, KEY_BIT_LANES_INNER}));
+    CHECK_S(w.ptags.at(4).bits ==
+            KeySet({KEY_BIT_ACCESS, KEY_BIT_LANES_INNER, KEY_BIT_FORWARD}));
+    CHECK_S(w.ptags.at(5).bits == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}));
+    CHECK_S(w.ptags.at(6).bits ==
+            KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_FORWARD}));
+    CHECK_S(w.ptags.at(7).bits ==
+            KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_LANES_INNER}));
+    CHECK_S(w.ptags.at(8).bits == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR}));
+    CHECK_S(w.ptags.at(9).bits ==
+            KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR, KEY_BIT_LANES_INNER}));
+    CHECK_S(w.ptags.at(10).bits ==
+            KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR, KEY_BIT_LANES_INNER,
+                    KEY_BIT_FORWARD}));
   }
 }
 

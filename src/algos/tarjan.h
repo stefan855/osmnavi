@@ -139,8 +139,8 @@ class Tarjan {
 
  private:
   // Beginning with n.edge[*edge_offset], find the first edge that has
-  // 'unique_other' set and return the connected node in 'neighbour'. Returns
-  // false if no more edges with 'unique_other' exist.
+  // 'unique_target' set and return the connected node in 'neighbour'. Returns
+  // false if no more edges with 'unique_target' exist.
   //
   // This is used to iterate over the undirected neighbours of a node.
   bool GetNextNeighbour(uint32_t node_idx, std::uint32_t* edge_offset,
@@ -150,7 +150,7 @@ class Tarjan {
     size_t stop = gnode_edges_stop(g_, node_idx);
 
     while (current < stop) {
-      if (g_.edges.at(current).unique_other) {
+      if (g_.edges.at(current).unique_target) {
         *neighbour = g_.edges.at(current).target_idx;
         (*edge_offset) = current + 1 - n.edges_start_pos;
         return true;
@@ -164,7 +164,7 @@ class Tarjan {
                         std::uint32_t* neighbour) {
     const uint32_t num_edges = gnode_total_edges(n);
     while ((*edge_pos) < num_edges) {
-      if (n.edges[*edge_pos].unique_other) {
+      if (n.edges[*edge_pos].unique_target) {
         *neighbour = n.edges[*edge_pos].target_idx;
         (*edge_pos)++;
         return true;
@@ -218,7 +218,7 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
     for (GEdge& e : gnode_all_edges(g, node_pos)) {
       // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
       // { GEdge& e = n.edges[edge_pos];
-      if (e.bridge || !e.unique_other) continue;
+      if (e.bridge || !e.unique_target) continue;
       GNode& other = g.nodes.at(e.target_idx);
       if (!other.dead_end) {
         other.dead_end = 1;

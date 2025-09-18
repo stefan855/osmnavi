@@ -227,7 +227,12 @@ struct GEdge {
     // road network.
     LABEL_TEMPORARY,
   };
-  enum ROAD_PRIORITY : uint8_t { PRIO_UNSET = 0, PRIO_LOW = 1, PRIO_HIGH = 2 };
+  enum ROAD_PRIORITY : uint8_t {
+    PRIO_UNSET = 0,
+    PRIO_LOW = 1,
+    PRIO_HIGH = 2,
+    PRIO_SIGNALS = 3,  // Traffic signal on the way to the crossing.
+  };
 
   std::uint32_t target_idx;
   std::uint32_t way_idx;
@@ -237,7 +242,7 @@ struct GEdge {
   // True iff this is the first time 'target_idx' has this value in the list
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
-  std::uint32_t unique_other : 1;
+  std::uint32_t unique_target : 1;
   // This edge connects two components in the undirected graph. Removing it
   // creates two non-connected subgraphs. The nodes in the smaller of the two
   // subgraphs are all marked 'dead end'. On the other side of the bridge, all
@@ -288,6 +293,8 @@ struct GEdge {
 
   // Stop sign at the target node of the edge.
   std::uint32_t stop_sign : 1;
+  // Traffic sign/light at the target node of the edge.
+  std::uint32_t traffic_signal : 1;
   // Priority of the road when arriving at the target node.
   ROAD_PRIORITY road_priority : 2;
 
@@ -465,8 +472,8 @@ struct Graph {
            ++e_idx) {
         const GEdge& e = edges.at(e_idx);
         LOG_S(INFO) << absl::StrFormat("    Edge to:%u w:%u contra:%u inv:%u",
-                                       e.target_idx, e.way_idx,
-                                       e.contra_way, e.inverted);
+                                       e.target_idx, e.way_idx, e.contra_way,
+                                       e.inverted);
       }
     }
   }
@@ -525,12 +532,13 @@ inline std::span<const GEdge> gnode_all_edges(const Graph& g,
   return std::span<const GEdge>(&(g.edges[e_start]), e_stop - e_start);
 }
 
+// Count the unqiue edges (deduping 'e.target_idx') at 'node_idx'.
 inline uint32_t gnode_num_unique_edges(const Graph& g, uint32_t node_idx,
-                                       bool ignore_loops) {
+                                       bool ignore_loops = true) {
   uint32_t count = 0;
   for (const GEdge& e : gnode_all_edges(g, node_idx)) {
     if (!ignore_loops || e.target_idx != node_idx) {
-      count += (e.unique_other);
+      count += (e.unique_target);
     }
   }
   return count;
@@ -552,14 +560,14 @@ inline std::span<const GEdge> gnode_forward_edges(const Graph& g,
 inline uint32_t gnode_num_incoming_edges(const Graph& g, uint32_t node_idx) {
   uint32_t count = 0;
   for (const GEdge& out : gnode_all_edges(g, node_idx)) {
-    if (!out.unique_other || out.target_idx == node_idx) {
+    if (!out.unique_target || out.target_idx == node_idx) {
       continue;
     }
 
     const GNode& other = g.nodes.at(out.target_idx);
     for (uint32_t offset = 0; offset < other.num_forward_edges; ++offset) {
-      count += (g.edges.at(other.edges_start_pos + offset).target_idx ==
-                node_idx);
+      count +=
+          (g.edges.at(other.edges_start_pos + offset).target_idx == node_idx);
     }
   }
   return count;

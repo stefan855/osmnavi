@@ -99,7 +99,38 @@ class OsmPbfReader {
     const std::vector<int>& keys() const { return keys_; }
     const std::vector<int>& vals() const { return vals_; }
 
-   private:
+    // Advance the window [kv_start, kv_stop] to the next node. Note that the
+    // window can be outside of the available range.
+    // Note: kv_start is an in-out parameter.
+    // Note: kv_start has to be set to kv_stop (-1 in the beginning) before
+    //       every call.
+    static int AdvanceKVWindow(
+        const google::protobuf::RepeatedField<int>& keys_vals, int* kv_start) {
+      (*kv_start)++;
+      int kv_stop = (*kv_start);
+      while (kv_stop < keys_vals.size() && keys_vals.at(kv_stop) != 0) {
+        kv_stop++;
+      }
+      // Difference has to be even.
+      CHECK_EQ_F((kv_stop - (*kv_start)) & 1, 0);
+      // kv_stop points to 0-element terminating kvs for this node.
+      return kv_stop;
+    }
+
+    void AddKeyVals(const google::protobuf::RepeatedField<int>& keys_vals,
+                    int kv_start, int kv_stop) {
+      CHECK_EQ_S(keys_.size(), 0);
+      CHECK_EQ_S(vals_.size(), 0);
+      if (kv_start < kv_stop) {
+        // We have some key/values. Check that the diff is even.
+        CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
+        while (kv_start < kv_stop) {
+          keys_.push_back(keys_vals.at(kv_start++));
+          vals_.push_back(keys_vals.at(kv_start++));
+        }
+        CHECK_EQ_F(kv_start, kv_stop);
+      }
+    }
   };
 
   // The mutex 'mut' passed to the functions below can be used to isolate
@@ -135,7 +166,7 @@ class OsmPbfReader {
   // of the other Read* functions. This might be a little bit slow on hard
   // disks. It was tested only on SSDs.
   void ReadFileStructure() {
-    FuncTimer timer("OsmPbfReader::ReadFileStructure()",__FILE__, __LINE__);
+    FuncTimer timer("OsmPbfReader::ReadFileStructure()", __FILE__, __LINE__);
     CHECK_NE_S(file_handles_.at(0), nullptr);
     CHECK_S(blob_meta_.empty())
         << "ReadFileStructure() has already been called";
@@ -184,7 +215,7 @@ class OsmPbfReader {
   // threads, so you might have to synchronize access to global data from
   // your worker_func.
   void ReadRelations(RelationWorkerFunc worker_func) {
-    FuncTimer timer("OsmPbfReader::ReadRelations()",__FILE__, __LINE__);
+    FuncTimer timer("OsmPbfReader::ReadRelations()", __FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -203,7 +234,7 @@ class OsmPbfReader {
   // threads, so you might have to synchronize access to global data from
   // your worker_func.
   void ReadWays(WayWorkerFunc worker_func) {
-    FuncTimer timer("OsmPbfReader::ReadWays()",__FILE__, __LINE__);
+    FuncTimer timer("OsmPbfReader::ReadWays()", __FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -222,7 +253,7 @@ class OsmPbfReader {
   // threads, so you might have to synchronize access to global data from
   // your worker_func.
   void ReadNodes(NodeWorkerFunc worker_func) {
-    FuncTimer timer("OsmPbfReader::ReadNodes()",__FILE__, __LINE__);
+    FuncTimer timer("OsmPbfReader::ReadNodes()", __FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -241,9 +272,9 @@ class OsmPbfReader {
   // Uses multiple threads, so you might have to synchronize access to
   // global data from your worker_func.
   void ReadBlobs(BlobContentType type, BlobWorkerFunc worker_func) {
-    FuncTimer timer(
-        absl::StrFormat("OsmPbfReader::ReadBlobs(type=%s)", BlobContentTypeToStr(type)),
-        __FILE__, __LINE__);
+    FuncTimer timer(absl::StrFormat("OsmPbfReader::ReadBlobs(type=%s)",
+                                    BlobContentTypeToStr(type)),
+                    __FILE__, __LINE__);
     std::mutex mut;
     ThreadPool pool;
     for (BlobMeta& meta : blob_meta_) {
@@ -537,23 +568,11 @@ class OsmPbfReader {
         if (kv_start < pg.dense().keys_vals().size()) {
           node.keys_.clear();
           node.vals_.clear();
-          kv_start++;
-          int kv_stop = kv_start;
-          while (kv_stop < pg.dense().keys_vals().size() &&
-                 pg.dense().keys_vals(kv_stop) != 0) {
-            kv_stop++;
-          }
-          // kv_stop points to 0-element terminating kvs for this node.
 
-          if (kv_start < kv_stop) {
-            // We have some key/values. Check that the diff is even.
-            CHECK_EQ_F((kv_stop - kv_start) & 1, 0);
-            while (kv_start < kv_stop) {
-              node.keys_.push_back(pg.dense().keys_vals().at(kv_start++));
-              node.vals_.push_back(pg.dense().keys_vals().at(kv_start++));
-            }
-            CHECK_EQ_F(kv_start, kv_stop);
-          }
+          int kv_stop =
+              NodeWithTags::AdvanceKVWindow(pg.dense().keys_vals(), &kv_start);
+          node.AddKeyVals(pg.dense().keys_vals(), kv_start, kv_stop);
+          kv_start = kv_stop;
           // kv_start points to 0-element terminating kvs for this node.
         }
         worker_func(tagh, node, thread_idx, mut);

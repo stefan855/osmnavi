@@ -63,7 +63,7 @@ inline TGVec CreateInitalLouvainGraph(
         if (e.target_idx != gnode_pos && EligibleNodeForLouvain(other)) {
           auto it = np_to_louvain_pos.find(e.target_idx);
           CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
-          if (e.unique_other) {
+          if (e.unique_target) {
             lg->AddEdge(it->second, /*weight=*/1);
           }
           // The code below needs to run for all, also non-unique edges.
@@ -82,7 +82,7 @@ inline TGVec CreateInitalLouvainGraph(
         }
       } else {
         CHECK_S(false);
-        if (e.unique_other && e.target_idx != gnode_pos &&
+        if (e.unique_target && e.target_idx != gnode_pos &&
             EligibleNodeForLouvain(other, n.ncc)) {
           auto it = np_to_louvain_pos.find(e.target_idx);
           CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
@@ -230,7 +230,7 @@ inline void ExecuteLouvain(int n_threads, bool align_clusters_to_ncc,
     if (EligibleNodeForLouvain(n)) {
       for (const GEdge& e : gnode_all_edges(*graph, gnode_pos)) {
         // Check if this edge is in the louvain graph.
-        if (e.unique_other && e.target_idx != gnode_pos &&
+        if (e.unique_target && e.target_idx != gnode_pos &&
             EligibleNodeForLouvain(graph->nodes.at(e.target_idx))) {
           // Edge between two eligible nodes.
           // Node 'n' at position 'gnode_pos' is good to use.

@@ -23,8 +23,8 @@ struct InterpretAccessResult {
   bool improve_only;
 };
 
-inline InterpretAccessResult
-InterpretAccessValue(std::string_view val, bool lanes, bool bicycle) {
+inline InterpretAccessResult InterpretAccessValue(std::string_view val,
+                                                  bool lanes, bool bicycle) {
   if (!lanes) {
     return {.acc = ExtendedAccessToEnum(val, bicycle),
             .improve_only = val.empty()};
@@ -51,9 +51,8 @@ InterpretAccessValue(std::string_view val, bool lanes, bool bicycle) {
 // not be set permissive for cars.
 inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
                       RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
-  InterpretAccessResult res =
-      InterpretAccessValue(value, BitIsContained(KEY_BIT_LANES_INNER, pt.bits),
-                           pt.first == KEY_BIT_BICYCLE);
+  InterpretAccessResult res = InterpretAccessValue(
+      value, pt.bits.test(KEY_BIT_LANES_INNER), pt.first == KEY_BIT_BICYCLE);
   if (res.acc == ACC_MAX) {
     // In general, if we don't know the access value, then it has to be
     // interpreted as a 'no'.
@@ -61,8 +60,8 @@ inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
     res.acc = ACC_NO;
   }
 
-  const bool forward = BitIsContained(KEY_BIT_FORWARD, pt.bits);
-  const bool backward = BitIsContained(KEY_BIT_BACKWARD, pt.bits);
+  const bool forward = pt.bits.test(KEY_BIT_FORWARD);
+  const bool backward = pt.bits.test(KEY_BIT_BACKWARD);
   // If forward/backward are missing, then set both.
   if (forward || !backward) {
     if (!weak || ra_forw->access != ACC_NO) {
@@ -87,70 +86,95 @@ inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
   // Special (hard) cases:
   // 1) access:lanes:backward=motorcar;motorcycle|hgv (TODO!)
   // 2) lanes:motor_vehicle=yes|no|yes
-  constexpr uint64_t selector_bits =
-      GetBitMask(KEY_BIT_ACCESS) | GetBitMask(KEY_BIT_VEHICLE) |
-      GetBitMask(KEY_BIT_MOTOR_VEHICLE) | GetBitMask(KEY_BIT_MOTORCAR);
+  constexpr KeySet selector_bits =
+      KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_MOTOR_VEHICLE,
+              KEY_BIT_MOTORCAR});
   // ":both_ways" is not used here. It means a lane that is for both directions,
   // not both ":forward" and ":backward" for the road. See
   // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
-  constexpr uint64_t modifier_bits = GetBitMask(KEY_BIT_FORWARD) |
-                                     GetBitMask(KEY_BIT_BACKWARD) |
-                                     GetBitMask(KEY_BIT_LANES_INNER);
+  constexpr KeySet modifier_bits =
+      KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_LANES_INNER});
 
   for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
+    if ((pt.bits & selector_bits).none()) {
       continue;
     }
 
+    const KeySet ks = pt.bits & ~modifier_bits;
+    if (ks == KeySet({KEY_BIT_ACCESS}) ||
+        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}) ||
+        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE}) ||
+        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR}) ||
+        // Instead of access:motorcar=... one can say motorcar=...
+        ks == KeySet({KEY_BIT_VEHICLE}) ||
+        ks == KeySet({KEY_BIT_MOTOR_VEHICLE}) ||
+        ks == KeySet({KEY_BIT_MOTORCAR})) {
+      const bool weak = (ks == KeySet({KEY_BIT_ACCESS}));
+      SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+    }
+#if 0
     switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_ACCESS):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_VEHICLE):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_MOTORCAR):
+      case KeySet({KEY_BIT_ACCESS}):
+      case KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}):
+      case KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE}):
+      case KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR}):
       // Instead of access:motorcar=... one can say motorcar=...
-      case GetBitMask(KEY_BIT_VEHICLE):
-      case GetBitMask(KEY_BIT_MOTOR_VEHICLE):
-      case GetBitMask(KEY_BIT_MOTORCAR): {
+      case KeySet({KEY_BIT_VEHICLE}):
+      case KeySet({KEY_BIT_MOTOR_VEHICLE)}:
+      case KeySet({KEY_BIT_MOTORCAR}): {
         const bool weak =
-            (pt.bits & ~modifier_bits) == GetBitMask(KEY_BIT_ACCESS);
+            (pt.bits & ~modifier_bits) == KeySet({KEY_BIT_ACCESS});
         SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+
         break;
       }
       default:
         break;
     }
+#endif
   }
 }
 
 inline void BicycleAccess(const OSMTagHelper& tagh, std::int64_t way_id,
                           const std::vector<ParsedTag>& ptags,
                           RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
-  constexpr uint64_t selector_bits = GetBitMask(KEY_BIT_ACCESS) |
-                                     GetBitMask(KEY_BIT_VEHICLE) |
-                                     GetBitMask(KEY_BIT_BICYCLE);
-  constexpr uint64_t modifier_bits =
-      GetBitMask(KEY_BIT_FORWARD) | GetBitMask(KEY_BIT_BACKWARD) |
-      GetBitMask(KEY_BIT_BOTH_WAYS) | GetBitMask(KEY_BIT_LANES_INNER);
+  constexpr KeySet selector_bits =
+      KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_BICYCLE});
+  constexpr KeySet modifier_bits =
+      KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_BOTH_WAYS,
+              KEY_BIT_LANES_INNER});
 
   for (const ParsedTag& pt : ptags) {
-    if ((pt.bits & selector_bits) == 0) {
+    if ((pt.bits & selector_bits).none()) {
       continue;
     }
 
+    const KeySet ks = pt.bits & ~modifier_bits;
+    if (ks == KeySet({KEY_BIT_ACCESS}) ||
+        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}) ||
+        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_BICYCLE}) ||
+        // Instead of access:bicycle=... one can say bicycle=...
+        ks == KeySet({KEY_BIT_VEHICLE}) || ks == KeySet({KEY_BIT_BICYCLE})) {
+      const bool weak = (ks == KeySet({KEY_BIT_ACCESS}));
+      SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+    }
+
+#if 0
     switch (pt.bits & ~modifier_bits) {
-      case GetBitMask(KEY_BIT_ACCESS):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_VEHICLE):
-      case GetBitMask(KEY_BIT_ACCESS, KEY_BIT_BICYCLE):
+      case KeySet({KEY_BIT_ACCESS}):
+      case KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}):
+      case KeySet({KEY_BIT_ACCESS, KEY_BIT_BICYCLE}):
       // Instead of access:bicycle=... one can say bicycle=...
-      case GetBitMask(KEY_BIT_VEHICLE):
-      case GetBitMask(KEY_BIT_BICYCLE): {
+      case KeySet({KEY_BIT_VEHICLE}):
+      case KeySet({KEY_BIT_BICYCLE}): {
         const bool weak =
-            (pt.bits & ~modifier_bits) == GetBitMask(KEY_BIT_ACCESS);
+            (pt.bits & ~modifier_bits) == KeySet({KEY_BIT_ACCESS});
         SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
         break;
       }
       default:
         break;
     }
+#endif
   }
 }
