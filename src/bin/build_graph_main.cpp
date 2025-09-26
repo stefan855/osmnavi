@@ -556,8 +556,8 @@ int main(int argc, char* argv[]) {
         .type = "int",
         .desc = "Print debug information for this node_id."}});
 
-  // TODO: Pass vehicle types from command line.
-  opt.vehicle_types = {VH_MOTORCAR};
+  // TODO: Pass vehicle type from command line.
+  opt.vt = VH_MOTORCAR;
   opt.pbf = argli.GetString("pbf");
   opt.admin_filepattern = argli.GetString("admin_filepattern");
   opt.routing_config = argli.GetString("routing_config");

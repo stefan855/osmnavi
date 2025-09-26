@@ -221,11 +221,11 @@ uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vh, const GEdge& e1,
   }
 }
 
-// TODO: handle direction of blockage.
-bool VehicleBlockedAtNode(VEHICLE vh, const NodeTags* node_tags) {
-  return (node_tags != nullptr && node_tags->has_barrier &&
-          (node_tags->vh_acc[vh] <= ACC_PRIVATE ||
-           node_tags->vh_acc[vh] >= ACC_MAX));
+bool VehicleBlockedAtNode(const NodeTags* node_tags) {
+  // TODO: handle direction.
+  return (node_tags != nullptr && node_tags->has_access_restriction &&
+          (!RoutableAccess(node_tags->acc_forw) ||
+           !RoutableAccess(node_tags->acc_backw)));
 }
 
 // Is the U-Turn represented by 'n3p' allowed?
@@ -238,6 +238,10 @@ bool VehicleBlockedAtNode(VEHICLE vh, const NodeTags* node_tags) {
 inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
                            const NodeTags* node_tags, const N3Path& n3p) {
   CHECK_EQ_S(n3p.node0_idx, n3p.node2_idx);
+
+  if (node_tags != nullptr && node_tags->bit_turning_circle) {
+    return true;
+  }
 
   const GEdge& edge0 = n3p.edge0(g);
   const GWay& way0 = g.ways.at(edge0.way_idx);
@@ -253,12 +257,12 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
   }
 
   // Special case, vehicle is blocked at node and returns on the same way.
-  if (VehicleBlockedAtNode(vh, node_tags) &&
+  if (VehicleBlockedAtNode(node_tags) &&
       edge0.way_idx == n3p.edge1(g).way_idx) {
     return true;
   }
 
-  // No check which kind of continuation edges there are.
+  // Now check which kind of continuation edges there are.
   bool found_continuation = false;
   bool found_free_continuation = false;
   for (const GEdge& out : gnode_forward_edges(g, edge0.target_idx)) {
@@ -277,6 +281,7 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
   return false;
 }
 
+#if 0
 inline void ProcessSimpleTurnRestrictions(
     const Graph& g, const IndexedTurnRestrictions& indexed_trs, VEHICLE vh,
     uint32_t start_node_idx, uint32_t edge_idx, TurnCostData* tcd) {
@@ -330,6 +335,7 @@ inline void ProcessSimpleTurnRestrictions(
     }
   }
 }
+#endif
 
 // Check if there is a turn restrictions matching the first edge in n3p.
 //
@@ -364,49 +370,6 @@ inline TRStatus CheckSimpleTurnRestriction(
   return result;
 }
 
-// Compute costs for obstacles that are not blocking but "cost" time.
-uint32_t NodeTagsCost(const Graph& g, N3Path n3p) {
-  uint32_t cost = 0;  // unit is millisecond
-
-  const NodeTags* attr = g.FindNodeTags(n3p.node1(g).node_id);
-  if (attr != nullptr) {
-    // TODO: handle direction
-    if (attr->bit_stop) {
-      cost += 3'000;
-    }
-    // TODO: handle direction
-    if (attr->bit_traffic_signals) {
-      cost += 20'000;
-    }
-    if (attr->bit_crossing) {
-      cost += 3'000;
-    }
-    if (attr->bit_railway_crossing) {
-      if (attr->bit_railway_crossing_barrier) {
-        // Check if the previous node is closer than 50m and already had a
-        // railway barrier. If so, then discount the current "barrier", it
-        // probably doesn't exist.
-        // See https://www.openstreetmap.org/node/103007646
-        const NodeTags* attr_prev = g.FindNodeTags(n3p.node0(g).node_id);
-        if (attr_prev != nullptr && attr_prev->bit_railway_crossing &&
-            attr_prev->bit_railway_crossing_barrier &&
-            n3p.edge0(g).distance_cm < 5000) {
-          cost += 500;
-        } else {
-          // TODO: Maybe guess how busy the railway is?
-          cost += 20'000;
-        }
-      } else {
-        cost += 500;
-      }
-    }
-    if (attr->bit_traffic_calming) {
-      cost += 1'000;
-    }
-  }
-  return cost;
-}
-
 uint32_t CurveCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
   const GNode& node0 = n3p.node0(g);
   const GNode& node1 = n3p.node1(g);
@@ -421,8 +384,53 @@ uint32_t CurveCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
   return TurnAngleTimeLoss(g, vh, n3p.edge0(g), n3p.edge1(g), turning_angle);
 }
 
-//
+// Compute costs for obstacles that are not blocking but "cost" time.
+// TODO: Differentiate for different vehicle types?
+uint32_t NodeTagsCost(const Graph& g, const N3Path& n3p) {
+  uint32_t cost = 0;  // unit is millisecond
+
+  const GEdge& e0 = n3p.edge0(g);
+  const GNode& node1 = n3p.node1(g);
+
+  if (e0.stop_sign) {
+    cost += 3'000;
+  }
+  if (e0.traffic_signal) {
+    cost += 20'000;
+  }
+  if (node1.is_pedestrian_crossing) {
+      cost += 3'000;
+  }
+
+  const NodeTags* attr = g.FindNodeTags(n3p.node1(g).node_id);
+  if (attr != nullptr) {
+    if (attr->bit_railway_crossing) {
+      cost += 500;
+      if (attr->bit_railway_crossing_barrier) {
+        // Check if the previous node is closer than 50m and already had a
+        // railway barrier. If so, then discount the current "barrier", it
+        // probably doesn't exist.
+        // See https://www.openstreetmap.org/node/103007646
+        const NodeTags* attr_prev = g.FindNodeTags(n3p.node0(g).node_id);
+        if (attr_prev == nullptr || !attr_prev->bit_railway_crossing ||
+            !attr_prev->bit_railway_crossing_barrier ||
+            n3p.edge0(g).distance_cm > 5000) {
+          // TODO: Maybe guess how busy the railway is? This is very inexact!
+          cost += 40'000;
+        }
+      }
+    }
+    if (attr->bit_traffic_calming || attr->barrier_type != BARRIER_MAX) {
+      // Assume every type of traffic calming or barrier slows down traffic by
+      // one second.
+      cost += 1'000;
+    }
+  }
+  return cost;
+}
+
 uint32_t CrossingCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
+  // Edge attribute: ROAD_PRIORITY road_priority : 2;
   return 0;
 }
 
@@ -451,7 +459,7 @@ inline uint32_t ComputeTurnCostForN3Path(
   }
 
   // Check if we're blocked by the middle node. We know this is not a u-turn.
-  if (VehicleBlockedAtNode(vh, node_tags)) {
+  if (VehicleBlockedAtNode(node_tags)) {
     const GWay& way0 = g.ways.at(n3p.edge0(g).way_idx);
     if (!way0.area || n3p.edge0(g).way_idx != n3p.edge1(g).way_idx) {
       return TURN_COST_INFINITY;
@@ -466,8 +474,8 @@ inline uint32_t ComputeTurnCostForN3Path(
   // 3) Real crossing
 
   const uint32_t cost_node_tags = NodeTagsCost(g, n3p);
-  const uint32_t cost_curve = CurveCost(g, vh, n3p);
   const uint32_t cost_crossing = CrossingCost(g, vh, n3p);
+  const uint32_t cost_curve = CurveCost(g, vh, n3p);
 
   return std::max(cost_node_tags, std::max(cost_curve, cost_crossing));
 }

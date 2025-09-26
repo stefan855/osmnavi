@@ -206,7 +206,7 @@ class KeySet final {
     return bs_ == other.bs_;
   }
   constexpr KeySet& operator&=(const KeySet& other) {
-    bs_ |= other.bs_;
+    bs_ &= other.bs_;
     return *this;
   }
   constexpr KeySet& operator|=(const KeySet& other) {

@@ -198,7 +198,7 @@ void TestWay2() {
 )";
   constexpr int num_nodes = 2;  // Our way has two nodes.
   build_graph::GraphMetaData meta = CreateMeta();
-  meta.opt.vehicle_types = {VH_MOTORCAR};
+  meta.opt.vt = VH_MOTORCAR;
   StoreNodes(num_nodes, meta.node_table.get());
   DeDuperWithIds<WaySharedAttrs> deduper;
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);

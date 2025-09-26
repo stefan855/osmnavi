@@ -7,6 +7,11 @@
 #include "osm/osm_helpers.h"
 #include "osm/parsed_tag.h"
 
+struct AccessPerDirection {
+  ACCESS acc_forw;
+  ACCESS acc_backw;
+};
+
 namespace {
 
 inline ACCESS ExtendedAccessToEnum(std::string_view val, bool bicycle) {
@@ -50,7 +55,7 @@ inline InterpretAccessResult InterpretAccessValue(std::string_view val,
 // modified. For instance, a way with "highway=footway access=permissive" should
 // not be set permissive for cars.
 inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
-                      RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
+                      AccessPerDirection* apd) {
   InterpretAccessResult res = InterpretAccessValue(
       value, pt.bits.test(KEY_BIT_LANES_INNER), pt.first == KEY_BIT_BICYCLE);
   if (res.acc == ACC_MAX) {
@@ -64,25 +69,27 @@ inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
   const bool backward = pt.bits.test(KEY_BIT_BACKWARD);
   // If forward/backward are missing, then set both.
   if (forward || !backward) {
-    if (!weak || ra_forw->access != ACC_NO) {
-      if (!res.improve_only || res.acc > ra_forw->access) {
-        ra_forw->access = res.acc;
+    if (!weak || apd->acc_forw != ACC_NO) {
+      if (!res.improve_only || res.acc > apd->acc_forw) {
+        apd->acc_forw = res.acc;
       }
     }
   }
   if (backward || !forward) {
-    if (!weak || ra_backw->access != ACC_NO) {
-      if (!res.improve_only || res.acc > ra_backw->access) {
-        ra_backw->access = res.acc;
+    if (!weak || apd->acc_backw != ACC_NO) {
+      if (!res.improve_only || res.acc > apd->acc_backw) {
+        apd->acc_backw = res.acc;
       }
     }
   }
 }
 }  // namespace
 
-inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
-                      const std::vector<ParsedTag>& ptags,
-                      RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
+inline AccessPerDirection CarAccess(const OSMTagHelper& tagh,
+                                    std::int64_t way_id,
+                                    const std::vector<ParsedTag>& ptags,
+                                    const AccessPerDirection dflt) {
+  AccessPerDirection apd = dflt;
   // Special (hard) cases:
   // 1) access:lanes:backward=motorcar;motorcycle|hgv (TODO!)
   // 2) lanes:motor_vehicle=yes|no|yes
@@ -91,7 +98,7 @@ inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
               KEY_BIT_MOTORCAR});
   // ":both_ways" is not used here. It means a lane that is for both directions,
   // not both ":forward" and ":backward" for the road. See
-  // https://wiki.openstreetmap.org/wiki/Forward_%26_backward,_left_%26_right
+  // https://wiki.openstreetmap.org/wiki/Forward_&_backward,_left_&_right
   constexpr KeySet modifier_bits =
       KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_LANES_INNER});
 
@@ -110,34 +117,17 @@ inline void CarAccess(const OSMTagHelper& tagh, std::int64_t way_id,
         ks == KeySet({KEY_BIT_MOTOR_VEHICLE}) ||
         ks == KeySet({KEY_BIT_MOTORCAR})) {
       const bool weak = (ks == KeySet({KEY_BIT_ACCESS}));
-      SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+      SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), &apd);
     }
-#if 0
-    switch (pt.bits & ~modifier_bits) {
-      case KeySet({KEY_BIT_ACCESS}):
-      case KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}):
-      case KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE}):
-      case KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR}):
-      // Instead of access:motorcar=... one can say motorcar=...
-      case KeySet({KEY_BIT_VEHICLE}):
-      case KeySet({KEY_BIT_MOTOR_VEHICLE)}:
-      case KeySet({KEY_BIT_MOTORCAR}): {
-        const bool weak =
-            (pt.bits & ~modifier_bits) == KeySet({KEY_BIT_ACCESS});
-        SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
-
-        break;
-      }
-      default:
-        break;
-    }
-#endif
   }
+  return apd;
 }
 
-inline void BicycleAccess(const OSMTagHelper& tagh, std::int64_t way_id,
-                          const std::vector<ParsedTag>& ptags,
-                          RoutingAttrs* ra_forw, RoutingAttrs* ra_backw) {
+inline AccessPerDirection BicycleAccess(const OSMTagHelper& tagh,
+                                        std::int64_t way_id,
+                                        const std::vector<ParsedTag>& ptags,
+                                        const AccessPerDirection dflt) {
+  AccessPerDirection apd = dflt;
   constexpr KeySet selector_bits =
       KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_BICYCLE});
   constexpr KeySet modifier_bits =
@@ -156,25 +146,8 @@ inline void BicycleAccess(const OSMTagHelper& tagh, std::int64_t way_id,
         // Instead of access:bicycle=... one can say bicycle=...
         ks == KeySet({KEY_BIT_VEHICLE}) || ks == KeySet({KEY_BIT_BICYCLE})) {
       const bool weak = (ks == KeySet({KEY_BIT_ACCESS}));
-      SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
+      SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), &apd);
     }
-
-#if 0
-    switch (pt.bits & ~modifier_bits) {
-      case KeySet({KEY_BIT_ACCESS}):
-      case KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}):
-      case KeySet({KEY_BIT_ACCESS, KEY_BIT_BICYCLE}):
-      // Instead of access:bicycle=... one can say bicycle=...
-      case KeySet({KEY_BIT_VEHICLE}):
-      case KeySet({KEY_BIT_BICYCLE}): {
-        const bool weak =
-            (pt.bits & ~modifier_bits) == KeySet({KEY_BIT_ACCESS});
-        SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), ra_forw, ra_backw);
-        break;
-      }
-      default:
-        break;
-    }
-#endif
   }
+  return apd;
 }

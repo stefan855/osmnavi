@@ -102,7 +102,7 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
   }
 }
 
-void ConsumeNodeBlob(const OSMTagHelper& tagh,
+void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
                      const HugeBitset& touched_nodes_ids,
                      DataBlockTable* node_table, GraphMetaData* meta) {
@@ -126,7 +126,6 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
       if (touched_nodes_ids.GetBit(node.id_)) {
         if (kv_start < kv_stop) {
           node.AddKeyVals(pg.dense().keys_vals(), kv_start, kv_stop);
-
           const ParsedTagInfo pti = ParseTags(tagh, node);
 #if 0
           {
@@ -142,8 +141,7 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
           }
 #endif
 
-          NodeTags node_tags = ParseOSMNodeTags(pti, tagh, node.id_, keys_vals,
-                                                kv_start, kv_stop);
+          NodeTags node_tags = ParseOSMNodeTags(vt, pti, node.id_);
           if (!node_tags.empty()) {
             // Store node_tags for this node.
             std::unique_lock<std::mutex> l(mut);
@@ -172,8 +170,8 @@ void ConsumeNodeBlob(const OSMTagHelper& tagh,
 
 WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
                                const std::vector<ParsedTag>& ptags) {
-  constexpr KeySet selector_bits = KeySet({
-      KEY_BIT_MAXSPEED, KEY_BIT_ZONE, KEY_BIT_TRAFFIC, KEY_BIT_MOTORROAD});
+  constexpr KeySet selector_bits = KeySet(
+      {KEY_BIT_MAXSPEED, KEY_BIT_ZONE, KEY_BIT_TRAFFIC, KEY_BIT_MOTORROAD});
   constexpr KeySet modifier_bits =
       KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_BOTH_WAYS});
 
@@ -492,8 +490,15 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   ra_backw.dir = IsDirBackward(direction);
   CarRoadSurface(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
 
-  // Set access.
-  CarAccess(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
+  {
+    // Set access.
+    const AccessPerDirection apd =
+        CarAccess(tagh, wc.way.id, wc.pti.tags(),
+                  {.acc_forw = ra_forw.access, .acc_backw = ra_backw.access});
+    ra_forw.access = apd.acc_forw;
+    ra_backw.access = apd.acc_backw;
+  }
+
   bool acc_forw = RoutableAccess(ra_forw.access);
   bool acc_backw = RoutableAccess(ra_backw.access);
   if ((!IsDirForward(direction) || !acc_forw) &&
@@ -538,8 +543,15 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
   ra_forw.dir = IsDirForward(direction);
   ra_backw.dir = IsDirBackward(direction);
 
-  // Set access.
-  BicycleAccess(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
+  {
+    // Set access.
+    const AccessPerDirection apd = BicycleAccess(
+        tagh, wc.way.id, wc.pti.tags(),
+        {.acc_forw = ra_forw.access, .acc_backw = ra_backw.access});
+    ra_forw.access = apd.acc_forw;
+    ra_backw.access = apd.acc_backw;
+  }
+
   bool acc_forw = RoutableAccess(ra_forw.access);
   bool acc_backw = RoutableAccess(ra_backw.access);
   if ((!IsDirForward(direction) || !acc_forw) &&
@@ -631,19 +643,18 @@ std::pair<bool, bool> GetPriorityRoadSetting(
     const OSMTagHelper& tagh, const std::vector<ParsedTag>& ptags) {
   bool p_forward = false;
   bool p_backward = false;
-  static const std::string_view yes_prio[] = {"designated", "yes",
-                                              "yes_unposted"};
+  // static const std::string_view yes_prio[] = {"designated", "yes",
+  //                                             "yes_unposted"};
 
   for (const ParsedTag& pt : ptags) {
     if (pt.bits.test(KEY_BIT_PRIORITY_ROAD)) {
-      bool prio = SpanContains(yes_prio, tagh.ToString(pt.val_st_idx));
+      bool prio = StrSpanContains(tagh.ToString(pt.val_st_idx),
+                                  {"designated", "yes", "yes_unposted"});
       if (pt.bits == KeySet({KEY_BIT_PRIORITY_ROAD})) {
         p_forward = p_backward = prio;
-      } else if (pt.bits ==
-                 KeySet({KEY_BIT_PRIORITY_ROAD, KEY_BIT_FORWARD})) {
+      } else if (pt.bits == KeySet({KEY_BIT_PRIORITY_ROAD, KEY_BIT_FORWARD})) {
         p_forward = prio;
-      } else if (pt.bits ==
-                 KeySet({KEY_BIT_PRIORITY_ROAD, KEY_BIT_BACKWARD})) {
+      } else if (pt.bits == KeySet({KEY_BIT_PRIORITY_ROAD, KEY_BIT_BACKWARD})) {
         p_backward = prio;
       }
     }
@@ -850,7 +861,7 @@ void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
 // Read the ways that might useful for routing, remember the nodes ids touched
 // by these ways, then read the node coordinates and store them in
 // 'node_table'.
-void LoadNodeCoordsAndAttrributes(OsmPbfReader* reader,
+void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
                                   DataBlockTable* node_table,
                                   GraphMetaData* meta) {
   FUNC_TIMER();
@@ -866,11 +877,11 @@ void LoadNodeCoordsAndAttrributes(OsmPbfReader* reader,
   // Read all the node coordinates for nodes in 'touched_nodes_ids'.
   reader->ReadBlobs(
       OsmPbfReader::ContentNodes,
-      [&touched_nodes_ids, node_table, meta](
+      [vt, &touched_nodes_ids, node_table, meta](
           const OSMTagHelper& tagh, const OSMPBF::PrimitiveBlock& prim_block,
           int thread_idx, std::mutex& mut) {
-        ConsumeNodeBlob(tagh, prim_block, mut, touched_nodes_ids, node_table,
-                        meta);
+        ConsumeNodeBlob(vt, tagh, prim_block, mut, touched_nodes_ids,
+                        node_table, meta);
       });
   // Make node table searchable, so we can look up lat/lon by node_id.
   node_table->Sort();
@@ -936,6 +947,7 @@ void AllocateGNodes(GraphMetaData* meta) {
       n.dead_end = 0;
       n.ncc = INVALID_NCC;
       n.simple_turn_restriction_via_node = 0;
+      n.is_pedestrian_crossing = 0;
       n.lat = node->lat;
       n.lon = node->lon;
       meta->graph.nodes.push_back(n);
@@ -1653,22 +1665,63 @@ inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
   }
 }
 
-// Label the current edge and the edge at trhe next crossing according to some
+void MarkCrossingNodes(GraphMetaData* meta) {
+  FUNC_TIMER();
+  const Graph& g = meta->graph;
+
+  const size_t unit_length = 20000;
+  ThreadPool pool;
+  for (size_t start_pos = 0; start_pos < meta->graph.node_tags_sorted.size();
+       start_pos += unit_length) {
+    pool.AddWork([meta, &g, start_pos, unit_length](int thread_idx) {
+      const size_t stop_pos = std::min(start_pos + unit_length,
+                                       meta->graph.node_tags_sorted.size());
+      for (size_t idx = start_pos; idx < stop_pos; ++idx) {
+        const NodeTags& nt = meta->graph.node_tags_sorted.at(idx);
+        if (nt.bit_crossing) {
+          uint32_t node_idx = g.FindNodeIndex(nt.node_id);
+          if (node_idx < g.nodes.size()) {
+            meta->graph.nodes.at(node_idx).is_pedestrian_crossing = 1;
+          }
+        }
+      }
+    });
+  }
+  pool.Start(meta->opt.n_threads);
+  pool.WaitAllFinished();
+}
+
+// Label the current edge and the edge at the next crossing according to some
 // node tags. Note that at least on of nt.bit_traffic_signals, nt.bit_stop,
 // nt.bit_give_way has to be true.
 inline void LabelEdgeAndNextCrossing(Graph& g, const NodeTags& nt, FullEdge fe,
                                      FullEdge crossing_fe) {
   CHECK_S(fe.valid());
   if (nt.bit_traffic_signals) {
-    fe.gedge(g).traffic_signal = 1;
-    if (crossing_fe.valid()) {
+    if (!crossing_fe.valid()) {  // We didn't find a crossing.
+      fe.gedge(g).traffic_signal = 1;
+    } else if (fe == crossing_fe) {  // Signal is directly on crossing node.
+      if (crossing_fe.gedge(g).road_priority != GEdge::PRIO_SIGNALS) {
+        // The signal was not found farther away, so put it.
+        fe.gedge(g).traffic_signal = 1;
+        crossing_fe.gedge(g).road_priority = GEdge::PRIO_SIGNALS;
+      }
+    } else {
+      // Start and crossing edges differ, signal not directly at crossing.
+      fe.gedge(g).traffic_signal = 1;
       crossing_fe.gedge(g).road_priority = GEdge::PRIO_SIGNALS;
+      // Delete the signal flag that might be directly at crossing, it is
+      // replaced by the signal father away.
+      crossing_fe.gedge(g).traffic_signal = 0;
     }
   } else if (nt.bit_stop || nt.bit_give_way) {
     if (nt.bit_stop) {
       fe.gedge(g).stop_sign = 1;
     }
-    if (crossing_fe.valid()) {
+    if (crossing_fe.valid() &&
+        crossing_fe.gedge(g).road_priority != GEdge::PRIO_SIGNALS) {
+      // Set priority of edge arriving at crossing, but only if is not
+      // controlled by a traffic signal.
       crossing_fe.gedge(g).road_priority = GEdge::PRIO_LOW;
     }
   } else {
@@ -1676,21 +1729,17 @@ inline void LabelEdgeAndNextCrossing(Graph& g, const NodeTags& nt, FullEdge fe,
   }
 }
 
-// Some nodes are marked as "stop" or "give_way". They often come with a
-// direction in the tags, but sometimes the direction has to be inferred by
-// looking at the direction of the road or by finding the closest crossing.
+// Some nodes are tagged as "traffic_signals", "stop" or "give_way". They often
+// come with a direction in the tags, but sometimes the direction has to be
+// inferred by looking at the direction of the road or by finding the closest
+// crossing.
 //
-// For both tags we try to find the next crossing and mark the edge arriving at
-// the crossing as low priority (GEdge::LOW_PRIO).
+// For these tags we try to find the next crossing and mark the edge arriving
+// at the crossing as high-signal, high or low priority, depending on the tag.
 //
-// For "stop", we additionally label the edge leading to the node marked as
-// "stop", because this costs some time.
-//
-// TODO
-//   * https://wiki.openstreetmap.org/wiki/Tag:highway%3Dstop#Direction
-//   * Also handle give_way:
-//   * https://wiki.openstreetmap.org/wiki/Tag:highway%3Dgive_way
-void LabelStopEdges(GraphMetaData* meta) {
+// For "traffic_signals" and "stop", we additionally label the edge leading to
+// the node, because this will add some time to the turn costs.
+void LabelEdgesFromNodeTags(GraphMetaData* meta) {
   FUNC_TIMER();
   const Graph& g = meta->graph;
   const VEHICLE vt = VH_MOTORCAR;  // TODO: shouldn't be defined here.
@@ -1709,10 +1758,12 @@ void LabelStopEdges(GraphMetaData* meta) {
 
     if (nt.bit_stop || nt.bit_give_way || nt.bit_traffic_signals) {
       if (nt.direction == DIR_BOTH || nt.direction == DIR_MAX) {
+        // ======================================
         // Missing direction or direction "both".
+        // ======================================
         if (in_edges.size() == 1) {
-          // We have only one incoming edge, so the direction is given. This is
-          // probably a one way road. Label the edge.
+          // We have only one incoming edge, so the direction is given. This
+          // is probably a one way road. Label the edge.
           const FullEdge cr = FollowEdgeToCrossing(g, vt, in_edges.front());
           LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.front(), cr);
           LOG_S(INFO) << absl::StrFormat(
@@ -1734,7 +1785,8 @@ void LabelStopEdges(GraphMetaData* meta) {
             LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.at(0), {});
             LabelEdgeAndNextCrossing(meta->graph, nt, in_edges.at(1), {});
             LOG_S(INFO) << absl::StrFormat(
-                "Assume both ways direction for 2-stop-edges at crossing %lld",
+                "Assume both ways direction for 2-stop-edges at crossing "
+                "%lld",
                 GetGNodeIdSafe(g, node_idx));
 
           } else {
@@ -1785,7 +1837,9 @@ void LabelStopEdges(GraphMetaData* meta) {
           }
         }
       } else {
+        // ================
         // Valid direction.
+        // ================
         const bool contra_way = (nt.direction == DIR_BACKWARD);
         if (in_edges.size() == 1) {
           // Check that the direction is correct.
@@ -1849,9 +1903,8 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
     for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
       GEdge& e = g.edges.at(from_node.edges_start_pos + off);
       // Compute the turn costs for the target node of 'fe'.
-      TurnCostData tcd = ComputeTurnCostsForEdge(
-          g, meta->opt.vehicle_types.front(), indexed_trs, {from_idx, off});
-      // {.start_idx = from_idx, .offset = off});
+      TurnCostData tcd = ComputeTurnCostsForEdge(g, meta->opt.vt, indexed_trs,
+                                                 {from_idx, off});
       e.turn_cost_idx = deduper.Add(tcd);
     }
   }
@@ -1909,7 +1962,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     pool.WaitAllFinished();
   }
 
-  LoadNodeCoordsAndAttrributes(&reader, meta.node_table.get(), &meta);
+  LoadNodeCoordsAndAttrributes(opt.vt, &reader, meta.node_table.get(), &meta);
   LoadGWays(&reader, &meta);
   SortGWays(&meta);
   MarkNodesWithAttributesAsNeeded(&meta);
@@ -1938,7 +1991,8 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
   MarkUTurnAllowedEdges_Obsolete(&(meta.graph));
 
-  LabelStopEdges(&meta);
+  MarkCrossingNodes(&meta);
+  LabelEdgesFromNodeTags(&meta);
   ComputeAllTurnCosts(&meta);
 
   ClusterGraph(meta.opt, &meta);

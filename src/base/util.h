@@ -103,8 +103,8 @@ inline bool ConsumePrefixIf(std::string_view prefix, std::string_view* str) {
   return true;
 }
 
-template <typename ContainerT, typename T>
-bool SpanContains(const ContainerT& container, const T& search) {
+template <typename T, typename ContainerT>
+bool SpanContains(const T& search, const ContainerT& container) {
   for (const auto& x : container) {
     if (x == search) {
       return true;
@@ -113,9 +113,9 @@ bool SpanContains(const ContainerT& container, const T& search) {
   return false;
 }
 
-inline bool StrSpanContains(const std::vector<std::string_view>& v,
-                            std::string_view search) {
-  return SpanContains(v, search);
+inline bool StrSpanContains(std::string_view search,
+                            const std::vector<std::string_view>& v) {
+  return SpanContains(search, v);
 }
 
 // Add space characters to the right or the left of a string to make it 'width'

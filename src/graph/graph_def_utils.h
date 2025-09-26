@@ -106,13 +106,25 @@ inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
   FullEdge curr = start;
   while (dist_cm <= max_distance_cm) {
     uint32_t target_idx = curr.target_idx(g);
+    const GNode& target = g.nodes.at(target_idx);
+
+#if 0
+    // TODO: Should use this for some street types (depending on type of
+    // start.way?).
+    if (target.is_pedestrian_crossing) {
+      // Marked as crossing with node tags. For instance a street crossing a
+      // footway, one of which might be missing.
+      return curr;
+    }
+#endif
+
     const uint32_t num_unique =
         gnode_num_unique_edges(g, target_idx, /*ignore_loops=*/true);
     // 'num_unique' counts the nodes connected to 'target_idx' by edges with
     // arbitrary direction.
     if (num_unique < 2) {
       // Should be one, because otherwise we wouldn't have gotten here.
-      CHECK_EQ_S(num_unique, 1) << curr.target_node(g).node_id;
+      CHECK_EQ_S(num_unique, 1) << target.node_id;
       // Seems to be the end of a street.
       break;
     }
@@ -139,7 +151,7 @@ inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
     // No crossing, but we can't continue.
     LOG_S(INFO) << absl::StrFormat(
         "No crossing but can't continue. edge %lld -> %lld",
-        curr.start_node(g).node_id, curr.target_node(g).node_id);
+        curr.start_node(g).node_id, target.node_id);
     break;
   }
 

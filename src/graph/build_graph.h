@@ -21,10 +21,10 @@
 namespace build_graph {
 
 struct BuildGraphOptions {
-  // Support the following vehicle types. Possible values are {VH_MOTORCAR,
-  // VH_BICYCLE, VH_FOOT}. Note that currently only cars and partially bicycle
-  // are supported.
-  std::vector<VEHICLE> vehicle_types = {VH_MOTORCAR};
+  // When building the graph, Support the following vehicle type.
+  // Possible values are VH_MOTORCAR, VH_BICYCLE, VH_FOOT.
+  // Note that currently only cars and partially bicycle are supported.
+  VEHICLE vt = VH_MOTORCAR;
   // Path to input OSM pbf file. Must not be empty.
   std::string pbf;
   // File pattern for admin files (country polygons).
@@ -285,7 +285,7 @@ void ConsumeWayStoreSeenNodesWorker(const OSMTagHelper& tagh,
                                     HugeBitset* node_ids,
                                     BuildGraphStats* stats);
 
-void ConsumeNodeBlob(const OSMTagHelper& tagh,
+void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
                      const OSMPBF::PrimitiveBlock& prim_block, std::mutex& mut,
                      const HugeBitset& touched_nodes_ids,
                      DataBlockTable* node_table);

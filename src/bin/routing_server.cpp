@@ -348,6 +348,14 @@ int main(int argc, char* argv[]) {
   // Read Road Network.
   build_graph::BuildGraphOptions opt = {.pbf = pbf, .n_threads = n_threads};
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
+  // Release memory.
+  meta.tiler.reset();
+  meta.per_country_config.reset();
+  meta.node_table.reset();
+  meta.way_nodes_seen.reset();
+  meta.way_nodes_needed.reset();
+  meta.graph.node_tags_sorted.clear();
+
   const Graph& g = meta.graph;
   std::vector<uint32_t> sorted_node_indexes = SortNodeIndexesByLon(g);
   // Remove all nodes that aren't in a large component.

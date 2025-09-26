@@ -160,26 +160,29 @@ enum VEHICLE : uint8_t {
   VH_PSV = 6,
   VH_BUS = 7,
   VH_HGV = 8,
-  VH_MAX = 9,
-  // COACH?
-  // HAZMAT?
-  // TAXI?
-  // AGRICULTURAL?
-  // FORESTRY?
+  VH_TRUCK = 9,
+  VH_AGRICULTURAL = 10,
+  VH_EMERGENCY = 11,
+  VH_MAX = 12,
 };
 
 namespace {
 std::vector<std::string_view> VehicleStringVector() {
   std::vector<std::string_view> v((size_t)VH_MAX);
+  // Standard vehicle types.
   v[(size_t)VH_MOTORCAR] = "motorcar";
   v[(size_t)VH_BICYCLE] = "bicycle";
   v[(size_t)VH_FOOT] = "foot";
+  // Special (currently unsupported) vehicles types.
   v[(size_t)VH_MOPED] = "moped";
   v[(size_t)VH_HORSE] = "horse";
   v[(size_t)VH_MOTORCYCLE] = "motorcycle";
   v[(size_t)VH_PSV] = "psv";
   v[(size_t)VH_BUS] = "bus";
   v[(size_t)VH_HGV] = "hgv";
+  v[(size_t)VH_TRUCK] = "truck";
+  v[(size_t)VH_AGRICULTURAL] = "agricultural";
+  v[(size_t)VH_EMERGENCY] = "emergency";
   return v;
 }
 }  // namespace
@@ -529,6 +532,145 @@ inline TRACKTYPE TracktypeToEnum(std::string_view tracktype_str) {
     }
   }
   return TRACKTYPE_MAX;
+}
+
+enum BARRIER : uint16_t {
+  BARRIER_BLOCK = 0,
+  BARRIER_BOLLARD,
+  BARRIER_BORDER_CONTROL,
+  BARRIER_BUMP_GATE,
+  BARRIER_BUS_TRAP,
+  BARRIER_CATTLE_GRID,
+  BARRIER_CHAIN,
+  BARRIER_CHECKPOINT,
+  BARRIER_CITY_WALL,
+  BARRIER_COUPURE,
+  BARRIER_CYCLE_BARRIER,
+  BARRIER_DEBRIS,
+  BARRIER_DITCH,
+  BARRIER_ENTRANCE,
+  BARRIER_FENCE,
+  BARRIER_FULL_HEIGHT_TURNSTILE,
+  BARRIER_GATE,
+  BARRIER_HEDGE,
+  BARRIER_HEIGHT_RESTRICTOR,
+  BARRIER_HORSE_STILE,
+  BARRIER_KERB,
+  BARRIER_KISSING_GATE,
+  BARRIER_LIFT_GATE,
+  BARRIER_LOG,
+  BARRIER_MOTORCYCLE_BARRIER,
+  BARRIER_ROPE,
+  BARRIER_SALLY_PORT,
+  BARRIER_SLIPWAY,
+  BARRIER_SPIKES,
+  BARRIER_STILE,
+  BARRIER_STONE,
+  BARRIER_SUMP_BUSTER,
+  BARRIER_SWING_GATE,
+  BARRIER_TANK_TRAP,
+  BARRIER_TOLL_BOOTH,
+  BARRIER_TURNSTILE,
+  BARRIER_WALL,
+  BARRIER_WIDTH_RESTRICTOR,
+  BARRIER_WIRE_FENCE,
+  BARRIER_YES,
+  BARRIER_UNKNOWN_VAL,
+  BARRIER_MAX,
+};
+
+struct BarrierDef {
+  BARRIER enum_val;
+  std::string_view name;
+  std::string_view allowed_vehicles;
+};
+
+static const std::vector<BarrierDef> g_barrier_def_vector = {
+    {BARRIER_BLOCK, "block", ""},
+    {BARRIER_BOLLARD, "bollard", "foot,bicycle,motorcycle"},
+    {BARRIER_BORDER_CONTROL, "border_control",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_BUMP_GATE, "bump_gate",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_BUS_TRAP, "bus_trap", "bus,truck,hgv"},
+    {BARRIER_CATTLE_GRID, "cattle_grid",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_CHAIN, "chain", "foot,bicycle,motorcycle"},
+    {BARRIER_CHECKPOINT, "checkpoint",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_CITY_WALL, "city_wall", ""},  // Stadtmauer
+    {BARRIER_COUPURE, "coupure",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},  // Öffnung in einem Deich.
+    {BARRIER_CYCLE_BARRIER, "cycle_barrier", "foot,bicycle"},
+    {BARRIER_DEBRIS, "debris", ""},
+    {BARRIER_DITCH, "ditch",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_ENTRANCE, "entrance",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_FENCE, "fence", ""},
+    {BARRIER_FULL_HEIGHT_TURNSTILE, "full-height_turnstile", "foot"},
+    {BARRIER_GATE, "gate",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_HEDGE, "hedge", ""},
+    {BARRIER_HEIGHT_RESTRICTOR, "height_restrictor",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency"},
+    {BARRIER_HORSE_STILE, "horse_stile", "horse,foot"},
+    {BARRIER_KERB, "kerb", "foot,bicycle,wheelchair"},
+    {BARRIER_KISSING_GATE, "kissing_gate", "foot,bicycle,horse"},
+    {BARRIER_LIFT_GATE, "lift_gate",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_LOG, "log", "foot,bicycle,4wd"},  // Baumstamm als Barriere
+    {BARRIER_MOTORCYCLE_BARRIER, "motorcycle_barrier",
+     "foot,bicycle"},  // Motorräder werden blockiert
+    {BARRIER_ROPE, "rope", "foot,bicycle"},
+    {BARRIER_SALLY_PORT, "sally_port", "military"},
+    {BARRIER_SLIPWAY, "slipway", "foot,bicycle,boat"},  // Slipanlage für Boote
+    {BARRIER_SPIKES, "spikes", "foot"},  // für Fußgänger, blockiert Räder
+    {BARRIER_STILE, "stile", "foot"},
+    {BARRIER_STONE, "stone", ""},  // Steine als Barriere
+    {BARRIER_SUMP_BUSTER, "sump_buster", "4wd"},
+    {BARRIER_SWING_GATE, "swing_gate",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_TANK_TRAP, "tank_trap",
+     ""},  // für Panzer, normalerweise für alle blockierend
+    {BARRIER_TOLL_BOOTH, "toll_booth",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_TURNSTILE, "turnstile", "foot"},
+    {BARRIER_WALL, "wall", ""},
+    {BARRIER_WIDTH_RESTRICTOR, "width_restrictor",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency"},
+    {BARRIER_WIRE_FENCE, "wire_fence", ""},  // Stacheldrahtzaun
+    {BARRIER_YES, "yes",
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
+     "emergency"},
+    {BARRIER_UNKNOWN_VAL, "<non-empty-unknown>", ""}  // Can't interpret value.
+};
+
+inline std::string_view BarrierToString(BARRIER bt) {
+  return VECTOR_AT(g_barrier_def_vector, (size_t)bt).name;
+}
+
+inline BARRIER BarrierToEnum(std::string_view barrier_str) {
+  if (barrier_str.empty()) {
+    return BARRIER_MAX;
+  }
+  for (BARRIER bt = (BARRIER)0; bt < BARRIER_MAX; bt = (BARRIER)(bt + 1)) {
+    if (barrier_str == BarrierToString(bt)) {
+      return bt;
+    }
+  }
+  return BARRIER_UNKNOWN_VAL;
 }
 
 constexpr uint16_t INFINITE_MAXSPEED = 1023;  // 2^10 - 1

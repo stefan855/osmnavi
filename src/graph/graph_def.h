@@ -38,18 +38,23 @@ struct TurnCostData {
 struct NodeTags {
   int64_t node_id : 40 = 0;
 
-  // "direction=" from the node. DIR_MAX if the tag does not occur.
   DIRECTION direction : 2 = DIR_MAX;
+
+  // Nodes with highway=crossing.
+  std::uint32_t bit_crossing : 1 = 0;
+  // Given bit_crossing, what do we know about markings and traffic lights?
+  std::uint32_t bit_crossing_markings : 1 = 0;
+  std::uint32_t bit_crossing_traffic_signals : 1 = 0;
+
+  // "direction=" from the node. DIR_MAX if the tag does not occur.
   std::uint32_t bit_give_way : 1 = 0;
   std::uint32_t bit_turning_circle : 1 = 0;
-  // TODO: Direction of the stop.
   std::uint32_t stop_all : 1 = 0;
   std::uint32_t bit_stop : 1 = 0;
-  // TODO: Direction of the signal.
   std::uint32_t bit_traffic_signals : 1 = 0;
-  std::uint32_t bit_crossing : 1 = 0;
+
   // Railway crossings are reported for each track that is crossed, for instance
-  // see https://www.openstreetmap.org/way/541407035. This causes issues when
+  // see https://www.openstreetmap.org/way/541407035 . This causes issues when
   // the street passes multiple railway tracks between two barriers, because the
   // naive approach would count each barrier individually. To handle multiple
   // nodes following each other, we do the following:
@@ -59,18 +64,23 @@ struct NodeTags {
   //   ending at a railway crossing, does not get costs for the new crossings
   std::uint32_t bit_railway_crossing : 1 = 0;
   std::uint32_t bit_railway_crossing_barrier : 1 = 0;
+
   std::uint32_t bit_public_transport : 1 = 0;
   std::uint32_t bit_traffic_calming : 1 = 0;
 
   // Access for each individual vehicle type for barriers.
-  std::uint32_t has_barrier : 1 = 0;
-  ACCESS vh_acc[VH_MAX];
+  BARRIER barrier_type : 6 = BARRIER_MAX;
+  std::uint32_t has_access_restriction : 1 = 0;
+  ACCESS acc_forw = ACC_YES;
+  ACCESS acc_backw = ACC_YES;
 
   constexpr bool empty() const {
-    return node_id == 0 && !bit_give_way && !bit_turning_circle && !bit_stop &&
-           !bit_traffic_signals && !bit_crossing && !bit_railway_crossing &&
-           !bit_railway_crossing_barrier && !bit_public_transport &&
-           !bit_traffic_calming && !has_barrier;
+    return node_id == 0 && !bit_crossing && !bit_crossing_markings &&
+           !bit_crossing_traffic_signals && !bit_give_way &&
+           !bit_turning_circle && !bit_stop && !bit_traffic_signals &&
+           !bit_railway_crossing && !bit_railway_crossing_barrier &&
+           !bit_public_transport && !bit_traffic_calming &&
+           (barrier_type == BARRIER_MAX) && !has_access_restriction;
   }
 };
 
@@ -198,6 +208,9 @@ struct GNode {
 
   // True iff the node is the via node in a simple turn restriction.
   std::uint32_t simple_turn_restriction_via_node : 1;
+
+  // True if there is a node tag entry with bit_crossing set.
+  std::uint32_t is_pedestrian_crossing : 1;
 
   std::int32_t lat = 0;
   std::int32_t lon = 0;

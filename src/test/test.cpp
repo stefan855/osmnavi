@@ -362,11 +362,11 @@ void TestCarMaxspeed() {
 namespace {
 void CheckCarAccess(ACCESS dflt, std::string_view tag_string,
                     ACCESS exp_access_forw, ACCESS exp_access_backw) {
-  RoutingAttrs forw = {.access = dflt}, backw = {.access = dflt};
   OsmWayWrapper w = FillWayData(tag_string);
-  CarAccess(*w.tagh, /*way_id=*/1, w.ptags, &forw, &backw);
-  CHECK_EQ_S(forw.access, exp_access_forw) << tag_string;
-  CHECK_EQ_S(backw.access, exp_access_backw) << tag_string;
+  AccessPerDirection apd = CarAccess(*w.tagh, /*way_id=*/1, w.ptags,
+                                     {.acc_forw = dflt, .acc_backw = dflt});
+  CHECK_EQ_S(apd.acc_forw, exp_access_forw) << tag_string;
+  CHECK_EQ_S(apd.acc_backw, exp_access_backw) << tag_string;
 }
 }  // namespace
 

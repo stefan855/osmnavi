@@ -10,138 +10,132 @@
 #include "osm/osm_helpers.h"
 
 namespace {
-struct NodeTagExtract {
-  ACCESS access = ACC_MAX;
-  ACCESS motor_vehicle_access = ACC_MAX;
-  bool stop_all = false;  // "stop=all".
-  DIRECTION direction = DIR_MAX;
 
-  std::string_view barrier;
-  std::string_view locked;
-  std::string_view highway;
-  std::string_view crossing;
-  std::string_view crossing_barrier;
-  std::string_view public_transport;
-  std::string_view traffic_calming;
-  std::string_view railway;
-};
-
-NodeTagExtract ExtractNodeTags(
-    const OSMTagHelper& tagh, int64_t node_id,
-    const google::protobuf::RepeatedField<int>& keys_vals, int kv_start,
-    int kv_stop) {
-  NodeTagExtract ex;
-  for (int i = kv_start; i < kv_stop; i += 2) {
-    const std::string_view key = tagh.ToString(keys_vals.at(i));
-    const std::string_view val = tagh.ToString(keys_vals.at(i + 1));
-    if (key == "access") {
-      ex.access = AccessToEnum(val);
-      if (ex.access == ACC_MAX) {
-        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld", val,
-                                       node_id);
-      }
-    } else if (key == "motor_vehicle") {
-      ex.motor_vehicle_access = AccessToEnum(val);
-      if (ex.motor_vehicle_access == ACC_MAX) {
-        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld", val,
-                                       node_id);
-      }
-    } else if (key == "barrier") {
-      ex.barrier = val;
-    } else if (key == "locked") {
-      ex.locked = val;
-    } else if (key == "highway") {
-      ex.highway = val;
-    } else if (key == "direction" || key == "traffic_sign:direction" ||
-               key == "traffic_signals:direction") {
-      ex.direction = DirectionToEnum(val);
-      // key == "traffic_sign:forward":
-      // Not handling these kind of tags, often co-occurs with other flags that
-      // have enough information.
-    } else if (key == "crossing") {
-      ex.crossing = val;
-    } else if (key == "crossing:barrier") {
-      ex.crossing_barrier = val;
-    } else if (key == "public_transport") {
-      ex.public_transport = val;
-    } else if (key == "traffic_calming") {
-      ex.traffic_calming = val;
-    } else if (key == "railway") {
-      ex.railway = val;
-    } else if (key == "stop") {
-      ex.stop_all = (val == "all");
-    }
+// Handle crossings of footways with streets.
+//   highway=crossing
+//   crossing=*
+//   crossing:signals=*
+//   crossing:markings=*
+//   See https://wiki.openstreetmap.org/wiki/Tag:highway=crossing
+void SetCrossingBits(const ParsedTagInfo& pti, int64_t node_id, NodeTags* nt) {
+  if (pti.FindValue({KEY_BIT_HIGHWAY}) != "crossing") {
+    return;
   }
-  return ex;
-}
+  nt->bit_crossing = 1;
 
-void SetNodeTagBits(const NodeTagExtract& ex, NodeTags* a) {
-  a->direction = ex.direction;
-
-  if (ex.highway == "turning_circle") {
-    a->bit_turning_circle = 1;
-  }
-
-  if (ex.highway == "stop") {
-    a->bit_stop = 1;
-    a->stop_all = ex.stop_all;
-  }
-
-  if (ex.highway == "give_way") {
-    a->bit_give_way = 1;
-  }
-
-  // Cars. The marker
-  if (ex.highway == "traffic_signals") {
-    a->bit_traffic_signals = 1;
-  }
-
-  // Pedstrians/bikes: Node in the middle of the crossing that is part of the
-  // way for pedestrians/bikes over the street.
-  if (ex.highway == "crossing") {
-    a->bit_crossing = 1;
-    if (ex.crossing == "traffic_signals") {
-      a->bit_traffic_signals = 1;
+  // Handle "crossing=*"
+  std::string_view val = pti.FindValue({KEY_BIT_CROSSING});
+  if (!val.empty()) {
+    if (val == "traffic_signals") {
+      // Crossing with traffic lights.
+      nt->bit_crossing_traffic_signals = 1;
+    } else if (val == "uncontrolled") {
+      // Crossing with markings, without traffic lights.
+      nt->bit_crossing_traffic_signals = 0;
+      nt->bit_crossing_markings = 1;
+    } else if (val == "marked" || val == "zebra") {
+      // Crossing with markings, maybe with traffic lights.
+      nt->bit_crossing_markings = 1;
     }
   }
 
-  if (StrSpanContains({"crossing", "level_crossing", "tram_crossing",
-                       "tram_level_crossing"},
-                      ex.railway)) {
-    a->bit_railway_crossing = 1;
-    a->bit_railway_crossing_barrier = StrSpanContains(
-        {"yes", "full", "half", "double_half", "gate", "chain", "gates"},
-        ex.crossing_barrier);
+  // Handle "crossing:signals=*"
+  val = pti.FindValue({KEY_BIT_CROSSING, KEY_BIT_SIGNALS});
+  if (!val.empty()) {
+    if (val == "yes") {
+      nt->bit_crossing_traffic_signals = 1;
+    } else if (val == "no") {
+      nt->bit_crossing_traffic_signals = 0;
+    }
   }
 
-  if (ex.public_transport == "stop_position" ||
-      ex.public_transport == "platform" || ex.public_transport == "station") {
-    a->bit_public_transport = 1;
-  }
-
-  if (!ex.traffic_calming.empty() && ex.traffic_calming != "no") {
-    a->bit_traffic_calming = 1;
+  // Handle "crossing:markings=*"
+  val = pti.FindValue({KEY_BIT_CROSSING, KEY_BIT_MARKINGS});
+  if (!val.empty()) {
+    if (val == "no") {
+      nt->bit_crossing_markings = 0;
+    } else {
+      nt->bit_crossing_markings = 1;
+    }
   }
 }
 
-// Assign the allowed vehicle types for a barrier. For instance, a turnstile
-// only allows pedestrians.
-inline void SetBarrierToVehicle(
-    const OSMTagHelper& tagh, int64_t node_id,
-    const google::protobuf::RepeatedField<int>& keys_vals, int kv_start,
-    int kv_stop, const NodeTagExtract& ex, NodeTags* node_tags) {
-  // For barriers, we apply access tags in the following order:
-  //   1) "barrier=" type sets the default.
-  //   2) "access=" overrides everything that barrier type might have set.
-  //   3) "motor_vehicle=" sets access for all motorized traffic.
-  //   4) "bicycle=", "foot=", "horse=" etc. set access for individual vehicle
-  //      types.
+void SetNodeTagBits(VEHICLE vt, const ParsedTagInfo& pti, int64_t node_id,
+                    NodeTags* nt) {
+  // Handle
+  //   direction
+  //   traffic_sign:direction
+  //   traffic_signals:direction
+  std::string_view val;
+  val = pti.FindValue({KEY_BIT_DIRECTION});
+  if (!val.empty()) {
+    nt->direction = DirectionToEnum(val);
+  }
+  val = pti.FindValue({KEY_BIT_TRAFFIC_SIGN, KEY_BIT_DIRECTION});
+  if (!val.empty()) {
+    nt->direction = DirectionToEnum(val);
+  }
+  val = pti.FindValue({KEY_BIT_TRAFFIC_SIGNALS, KEY_BIT_DIRECTION});
+  if (!val.empty()) {
+    nt->direction = DirectionToEnum(val);
+  }
 
+  // Handle
+  //   highway=turning_circle
+  //   highway=stop and stop=all
+  //   highway=give_way
+  //   highway=traffic_signals
+  val = pti.FindValue({KEY_BIT_HIGHWAY});
+  if (val == "turning_circle") {
+    nt->bit_turning_circle = 1;
+  }
+
+  if (val == "stop") {
+    nt->bit_stop = 1;
+    nt->stop_all = pti.FindValue({KEY_BIT_STOP}) == "all";
+  }
+
+  if (val == "give_way") {
+    nt->bit_give_way = 1;
+  }
+
+  if (val == "traffic_signals") {
+    nt->bit_traffic_signals = 1;
+  }
+
+  // Handle railway=*
+  // crossing/tram_crossing: footway crossing tram/railway
+  // level_crossing/tram_level_crossing: street crossing tram/railway.
+  if (StrSpanContains(pti.FindValue({KEY_BIT_RAILWAY}),
+                      {"crossing", "tram_crossing", "level_crossing",
+                       "tram_level_crossing"})) {
+    nt->bit_railway_crossing = 1;
+    nt->bit_railway_crossing_barrier = StrSpanContains(
+        pti.FindValue({KEY_BIT_CROSSING, KEY_BIT_BARRIER}),
+        {"yes", "full", "half", "double_half", "gate", "chain", "gates"});
+  }
+
+  // Handle public_transport=*
+  val = pti.FindValue({KEY_BIT_PUBLIC_TRANSPORT});
+  if (val == "stop_position" || val == "platform" || val == "station") {
+    nt->bit_public_transport = 1;
+  }
+
+  // Handle traffic_calming=*
+  val = pti.FindValue({KEY_BIT_TRAFFIC_CALMING});
+  if (!val.empty() && val != "no") {
+    nt->bit_traffic_calming = 1;
+  }
+}
+
+#if 0
+// Get per-vehicle acccess for barrier of type 'barrier'.
+bool GetBarrierAccess(const ParsedTagInfo& pti, int64_t node_id,
+                      ACCESS vh_acc[VH_MAX]) {
   /*
   These tags are assumed to block passage through the node for all vehicle
   types. Since this is the default also for unknown barrier types, the list
   isn't actually needed.
-
   static const std::string_view full_blocks[] = {
       "debris",    "chain",        "barrier_board", "jersey_barrier",
       "log",       "rope",         "yes",           "hampshire_gate",
@@ -149,120 +143,125 @@ inline void SetBarrierToVehicle(
       "wedge",     "wicket_gate",
   };
   */
-  // Barrier types that don't block passage for any vehicle by default.
+
   static const std::string_view no_blocks[] = {
       "border_control", "bump_gate", "cattle_grid", "coupure",
       "entrance",       "lift_gate", "sally_port",  "toll_booth"};
 
-  auto& vh_acc = node_tags->vh_acc;
-  if (ex.access != ACC_MAX) {
-    // The barrier type doesn't matter, use access.
-    std::fill_n(vh_acc, VH_MAX, ex.access);
+  std::string_view barrier = pti.FindValue({KEY_BIT_BARRIER});
+  if (barrier.empty()) {
+    return false;
+  }
+  std::fill_n(vh_acc, VH_MAX, ACC_NO);
+  if (barrier == "stile" || barrier == "turnstile" ||
+      barrier == "full-height_turnstile" || barrier == "kerb" ||
+      barrier == "kissing_gate" || barrier == "log") {
+    vh_acc[VH_FOOT] = ACC_YES;
+  } else if (barrier == "cycle_barrier" || barrier == "bar" ||
+             barrier == "swing_gate") {
+    vh_acc[VH_FOOT] = ACC_YES;
+    vh_acc[VH_BICYCLE] = ACC_YES;
+  } else if (barrier == "bollard" || barrier == "block" ||
+             barrier == "motorcycle_barrier" || barrier == "planter") {
+    vh_acc[VH_FOOT] = ACC_YES;
+    vh_acc[VH_BICYCLE] = ACC_YES;
+    vh_acc[VH_MOPED] = ACC_YES;
+  } else if (barrier == "gate") {
+    if (pti.FindValue({KEY_BIT_LOCKED}) != "yes") {
+      std::fill_n(vh_acc, VH_MAX, ACC_YES);
+    }
+  } else if (barrier == "horse_stile") {
+    vh_acc[VH_FOOT] = ACC_YES;
+    vh_acc[VH_HORSE] = ACC_YES;
+  } else if (barrier == "bus_trap") {
+    vh_acc[VH_FOOT] = ACC_YES;
+    vh_acc[VH_BICYCLE] = ACC_YES;
+    vh_acc[VH_MOPED] = ACC_YES;
+    vh_acc[VH_PSV] = ACC_YES;
+    vh_acc[VH_HGV] = ACC_YES;
+    vh_acc[VH_BUS] = ACC_YES;
+  } else if (SpanContains(no_blocks, barrier)) {
+    // blocks no traffic.
+    std::fill_n(vh_acc, VH_MAX, ACC_YES);
   } else {
-    // There was no all-overriding "access" tag, set access based on barrier.
-    std::fill_n(vh_acc, VH_MAX, ACC_NO);
-    if (ex.barrier == "stile" || ex.barrier == "turnstile" ||
-        ex.barrier == "full-height_turnstile" || ex.barrier == "kerb" ||
-        ex.barrier == "kissing_gate" || ex.barrier == "log") {
-      vh_acc[VH_FOOT] = ACC_YES;
-    } else if (ex.barrier == "cycle_barrier" || ex.barrier == "bar" ||
-               ex.barrier == "swing_gate") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_BICYCLE] = ACC_YES;
-    } else if (ex.barrier == "bollard" || ex.barrier == "block" ||
-               ex.barrier == "motorcycle_barrier" || ex.barrier == "planter") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_BICYCLE] = ACC_YES;
-      vh_acc[VH_MOPED] = ACC_YES;
-    } else if (ex.barrier == "gate") {
-      if (ex.locked != "yes") {
-        std::fill_n(vh_acc, VH_MAX, ACC_YES);
-      }
-    } else if (ex.barrier == "horse_stile") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_HORSE] = ACC_YES;
-    } else if (ex.barrier == "bus_trap") {
-      vh_acc[VH_FOOT] = ACC_YES;
-      vh_acc[VH_BICYCLE] = ACC_YES;
-      vh_acc[VH_MOPED] = ACC_YES;
-      vh_acc[VH_PSV] = ACC_YES;
-      vh_acc[VH_HGV] = ACC_YES;
-      vh_acc[VH_BUS] = ACC_YES;
-    } else if (SpanContains(no_blocks, ex.barrier)) {
-      std::fill_n(vh_acc, VH_MAX, ACC_YES);  // blocks no traffic by default.
-    } else {
-      LOG_S(INFO) << "Unknown barrier: " << ex.barrier << ":" << node_id;
-      ;  // Assume everything else is blocking. This includes full_blocks.
-    }
+    LOG_S(INFO) << "Unknown barrier: " << barrier << ":" << node_id;
+    // Assume everything else is blocking. This includes "full_blocks".
   }
+  return true;
+}
+#endif
 
-  if (ex.motor_vehicle_access != ACC_MAX) {
-    for (uint8_t vh = VH_MOTORCAR; vh < VH_MAX; ++vh) {
-      if (VehicleIsMotorized((VEHICLE)vh)) {
-        vh_acc[(VEHICLE)vh] = ex.motor_vehicle_access;
+std::vector<std::bitset<VH_MAX>> ComputeBarrierVehicleAllowed() {
+  std::vector<std::bitset<VH_MAX>> res;
+  for (const BarrierDef bd : g_barrier_def_vector) {
+    std::bitset<VH_MAX> bs;
+    for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
+      if (SpanContains(VehicleToString(vh),
+                       absl::StrSplit(bd.allowed_vehicles, ','))) {
+        bs.set(vh);
       }
     }
+    res.push_back(bs);
   }
-
-  // Now apply all more specific access tags such as bicycle=yes.
-  for (int i = kv_start; i < kv_stop; i += 2) {
-    VEHICLE vh = VehicleToEnum(tagh.ToString(keys_vals.at(i)));
-    if (vh != VH_MAX) {
-      ACCESS acc = AccessToEnum(tagh.ToString(keys_vals.at(i + 1)));
-      if (acc != ACC_MAX) {
-        vh_acc[vh] = acc;
-      } else {
-        LOG_S(INFO) << absl::StrFormat("Invalid access=<%s> in node %lld",
-                                       tagh.ToString(keys_vals.at(i + 1)),
-                                       node_id);
-      }
-    }
-  }
-
-  for (const ACCESS acc : node_tags->vh_acc) {
-    if (acc != ACC_YES) {
-      node_tags->has_barrier = 1;
-      return;
-    }
-  }
+  return res;
 }
 
-void ParseCrossing(const ParsedTagInfo& pti, int64_t node_id, NodeTags* nt) {
-  if (pti.FindValue({KEY_BIT_HIGHWAY}) != "crossing") {
-    return;
+// Assign the allowed vehicle types for a barrier. For instance, a turnstile
+// only allows pedestrians.
+// For barriers, we apply access tags in the following order:
+//   1) "barrier=" type sets the default.
+//   2) "access=" overrides everything that barrier type might have set.
+//   3) "motor_vehicle=" sets access for all motorized traffic.
+//   4) "bicycle=", "foot=", "horse=" etc. set access for individual vehicle
+//      types.
+inline void SetBarrierRestrictions(VEHICLE vt, const ParsedTagInfo& pti,
+                                   int64_t node_id, NodeTags* node_tags) {
+  node_tags->barrier_type = BarrierToEnum(pti.FindValue({KEY_BIT_BARRIER}));
+  if (node_tags->barrier_type == BARRIER_MAX) {
+    return;  // No 'barrier=*'
   }
-  std::string_view cr_val = pti.FindValue({KEY_BIT_CROSSING});
-  // LOG_S(INFO) << "DD1 node:" << node_id << " " << cr_val;
-  if (cr_val == "traffic_signals") {
-    // A crossing with light signals.
+
+  // A vector that for each barrier has the allowed vehicles as a std::bitset.
+  static const std::vector<std::bitset<VH_MAX>> barrier_allowed_vhs =
+      ComputeBarrierVehicleAllowed();
+
+  ACCESS access = barrier_allowed_vhs.at(node_tags->barrier_type).test(vt)
+                      ? ACC_YES
+                      : ACC_NO;
+
+  AccessPerDirection apd;
+  if (vt == VH_MOTORCAR) {
+    apd = CarAccess(pti.tagh(), node_id, pti.tags(),
+                    {.acc_forw = access, .acc_backw = access});
+  } else if (vt == VH_BICYCLE) {
+    apd = BicycleAccess(pti.tagh(), node_id, pti.tags(),
+                        {.acc_forw = access, .acc_backw = access});
+  } else {
+    ABORT_S() << "vehicle type not (yet) supported:" << (int)vt;
   }
+
+  node_tags->acc_forw = apd.acc_forw;
+  node_tags->acc_backw = apd.acc_backw;
+  node_tags->has_access_restriction =
+      (node_tags->acc_forw != ACC_YES || node_tags->acc_backw != ACC_YES);
 }
+
 }  // namespace
 
 // Extract node tags including barrier information stored in the keys_vals
 // of nodes. Returns true if relevant tags were found, false if not.
 // The tags themselves are returned in 'node_tags'.
-NodeTags ParseOSMNodeTags(const ParsedTagInfo& pti, const OSMTagHelper& tagh,
-                          int64_t node_id,
-                          const google::protobuf::RepeatedField<int>& keys_vals,
-                          int kv_start, int kv_stop) {
-  NodeTags nt;
-  if (kv_start >= kv_stop) {
-    return nt;
+NodeTags ParseOSMNodeTags(VEHICLE vt, const ParsedTagInfo& pti,
+                          int64_t node_id) {
+  if (pti.tags().empty()) {
+    return {};
   }
 
   // LOG_S(INFO) << "BB node:" << node_id;
-  ParseCrossing(pti, node_id, &nt);
-
-  std::fill_n(nt.vh_acc, VH_MAX, ACC_NO);
-
-  const NodeTagExtract ex =
-      ExtractNodeTags(tagh, node_id, keys_vals, kv_start, kv_stop);
-  SetNodeTagBits(ex, &nt);
-
-  if (!ex.barrier.empty()) {
-    SetBarrierToVehicle(tagh, node_id, keys_vals, kv_start, kv_stop, ex, &nt);
-  }
+  NodeTags nt;
+  SetCrossingBits(pti, node_id, &nt);
+  SetNodeTagBits(vt, pti, node_id, &nt);
+  SetBarrierRestrictions(vt, pti, node_id, &nt);
 
   if (!nt.empty()) {
     nt.node_id = node_id;
@@ -300,7 +299,7 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
     if (v_tags.at(nt_idx).node_id == g->nodes.at(node_idx).node_id) {
       const GNode& n = g->nodes.at(node_idx);
       const NodeTags nt = v_tags.at(nt_idx++);
-      if (!nt.has_barrier) {
+      if (!nt.has_access_restriction) {
         continue;
       }
 
@@ -328,8 +327,10 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
         }
       }
 
-      bool access_allowed = (nt.vh_acc[VH_MOTORCAR] > ACC_PRIVATE &&
-                             nt.vh_acc[VH_MOTORCAR] < ACC_MAX);
+      // TODO: handle access direction.
+      bool access_allowed =
+          (!nt.has_access_restriction ||
+           (RoutableAccess(nt.acc_forw) && RoutableAccess(nt.acc_backw)));
       LOG_S(INFO) << absl::StrFormat(
           "Node barrier on node %lld forward:%u all:%u #w-norm:%llu "
           "#w-area:%llu same-target:%u self-edge:%d acc:%d",
