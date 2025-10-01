@@ -111,7 +111,7 @@ struct TurnClassification {
   TURN_TYPE tt;
 };
 
-inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vh, const GEdge& e1,
+inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vt, const GEdge& e1,
                        const GEdge& e2, int32_t turning_angle) {
   return TT_CURVE;
 }
@@ -147,7 +147,7 @@ inline double MaxCurveVelocity(uint32_t arc_length_cm, int32_t turning_angle) {
 //
 // Uses the following formula for speed changes:
 //     dist = (v1^2 - v2^2) / (2 * a).
-inline uint32_t DistanceForSpeedChange(VEHICLE vh, double speed1_kmh,
+inline uint32_t DistanceForSpeedChange(VEHICLE vt, double speed1_kmh,
                                        double speed2_kmh) {
   // Rough assumptions about vehicle specific acceleration/deceleration
   // constants.
@@ -162,7 +162,7 @@ inline uint32_t DistanceForSpeedChange(VEHICLE vh, double speed1_kmh,
   const double sp1 = speed1_kmh / 3.6;
   const double sp2 = speed2_kmh / 3.6;
   double a;
-  switch (vh) {
+  switch (vt) {
     case VH_MOTORCAR:
     case VH_MOTORCYCLE:
       a = (sp1 >= sp2) ? dec_car : acc_car;
@@ -178,7 +178,7 @@ inline uint32_t DistanceForSpeedChange(VEHICLE vh, double speed1_kmh,
       a = (sp1 >= sp2) ? dec_hgv : acc_hgv;
       break;
     default:
-      ABORT_S() << vh;
+      ABORT_S() << vt;
   }
 
   return std::abs(std::lround(100 * (sp1 * sp1 - sp2 * sp2) / (2 * a)));
@@ -187,10 +187,10 @@ inline uint32_t DistanceForSpeedChange(VEHICLE vh, double speed1_kmh,
 // Compute the time loss in milliseconds that is caused by a curve that
 // doesn't allow max speed. The time loss is computed for the full distance of
 // edge 'e'.
-inline uint32_t TimeLossFromCurve(const Graph& g, VEHICLE vh, const GEdge& e,
+inline uint32_t TimeLossFromCurve(const Graph& g, VEHICLE vt, const GEdge& e,
                                   double curve_speed) {
   const double max_speed =
-      GetRAFromWSA(GetWSA(g, e.way_idx), vh, EDGE_DIR(e)).maxspeed;
+      GetRAFromWSA(GetWSA(g, e.way_idx), vt, EDGE_DIR(e)).maxspeed;
   if (curve_speed >= max_speed || e.distance_cm == 0) {
     return 0;
   }
@@ -204,7 +204,7 @@ namespace {
 
 // Compute the time loss in milliseconds of a turn from edge e1 to e2. A smaller
 // angle has higher cost.
-uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vh, const GEdge& e1,
+uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vt, const GEdge& e1,
                            const GEdge& e2, int32_t turning_angle) {
   turning_angle = std::labs(turning_angle);
   if (turning_angle <= 20) {
@@ -235,7 +235,7 @@ bool VehicleBlockedAtNode(const NodeTags* node_tags) {
 // at the end of a street or when facing a restricted access area.
 //
 // TODO: handle vehicle types properly.
-inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
+inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
                            const NodeTags* node_tags, const N3Path& n3p) {
   CHECK_EQ_S(n3p.node0_idx, n3p.node2_idx);
 
@@ -283,7 +283,7 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vh,
 
 #if 0
 inline void ProcessSimpleTurnRestrictions(
-    const Graph& g, const IndexedTurnRestrictions& indexed_trs, VEHICLE vh,
+    const Graph& g, const IndexedTurnRestrictions& indexed_trs, VEHICLE vt,
     uint32_t start_node_idx, uint32_t edge_idx, TurnCostData* tcd) {
   const GEdge& e = g.edges.at(edge_idx);
   const TurnRestriction::TREdge trigger_key = {.from_node_idx = start_node_idx,
@@ -370,7 +370,7 @@ inline TRStatus CheckSimpleTurnRestriction(
   return result;
 }
 
-uint32_t CurveCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
+uint32_t CurveCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   const GNode& node0 = n3p.node0(g);
   const GNode& node1 = n3p.node1(g);
   const GNode& node2 = n3p.node2(g);
@@ -381,7 +381,7 @@ uint32_t CurveCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
       node1.lat, node1.lon, node2.lat, node2.lon, n3p.edge1(g).distance_cm);
   const int32_t turning_angle = angle_between_edges(edge0_angle, edge1_angle);
 
-  return TurnAngleTimeLoss(g, vh, n3p.edge0(g), n3p.edge1(g), turning_angle);
+  return TurnAngleTimeLoss(g, vt, n3p.edge0(g), n3p.edge1(g), turning_angle);
 }
 
 // Compute costs for obstacles that are not blocking but "cost" time.
@@ -399,7 +399,7 @@ uint32_t NodeTagsCost(const Graph& g, const N3Path& n3p) {
     cost += 20'000;
   }
   if (node1.is_pedestrian_crossing) {
-      cost += 3'000;
+    cost += 3'000;
   }
 
   const NodeTags* attr = g.FindNodeTags(n3p.node1(g).node_id);
@@ -429,14 +429,54 @@ uint32_t NodeTagsCost(const Graph& g, const N3Path& n3p) {
   return cost;
 }
 
-uint32_t CrossingCost(const Graph& g, VEHICLE vh, const N3Path& n3p) {
-  // Edge attribute: ROAD_PRIORITY road_priority : 2;
-  return 0;
+// TODO: roads with >1 lanes.
+// TODO: Handle left/right turns differently (depends on country).
+// TODO: The code below is somewhat hand-waving and uses constants that come
+//       from thin air...
+uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
+  const uint32_t num_unique =
+      gnode_num_unique_edges(g, n3p.node1_idx, /*ignore_loops=*/true);
+  if (num_unique < 3) {
+    // Probably shape node.
+    return 0;
+  }
+  const GEdge& edge0 = n3p.edge0(g);
+  if (edge0.road_priority == GEdge::PRIO_HIGH ||
+      edge0.road_priority == GEdge::PRIO_SIGNALS) {
+    // Almost frictionless
+    return (num_unique - 2) * 500;
+  }
+
+  // there was a "give_way" sign or something like that before arriving at the
+  // crossing. Assume it takes some considerable time.
+  if (edge0.road_priority == GEdge::PRIO_LOW) {
+    return num_unique * 2000;
+  }
+
+  const GWay& w0 = g.ways.at(n3p.edge0(g).way_idx);
+  if (w0.highway_label < HW_UNCLASSIFIED) {
+    const BestHighwayAtNode best_hw =
+        GetBestHighwayAtNode(g, vt, n3p.node1_idx);
+    if (w0.highway_label == best_hw.highway_label) {
+      if (best_hw.num_incoming <= 1) {
+        // We arrive on a road with highest priority when considering the
+        // highway category, and no other edge does this. So assume we have
+        // higher priority than other traffic and can continue without much
+        // issues.
+        return (num_unique - 2) * 1000;
+      } else {
+        // Other edges are arriving with the same high priority;
+        return best_hw.num_incoming * 1500;
+      }
+    }
+  }
+
+  return num_unique * 1500;
 }
 
 // Compute the (uncompressed) turn cost for the specific turn 'n3p'.
 inline uint32_t ComputeTurnCostForN3Path(
-    const Graph& g, VEHICLE vh, const IndexedTurnRestrictions& indexed_trs,
+    const Graph& g, VEHICLE vt, const IndexedTurnRestrictions& indexed_trs,
     const N3Path& n3p) {
   const TRStatus tr_status = CheckSimpleTurnRestriction(g, indexed_trs, n3p);
   if (tr_status == TRStatus::FORBIDDEN) {
@@ -452,7 +492,7 @@ inline uint32_t ComputeTurnCostForN3Path(
     if (tr_status == TRStatus::ALLOWED) {
       return TURN_COST_U_TURN;
     }
-    if (!IsUTurnAllowed(g, vh, node_tags, n3p)) {
+    if (!IsUTurnAllowed(g, vt, node_tags, n3p)) {
       return TURN_COST_INFINITY;
     }
     return TURN_COST_U_TURN;
@@ -474,8 +514,8 @@ inline uint32_t ComputeTurnCostForN3Path(
   // 3) Real crossing
 
   const uint32_t cost_node_tags = NodeTagsCost(g, n3p);
-  const uint32_t cost_crossing = CrossingCost(g, vh, n3p);
-  const uint32_t cost_curve = CurveCost(g, vh, n3p);
+  const uint32_t cost_crossing = CrossingCost(g, vt, n3p);
+  const uint32_t cost_curve = CurveCost(g, vt, n3p);
 
   return std::max(cost_node_tags, std::max(cost_curve, cost_crossing));
 }
@@ -483,22 +523,20 @@ inline uint32_t ComputeTurnCostForN3Path(
 }  // namespace
 
 // Compute all turn costs for an edge at the target node.
-// vh: type of the vehicle.
+// vt: type of the vehicle.
 // indexed_trs: Container containing the simple turn restrictions.
 // fe: The edge for which we compute turn costs at the target node.
 // Returns the resulting turn costs data for fe.target_node(g).
 inline TurnCostData ComputeTurnCostsForEdge(
-    const Graph& g, VEHICLE vh, const IndexedTurnRestrictions& indexed_trs,
+    const Graph& g, VEHICLE vt, const IndexedTurnRestrictions& indexed_trs,
     const FullEdge fe) {
   // Create a tcd with the needed dimension.
   const GNode& crossing_node = fe.target_node(g);
-  TurnCostData tcd{
-      {crossing_node.num_forward_edges, TURN_COST_ZERO_COMPRESSED}};
+  TurnCostData tcd(crossing_node.num_forward_edges, TURN_COST_ZERO_COMPRESSED);
 
   for (uint32_t off = 0; off < crossing_node.num_forward_edges; ++off) {
     tcd.turn_costs.at(off) = compress_turn_cost(ComputeTurnCostForN3Path(
-        g, vh, indexed_trs, N3Path::Create(g, fe, {fe.target_idx(g), off})));
-    // {.start_idx = fe.target_idx(g), .offset = off})));
+        g, vt, indexed_trs, N3Path::Create(g, fe, {fe.target_idx(g), off})));
   }
   return tcd;
 }

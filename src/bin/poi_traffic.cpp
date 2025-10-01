@@ -355,6 +355,7 @@ int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   FUNC_TIMER();
 
+  build_graph::BuildGraphOptions opt;
   const Argli argli(
       argc, argv,
       {
@@ -369,7 +370,7 @@ int main(int argc, char* argv[]) {
            .desc = "Maximal number of POIs to create traffic for."},
           {.name = "n_threads",
            .type = "int",
-           .dflt = "10",
+           .dflt = absl::StrCat(opt.n_threads),
            .desc = "Number of threads to use"},
           {.name = "use_edge_dijkstra",
            .type = "bool",
@@ -382,16 +383,16 @@ int main(int argc, char* argv[]) {
            .desc = "Write output in export format to file <export_file>."},
       });
 
-  const std::string pbf = argli.GetString("pbf");
+  opt.pbf = argli.GetString("pbf");
   const uint64_t max_pois = argli.GetInt("max_pois");
-  const int n_threads = argli.GetInt("n_threads");
+  opt.n_threads = argli.GetInt("n_threads");
   const bool use_edge_dijkstra = argli.GetBool("use_edge_dijkstra");
   const bool check_slow = argli.GetBool("check_slow");
   const std::string export_file = argli.GetString("export_file");
   CHECK_GT_S(max_pois, 0);
 
   // Read POIs.
-  std::vector<pois::POI> pois = pois::ReadPBF(pbf, n_threads);
+  std::vector<pois::POI> pois = pois::ReadPBF(opt.pbf, opt.n_threads);
   const size_t orig_poi_size = pois.size();
   LOG_S(INFO) << absl::StrFormat("Use %u of %u pois", max_pois, pois.size());
   if (max_pois < pois.size()) {
@@ -399,14 +400,13 @@ int main(int argc, char* argv[]) {
   }
 
   // Read Road Network.
-  build_graph::BuildGraphOptions opt = {.pbf = pbf, .n_threads = n_threads};
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
 
-  MatchPOIsToRoads(g, n_threads, check_slow, &pois);
+  MatchPOIsToRoads(g, opt.n_threads, check_slow, &pois);
 
   // Execute random queries and collect traffic.
-  CollectRandomTraffic(g, n_threads, pois, use_edge_dijkstra, export_file);
+  CollectRandomTraffic(g, opt.n_threads, pois, use_edge_dijkstra, export_file);
 
   LOG_S(INFO) << absl::StrFormat("Collected traffic for %llu of %lld POIs",
                                  std::min(max_pois, orig_poi_size),

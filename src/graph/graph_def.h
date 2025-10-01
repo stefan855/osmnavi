@@ -7,7 +7,6 @@
 #include "base/constants.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
-#include "base/small_vector.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/routing_attrs.h"
@@ -24,9 +23,11 @@
 // restriction forbids the turn, a barrier disallows passing the target node, a
 // u-turn is not allowed or something else.
 struct TurnCostData {
+  TurnCostData(uint32_t size, uint8_t dflt) : turn_costs(size, dflt) {}
+
+  std::vector<uint8_t> turn_costs;
   // TODO: Use a more memory-efficient data structure than a vector.
-  // std::vector<uint8_t> turn_costs;
-  SmallVector<uint8_t, 7> turn_costs;
+  // SmallVector<uint8_t, 7> turn_costs;
 
   bool operator==(const TurnCostData& other) const {
     return turn_costs == other.turn_costs;
@@ -89,7 +90,7 @@ struct NodeTags {
 // node_idx, edge_idx and all kinds of osm-ids.
 constexpr uint64_t WAY_IDX_BITS = 31;
 
-// 9955WaySharedAttrs (=WSA) contains many of the way attributes in a
+// WaySharedAttrs (=WSA) contains many of the way attributes in a
 // data structure that is shared between ways. The shared data is stored in
 // Graph::way_shared_attrs vector and accessed through GWay::wsa_id.
 // Used to decrease the storage needed to store ways, both in ram and on disk.

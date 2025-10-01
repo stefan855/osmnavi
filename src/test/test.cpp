@@ -1354,6 +1354,31 @@ void TestDeDuperWithIdsString() {
   CHECK_EQ_S(els.at(2), "ccc");
 }
 
+void TestDeDuperMergeSort() {
+  DeDuperWithIds<std::string> dd1;
+  DeDuperWithIds<std::string> dd2;
+
+  dd1.Add("b", 2);
+  dd1.Add("c", 3);
+  dd1.Add("a", 3);
+
+  dd2.Add("d", 1);
+  dd2.Add("a", 1);
+
+  std::vector<std::string> objects;
+  std::vector<std::vector<uint32_t>> mappings;
+  const std::vector<DeDuperWithIds<std::string>> input = {dd1, dd2};
+  DeDuperWithIds<std::string>::MergeSort(input, &objects, &mappings);
+  
+  // Result is a:4 c:3 b:2 d:1.
+  CHECK_S(objects == std::vector<std::string>({"a", "c", "b", "d"}));
+  CHECK_EQ_S(mappings.size(), 2);
+  // b,c,a
+  CHECK_S(mappings.at(0) == std::vector<uint32_t>({2, 1, 0}));
+  // d,a
+  CHECK_S(mappings.at(1) == std::vector<uint32_t>({3, 0}));
+}
+
 namespace {
 int64_t qdist(int64_t lat, int64_t lon, const GNode& n) {
   int64_t dlat = lat - n.lat;
@@ -1584,6 +1609,7 @@ int main(int argc, char* argv[]) {
 
   TestDeDuperWithIdsInt();
   TestDeDuperWithIdsString();
+  TestDeDuperMergeSort();
   TestClosestPoint();
 
   TestEdgeAngles();

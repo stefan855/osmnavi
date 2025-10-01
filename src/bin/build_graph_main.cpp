@@ -66,6 +66,10 @@ void PrintStructSizes() {
                                  sizeof(GEdgeKey));
   LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter::VisitedEdge):%4u",
                                  sizeof(EdgeRouter::VisitedEdge));
+  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter2::VisitedEdge):%3u",
+                                 sizeof(EdgeRouter2::VisitedEdge));
+  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRoutingLabel):       %4u",
+                                 sizeof(EdgeRoutingLabel));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
   LOG_S(INFO) << absl::StrFormat("sizeof(NodeTags):               %4u",
@@ -524,8 +528,8 @@ int main(int argc, char* argv[]) {
 
        {.name = "n_threads",
         .type = "int",
-        .dflt = "16",
-        .desc = "Max . number of threads to use for parallel processing."},
+        .dflt = absl::StrCat(opt.n_threads),
+        .desc = "Max. number of threads to use for parallel processing."},
 
        {.name = "log_way_tag_stats",
         .type = "bool",

@@ -43,7 +43,8 @@ inline bool HasCyclewayOppositeTag(const OSMTagHelper& tagh,
   for (const ParsedTag& pt : ptags) {
     if (pt.first == KEY_BIT_CYCLEWAY &&
         BitsetContainedIn(pt.bits, cycleway_bits)) {
-      if (absl::StartsWith(tagh.ToString(pt.val_st_idx), "opposite")) {
+      // if (absl::StartsWith(tagh.ToString(pt.val_st_idx), "opposite")) {
+      if (tagh.ToString(pt.val_st_idx).starts_with("opposite")) {
         return true;
       }
     }

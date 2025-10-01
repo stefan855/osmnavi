@@ -31,7 +31,8 @@ class PerCountryConfig {
     }
 
     for (std::string line; std::getline(file, line);) {
-      if (line.empty() || absl::StartsWith(line, "#")) {
+      // if (line.empty() || absl::StartsWith(line, "#")) {
+      if (line.empty() || line.starts_with('#')) {
         continue;
       }
       ApplyConfigLine(line);
@@ -207,7 +208,8 @@ class PerCountryConfig {
         continue;
       }
       if (sel.hws.empty()) {
-        if (absl::EndsWith(keys[i], "*")) {
+        // if (absl::EndsWith(keys[i], "*")) {
+        if (keys[i].ends_with('*')) {
           std::string_view prefix = keys[i];
           prefix.remove_suffix(1);
           sel.hws = HighwayLabelsByPrefix(prefix);

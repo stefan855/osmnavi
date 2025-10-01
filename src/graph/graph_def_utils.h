@@ -97,8 +97,42 @@ inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
   return res;
 }
 
+// Statistics of in/outgoing edges at a node for the best (==lowest) highway
+// label value.
+struct BestHighwayAtNode {
+  HIGHWAY_LABEL highway_label : 5 = HW_MAX;
+  uint16_t num_incoming = 0;
+  uint16_t num_outgoing = 0;
+};
+
+inline BestHighwayAtNode GetBestHighwayAtNode(const Graph& g, VEHICLE vt,
+                                       uint32_t node_idx) {
+  BestHighwayAtNode best;
+  for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+    const GWay& w = g.ways.at(e.way_idx);
+    if (w.highway_label <= best.highway_label) {
+      if (w.highway_label < best.highway_label) {
+        // Found new best highway.
+        best.highway_label = w.highway_label;
+        best.num_incoming = 0;
+        best.num_outgoing = 0;
+      }
+      if (e.inverted) {
+        best.num_incoming++;
+      } else {
+        best.num_outgoing++;
+        if (e.both_directions) {
+          best.num_incoming++;
+        }
+      }
+    }
+  }
+  return best;
+}
+
 // Starting at 'start', find the first connected edge leading to a crossing
-// within 'max_distance_cm'. If nothing is found, an invalid edge is returned.
+// within 'max_distance_cm'. If nothing is found, an invalid edge is
+// returned.
 inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
                                      const FullEdge start,
                                      uint32_t max_distance_cm = 20 * 100) {

@@ -127,20 +127,6 @@ void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
         if (kv_start < kv_stop) {
           node.AddKeyVals(pg.dense().keys_vals(), kv_start, kv_stop);
           const ParsedTagInfo pti = ParseTags(tagh, node);
-#if 0
-          {
-            std::unique_lock<std::mutex> l(mut);
-            LOG_S(INFO) << absl::StrFormat(
-                "Node %lld all: <%s>", node.id_,
-                KeySetToSymbolicString(pti.CollectedBits()));
-            for (const auto& pt : pti.tags()) {
-              LOG_S(INFO) << absl::StrFormat("  <%s>=<%s>",
-                                             KeySetToSymbolicString(pt.bits),
-                                             tagh.ToString(pt.val_st_idx));
-            }
-          }
-#endif
-
           NodeTags node_tags = ParseOSMNodeTags(vt, pti, node.id_);
           if (!node_tags.empty()) {
             // Store node_tags for this node.
@@ -218,47 +204,6 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
         info.im_backw = im;
       }
     }
-
-#if 0
-    switch (pt.bits & ~modifier_bits) {
-      case KeySet({KEY_BIT_MAXSPEED}):
-      case KeySet({KEY_BIT_MAXSPEED, KEY_BIT_SOURCE}):
-      case KeySet({KEY_BIT_MAXSPEED, KEY_BIT_TYPE}):
-      case KeySet({KEY_BIT_MAXSPEED, KEY_BIT_ZONE}):
-      case KeySet({KEY_BIT_ZONE, KEY_BIT_TRAFFIC}): {
-        uint16_t ncc = INVALID_NCC;
-        ENVIRONMENT_TYPE et = ET_ANY;
-        std::string_view val = tagh.ToString(pt.val_st_idx);
-        if (ParseCountrySpeedParts(val, &ncc, &et)) {
-          if (et == ET_RURAL || et == ET_URBAN) {
-            if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
-              info.et_forw = et;
-            } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
-              info.et_backw = et;
-            } else {
-              info.et_forw = et;
-              info.et_backw = et;
-            }
-          }
-          if (ncc != INVALID_NCC) {
-            info.ncc = ncc;
-          }
-        }
-      }
-      case KeySet({KEY_BIT_MOTORROAD}): {
-        IS_MOTORROAD im =
-            tagh.ToString(pt.val_st_idx) == "yes" ? IM_YES : IM_NO;
-        if (BitIsContained(KEY_BIT_FORWARD, pt.bits)) {
-          info.im_forw = im;
-        } else if (BitIsContained(KEY_BIT_BACKWARD, pt.bits)) {
-          info.im_backw = im;
-        } else {
-          info.im_forw = im;
-          info.im_backw = im;
-        }
-      }
-    }
-#endif
   }
   return info;
 }
@@ -720,27 +665,28 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   // Set all numbers to 0, enums to first value.
   memset(&wsa.ra, 0, sizeof(wsa.ra));
 
-  for (const VEHICLE vt : WaySharedAttrs::RA_VEHICLES) {
-    // TODO: Use real country instead of always using CH (Switzerland).
-    wc.config_forw = meta->per_country_config->GetDefault(
-        /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, rural.et_forw,
-        rural.im_forw);
-    wc.config_backw = meta->per_country_config->GetDefault(
-        /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, vt, rural.et_backw,
-        rural.im_backw);
+  // TODO: Use real country instead of always using CH (Switzerland).
+  wc.config_forw = meta->per_country_config->GetDefault(
+      /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, meta->opt.vt, rural.et_forw,
+      rural.im_forw);
+  wc.config_backw = meta->per_country_config->GetDefault(
+      /*wc.way.ncc*/ NCC_CH, wc.way.highway_label, meta->opt.vt, rural.et_backw,
+      rural.im_backw);
 
-    if (vt == VH_MOTORCAR) {
-      ComputeCarWayRoutingData(tagh, wc, &wsa);
-    } else if (vt == VH_BICYCLE) {
-      // ComputeBicycleWayRoutingData(tagh, wc, &wsa);
-    } else if (vt == VH_FOOT) {
-      // TODO
-    } else {
-      ABORT_S() << "Invalid vehicle type " << vt;
-    }
+  if (meta->opt.vt == VH_MOTORCAR) {
+    ComputeCarWayRoutingData(tagh, wc, &wsa);
+  } else if (meta->opt.vt == VH_BICYCLE) {
+    ABORT_S() << "Unsupported vehicle type " << meta->opt.vt;
+    // TODO
+    // ComputeBicycleWayRoutingData(tagh, wc, &wsa);
+  } else if (meta->opt.vt == VH_FOOT) {
+    ABORT_S() << "Unsupported vehicle type " << meta->opt.vt;
+    // TODO
+  } else {
+    ABORT_S() << "Invalid vehicle type " << meta->opt.vt;
   }
 
-  if (!WSAAnyRoutable(wsa)) return;
+  if (!WSAVehicleAnyRoutable(wsa, meta->opt.vt)) return;
 
   WriteBuff node_ids_buff;
   EncodeNodeIds(node_countries, &node_ids_buff);
@@ -766,16 +712,6 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
     wc.way.wsa_id = deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
-
-#if 0
-    if (prev_num_unique != deduper->num_unique()) {
-      LOG_S(INFO) << "Number of unique way-routingattrs "
-                  << deduper->num_unique() << " for way " << wc.way.id;
-      for (uint32_t i = 0; i < WaySharedAttrs::RA_MAX; ++i) {
-        LOG_S(INFO) << "  " << i << ":" << RoutingAttrsDebugString(wsa.ra[i]);
-      }
-    }
-#endif
   }
 }
 
@@ -899,19 +835,18 @@ void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
                                     std::mutex& mut) {
     ConsumeWayWorker(tagh, way, mut, &deduper, meta, &meta->Stats(thread_idx));
   });
-  {
-    // Sort and build the vector with shared way attributes.
-    deduper.SortByPopularity();
-    meta->graph.way_shared_attrs = deduper.GetObjVector();
-    const std::vector<uint32_t> mapping = deduper.GetSortMapping();
-    for (GWay& w : meta->graph.ways) {
-      w.wsa_id = mapping.at(w.wsa_id);
-    }
-    LOG_S(INFO) << absl::StrFormat(
-        "Shared way attributes de-duping %u -> %u (%.2f%%)",
-        deduper.num_added(), deduper.num_unique(),
-        (100.0 * deduper.num_unique()) / std::max(1u, deduper.num_added()));
+
+  // Sort and build the vector with shared way attributes.
+  deduper.SortByPopularity();
+  meta->graph.way_shared_attrs = deduper.GetObjVector();
+  const std::vector<uint32_t> mapping = deduper.GetSortMapping();
+  for (GWay& w : meta->graph.ways) {
+    w.wsa_id = mapping.at(w.wsa_id);
   }
+  LOG_S(INFO) << absl::StrFormat(
+      "Shared way attributes de-duping %u -> %u (%.2f%%)", deduper.num_added(),
+      deduper.num_unique(),
+      (100.0 * deduper.num_unique()) / std::max(1u, deduper.num_added()));
 }
 
 void SortGWays(GraphMetaData* meta) {
@@ -982,9 +917,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
       for (const size_t idx : node_idx) {
         if (prev_idx >= 0) {
           // All edges should be routable for at least one vehicle type.
-          CHECK_S(WSAAnyRoutable(wsa, DIR_FORWARD) ||
-                  WSAAnyRoutable(wsa, DIR_BACKWARD))
-              << way.id;
+          CHECK_S(WSAVehicleAnyRoutable(wsa, meta->opt.vt)) << way.id;
 
           // We "abuse" edges_start_pos as edge-counter while building the
           // graph.
@@ -1003,14 +936,11 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
 void ComputeEdgeCounts(GraphMetaData* meta) {
   FUNC_TIMER();
   std::mutex mut;
-  const size_t unit_length = 25000;
   ThreadPool pool;
-  for (size_t start_pos = 0; start_pos < meta->graph.ways.size();
-       start_pos += unit_length) {
-    pool.AddWork([meta, &mut, start_pos, unit_length](int thread_idx) {
-      const size_t stop_pos =
-          std::min(start_pos + unit_length, meta->graph.ways.size());
-      ComputeEdgeCountsWorker(start_pos, stop_pos, meta, mut);
+  ArrayChunker<int> chunker(meta->graph.ways.size(), 1024 * 16, -1);
+  for (const auto& chunk : chunker.chunks) {
+    pool.AddWork([meta, &mut, &chunk](int thread_idx) {
+      ComputeEdgeCountsWorker(chunk.start, chunk.stop, meta, mut);
     });
   }
   pool.Start(meta->opt.n_threads);
@@ -1084,12 +1014,18 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
     // Go through 'needed' nodes (skip the others) and output edges.
     {
       const WaySharedAttrs& wsa = GetWSA(graph, way);
+      // TODO: use opt.vt instead of doing it for car.
       const ACCESS acc_car_f =
           GetRAFromWSA(wsa, VH_MOTORCAR, DIR_FORWARD).access;
       const ACCESS acc_car_b =
           GetRAFromWSA(wsa, VH_MOTORCAR, DIR_BACKWARD).access;
       const bool restr_car_f = RestrictedAccess(acc_car_f);
       const bool restr_car_b = RestrictedAccess(acc_car_b);
+
+      const bool vt_forward =
+          RoutableAccess(GetRAFromWSA(wsa, meta->opt.vt, DIR_FORWARD).access);
+      const bool vt_backward =
+          RoutableAccess(GetRAFromWSA(wsa, meta->opt.vt, DIR_BACKWARD).access);
 
       std::unique_lock<std::mutex> l(mut);
       int last_pos = -1;
@@ -1103,8 +1039,9 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
             uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(last_pos);
             // Store edges with the summed up distance.
 
-            if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
-                WSAAnyRoutable(wsa, DIR_BACKWARD)) {
+            // if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
+            //     WSAAnyRoutable(wsa, DIR_BACKWARD)) {
+            if (vt_forward && vt_backward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false,
                       /*both_directions=*/true, way_idx, distance_cm,
@@ -1113,7 +1050,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/true,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_b);
-            } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
+              // } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
+            } else if (vt_forward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
@@ -1123,7 +1061,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
             } else {
-              CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
+              // CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
+              CHECK_S(vt_backward) << way.id;
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
                       /*contra_way=*/true,
                       /*both_directions=*/false, way_idx, distance_cm,
@@ -1144,14 +1083,46 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
 void PopulateEdgeArrays(GraphMetaData* meta) {
   FUNC_TIMER();
   std::mutex mut;
-  const size_t unit_length = 25000;
   ThreadPool pool;
-  for (size_t start_pos = 0; start_pos < meta->graph.ways.size();
-       start_pos += unit_length) {
-    pool.AddWork([meta, &mut, start_pos, unit_length](int thread_idx) {
-      const size_t stop_pos =
-          std::min(start_pos + unit_length, meta->graph.ways.size());
-      PopulateEdgeArraysWorker(start_pos, stop_pos, meta, mut);
+  ArrayChunker chunker(meta->graph.ways.size(), 1024 * 16);
+  for (const auto& chunk : chunker.chunks) {
+    pool.AddWork([meta, &mut, &chunk](int thread_idx) {
+      PopulateEdgeArraysWorker(chunk.start, chunk.stop, meta, mut);
+    });
+  }
+  pool.Start(meta->opt.n_threads);
+  pool.WaitAllFinished();
+}
+
+namespace {
+// Sort the edges [start..stop) in g->edges by ascending (target_idx, way_idx).
+void SortEdgeSpan(Graph* g, uint32_t start, uint32_t stop) {
+  std::sort(
+      g->edges.begin() + start, g->edges.begin() + stop,
+      [](const GEdge& e0, const GEdge& e1) {
+        return e0.target_idx < e1.target_idx ||
+               (e0.target_idx == e1.target_idx && e0.way_idx < e1.way_idx);
+      });
+}
+}  // namespace
+
+void SortAllEdges(GraphMetaData* meta) {
+  FUNC_TIMER();
+
+  Graph& g = meta->graph;
+  ThreadPool pool;
+  ArrayChunker chunker(g.nodes.size(), 1024 * 32);
+  for (const auto& chunk : chunker.chunks) {
+    pool.AddWork([meta, &g, &chunk](int thread_idx) {
+      for (uint32_t from_idx = chunk.start; from_idx < chunk.stop; ++from_idx) {
+        const GNode& n = g.nodes.at(from_idx);
+        // Sort forward edges.
+        SortEdgeSpan(&g, n.edges_start_pos,
+                     n.edges_start_pos + n.num_forward_edges);
+        // Sort inverted edges.
+        SortEdgeSpan(&g, n.edges_start_pos + n.num_forward_edges,
+                     gnode_edges_stop(g, from_idx));
+      }
     });
   }
   pool.Start(meta->opt.n_threads);
@@ -1257,7 +1228,7 @@ void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
       });
     }
     // Faster with few threads only.
-    pool.Start(std::min(5, meta->opt.n_threads));
+    pool.Start(meta->opt.n_threads);
     pool.WaitAllFinished();
   }
 }
@@ -1340,12 +1311,6 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
                          ? stats->num_nodes_unique_edges_dim - 1
                          : unique_edges;
       stats->num_nodes_unique_edges[idx]++;
-#if 0
-      if (unique_edges > 4) {
-        LOG_S(INFO) << "Node with " << unique_edges
-                    << " unique edges: " << n.node_id;
-      }
-#endif
     }
 
     stats->num_edges_at_simple_tr_via +=
@@ -1667,16 +1632,13 @@ inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
 
 void MarkCrossingNodes(GraphMetaData* meta) {
   FUNC_TIMER();
-  const Graph& g = meta->graph;
 
-  const size_t unit_length = 20000;
+  const Graph& g = meta->graph;
   ThreadPool pool;
-  for (size_t start_pos = 0; start_pos < meta->graph.node_tags_sorted.size();
-       start_pos += unit_length) {
-    pool.AddWork([meta, &g, start_pos, unit_length](int thread_idx) {
-      const size_t stop_pos = std::min(start_pos + unit_length,
-                                       meta->graph.node_tags_sorted.size());
-      for (size_t idx = start_pos; idx < stop_pos; ++idx) {
+  ArrayChunker chunker(meta->graph.node_tags_sorted.size(), 1024 * 16);
+  for (const auto& chunk : chunker.chunks) {
+    pool.AddWork([meta, &g, &chunk](int thread_idx) {
+      for (size_t idx = chunk.start; idx < chunk.stop; ++idx) {
         const NodeTags& nt = meta->graph.node_tags_sorted.at(idx);
         if (nt.bit_crossing) {
           uint32_t node_idx = g.FindNodeIndex(nt.node_id);
@@ -1742,7 +1704,7 @@ inline void LabelEdgeAndNextCrossing(Graph& g, const NodeTags& nt, FullEdge fe,
 void LabelEdgesFromNodeTags(GraphMetaData* meta) {
   FUNC_TIMER();
   const Graph& g = meta->graph;
-  const VEHICLE vt = VH_MOTORCAR;  // TODO: shouldn't be defined here.
+  const VEHICLE vt = meta->opt.vt;
 
   for (NodeTags& nt : meta->graph.node_tags_sorted) {
     const size_t node_idx = g.FindNodeIndex(nt.node_id);
@@ -1889,39 +1851,55 @@ void LabelEdgesFromNodeTags(GraphMetaData* meta) {
 void ComputeAllTurnCosts(GraphMetaData* meta) {
   FUNC_TIMER();
 
-  DeDuperWithIds<TurnCostData> deduper;
   Graph& g = meta->graph;
   const IndexedTurnRestrictions indexed_trs = {
       .sorted_trs = meta->simple_turn_restrictions,
       .map_to_first =
           ComputeTurnRestrictionMapToFirst(meta->simple_turn_restrictions)};
-  // TurnCostData tcd;
-  // For each node in the graph.
+
+  ThreadPool pool;
+  std::vector<DeDuperWithIds<TurnCostData>> deduper_per_thread(
+      meta->opt.n_threads);
+
+  ArrayChunker<int16_t> chunker(g.nodes.size(), 1024 * 32, -1);
+  for (auto& chunk : chunker.chunks) {
+    pool.AddWork([meta, &g, &deduper_per_thread, &indexed_trs,
+                  &chunk](int thread_idx) {
+      chunk.chunk_data = thread_idx;
+      for (uint32_t from_idx = chunk.start; from_idx < chunk.stop; ++from_idx) {
+        const GNode& from_node = g.nodes.at(from_idx);
+        // For each outgoing edge of this node.
+        for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
+          GEdge& e = g.edges.at(from_node.edges_start_pos + off);
+          // Compute the turn costs for the target node of 'e'.
+          TurnCostData tcd = ComputeTurnCostsForEdge(
+              g, meta->opt.vt, indexed_trs, {from_idx, off});
+          e.turn_cost_idx = deduper_per_thread.at(thread_idx).Add(tcd);
+        }
+      }
+    });
+  }
+
+  pool.Start(meta->opt.n_threads);
+  pool.WaitAllFinished();
+
+  std::vector<std::vector<uint32_t>> vmappings;
+  DeDuperWithIds<TurnCostData>::MergeSort(deduper_per_thread, &(g.turn_costs),
+                                          &vmappings);
+  uint32_t count = 0;
   for (uint32_t from_idx = 0; from_idx < g.nodes.size(); ++from_idx) {
     const GNode& from_node = g.nodes.at(from_idx);
-    // For each outgoing edge of this node.
+    const auto& vmap = vmappings.at(chunker.ChunkAt(from_idx).chunk_data);
     for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
       GEdge& e = g.edges.at(from_node.edges_start_pos + off);
-      // Compute the turn costs for the target node of 'fe'.
-      TurnCostData tcd = ComputeTurnCostsForEdge(g, meta->opt.vt, indexed_trs,
-                                                 {from_idx, off});
-      e.turn_cost_idx = deduper.Add(tcd);
-    }
-  }
-  CHECK_LT_S(deduper.num_unique(), MAX_TURN_COST_IDX);
-
-  deduper.SortByPopularity();
-  auto sort_mapping = deduper.GetSortMapping();
-  for (GEdge& e : g.edges) {
-    if (!e.inverted) {
-      e.turn_cost_idx = sort_mapping.at(e.turn_cost_idx);
+      e.turn_cost_idx = vmap.at(e.turn_cost_idx);
+      count++;
     }
   }
 
-  meta->graph.turn_costs = deduper.GetObjVector();
   LOG_S(INFO) << absl::StrFormat(
-      "DeDuperWithIds<TurnCostData>: unique:%u tot:%u", deduper.num_unique(),
-      deduper.num_added());
+      "DeDuperWithIds<TurnCostData>: unique:%llu tot:%u", g.turn_costs.size(),
+      count);
 }
 
 BuildGraphStats CollectThreadStats(
@@ -1978,6 +1956,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   for (const GEdge& e : meta.graph.edges) {
     CHECK_S(e.target_idx != INFU32);
   }
+  SortAllEdges(&meta);
   MarkUniqueEdges(&meta);
 
   // ======================================================

@@ -106,15 +106,58 @@ class DeDuperWithIds {
   }
 
   // Given independently created dedupers in 'input', merge and frequency-sort
-  // them. Return the global list of sorted 'objects' (with no duplicates) and
-  // a mapping vector for each of the inputs. Note that after the call,
-  // mappings->size() == input.size().
+  // them into one big table. Return the global list of popularity-sorted
+  // 'objects' (with no duplicates) and a mapping vector for each of the inputs
+  // to the new object vector.
+  //
+  // Note that after the call, mappings->size() == input.size().
+  //
   // This is useful when creating dedupers in multiple threads and merging them
   // in the end.
   static void MergeSort(const std::vector<DeDuperWithIds<TObj>>& input,
                         std::vector<TObj>* objects,
                         std::vector<std::vector<uint32_t>>* mappings) {
-    ;
+    DeDuperWithIds<TObj> res;
+    for (const DeDuperWithIds<TObj>& dd : input) {
+      CHECK_EQ_S(dd.entries_.size(), dd.objs_.size());
+      for (const Entry& e : dd.entries_) {
+        res.Add(dd.objs_.at(e.id), e.ref_count);
+      }
+    }
+
+    res.SortByPopularity();
+    // entries_ is now sorted.
+    //   entry.id points to the correct location in objs_.
+    //   objs_ are still in the original order (as is entry.id). But the
+    //   position of an entry in entries_ is the new id.
+
+    // Create a new, sorted object table and a temporary lookup table, from
+    // object to new id. The new id is the position in sorted res.entries_.
+    absl::flat_hash_map<const TObj*, uint32_t, TPtrHash, TPtrEqual> lookup;
+    CHECK_S(objects->empty());
+    objects->reserve(res.entries_.size());
+    for (uint32_t i = 0; i < res.entries_.size(); ++i) {
+      const Entry& e = res.entries_[i];
+      objects->push_back(res.objs_[e.id]);
+      // We're not allowed to use a pointer into 'objects' here, because this is
+      // a vector and might reallocate.
+      lookup[&(res.objs_[e.id])] = i;
+    }
+
+    // Create mapping table for each input deduper.
+    CHECK_S(mappings->empty());
+    mappings->resize(input.size());
+    for (uint32_t dd_idx = 0; dd_idx < input.size(); ++dd_idx) {
+      const DeDuperWithIds<TObj>& dd = input.at(dd_idx);
+      std::vector<uint32_t>& vmap = mappings->at(dd_idx);
+      CHECK_S(vmap.empty());
+      vmap.resize(dd.num_unique(), 0);
+      for (uint32_t old_id = 0; old_id < dd.num_unique(); ++old_id) {
+        auto iter = lookup.find(&(dd.GetObj(old_id)));
+        CHECK_S(iter != lookup.end());
+        vmap.at(old_id) = iter->second;
+      }
+    }
   }
 
   void clear() {

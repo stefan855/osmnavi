@@ -7,30 +7,31 @@
 
 using CTRList = std::vector<ActiveCtrs>;
 
-// EdgeRoutingLabel uniquely identifies an edge in a graph data structure. It
-// works both for graph edges (GEdge) and cluster edges. It encapsulates the
-// index of the from-node (4 bytes), the edge-offset (9 bits), the type of the
-// edge (graph vs. cluster) and an additional bit that can be used by the
-// router. The data is stored in a way that it can be aligned at 2-byte
-// boundaries.
+// EdgeRoutingLabel uniquely identifies an edge in a graph data structure, with
+// additional context that is needed when edges are travelled more than once.
+//
+// It works for graph edges (GEdge) and cluster edges (artificial edges
+// representing the connection between two border nodes of a cluster). Graph
+// edges can have additional context about active CTRs. Overall, there are three
+// edge label types.
+//
+// The class encapsulates the index of the from-node (4 bytes), the edge-offset
+// (9 bits), the type of the edge (graph vs. cluster, vs. complex turn
+// restriction) and an additional bit that can be used by the router. The data
+// is stored in a way that it can be aligned at 2-byte boundaries.
 //
 // UInt64Key() returns all attributes mapped into a unique uint64_t.
 class alignas(2) EdgeRoutingLabel final {
  public:
-  enum TYPE : uint8_t { GRAPH = 0, CLUSTER, TURN_RESTRICTION };
+  enum TYPE : uint8_t { GRAPH = 0, CLUSTER, COMPLEX_TURN_RESTRICTION };
+
   EdgeRoutingLabel() = delete;
-  EdgeRoutingLabel(TYPE type, uint32_t id_data, uint8_t offset, bool bit) {
-    SetIdData(id_data);
-    offset_ = offset;
-    type_ = type;
-    bit_ = bit;
-  }
 
   uint32_t GetType() const { return type_; }
   bool IsClusterEdge() const { return type_ == CLUSTER; }
 
   uint32_t GetFromIdx(const Graph& g, const CTRList& ctr_list) const {
-    if (type_ != TURN_RESTRICTION) {
+    if (type_ != COMPLEX_TURN_RESTRICTION) {
       return (static_cast<uint32_t>(id_data_high_) << 16) + id_data_low_;
     } else {
       return GetActiveTREdge(g, ctr_list).from_node_idx;
@@ -38,16 +39,8 @@ class alignas(2) EdgeRoutingLabel final {
   }
 
   uint32_t GetCtrConfigId() const {
-    CHECK_EQ_S(type_, TURN_RESTRICTION);
+    CHECK_EQ_S(type_, COMPLEX_TURN_RESTRICTION);
     return (static_cast<uint32_t>(id_data_high_) << 16) + id_data_low_;
-  }
-
-  const TurnRestriction::TREdge& GetActiveTREdge(const Graph& g,
-                                                 const CTRList& ctr_list) const {
-    // GetCtrConfigId() checks type_ == TURN_RESTRICTION.
-    const CTRPosition& ctrpos = ctr_list.at(GetCtrConfigId()).at(0);
-    const TurnRestriction& tr = g.complex_turn_restrictions.at(ctrpos.ctr_idx);
-    return tr.path.at(ctrpos.position);
   }
 
   uint16_t GetOffset() const { return offset_; }
@@ -69,7 +62,7 @@ class alignas(2) EdgeRoutingLabel final {
     if (type_ == GRAPH) {
       const GNode& n = g.nodes.at(GetFromIdx(g, ctr_list));
       return g.edges.at(n.edges_start_pos + GetOffset());
-    } else if (type_ == TURN_RESTRICTION) {
+    } else if (type_ == COMPLEX_TURN_RESTRICTION) {
       const TurnRestriction::TREdge& e = GetActiveTREdge(g, ctr_list);
       return gnode_find_edge(g, e.from_node_idx, e.to_node_idx, e.way_idx);
     } else {
@@ -85,30 +78,33 @@ class alignas(2) EdgeRoutingLabel final {
     return g.nodes.at(GetToIdx(g, ctr_list));
   }
 
-  static EdgeRoutingLabel CreateGraphEdge(const Graph& g, uint32_t from_idx,
-                                          const GEdge& e, bool bit) {
+  static EdgeRoutingLabel CreateGraphEdgeLabel(const Graph& g,
+                                               uint32_t from_idx,
+                                               const GEdge& e, bool bit) {
     uint32_t offset =
         (&e - &g.edges.front()) - g.nodes.at(from_idx).edges_start_pos;
     CHECK_LT_S(offset, 1024);
-    CHECK_EQ_S(e.target_idx,
-               g.edges.at(g.nodes.at(from_idx).edges_start_pos + offset)
-                   .target_idx)
+    CHECK_EQ_S(
+        e.target_idx,
+        g.edges.at(g.nodes.at(from_idx).edges_start_pos + offset).target_idx)
         << offset;
     return EdgeRoutingLabel(GRAPH, from_idx, offset, bit);
   }
 
-  static EdgeRoutingLabel CreateClusterEdge(const Graph& g, uint32_t from_idx,
-                                            uint32_t offset, bool bit) {
+  static EdgeRoutingLabel CreateClusterEdgeLabel(const Graph& g,
+                                                 uint32_t from_idx,
+                                                 uint32_t offset, bool bit) {
     CHECK_LT_S(offset, 1024);
     CHECK_S(g.nodes.at(from_idx).cluster_id != INVALID_CLUSTER_ID);
     return EdgeRoutingLabel(CLUSTER, from_idx, offset, bit);
   }
 
-  static EdgeRoutingLabel CreateTurnRestrictionEdge(const Graph& g,
-                                                    uint32_t ctr_config_id,
-                                                    uint32_t offset, bool bit) {
+  static EdgeRoutingLabel CreateCTREdgeLabel(const Graph& g,
+                                             uint32_t ctr_config_id,
+                                             uint32_t offset, bool bit) {
     CHECK_LT_S(offset, 1024);
-    return EdgeRoutingLabel(TURN_RESTRICTION, ctr_config_id, offset, bit);
+    return EdgeRoutingLabel(COMPLEX_TURN_RESTRICTION, ctr_config_id, offset,
+                            bit);
   }
 
   // Convert the data to a *unique* 64 bit key that can be used for indexing and
@@ -138,7 +134,20 @@ class alignas(2) EdgeRoutingLabel final {
   }
 
  private:
-  // friend std::hash<EdgeRoutingLabel>;
+  EdgeRoutingLabel(TYPE type, uint32_t id_data, uint8_t offset, bool bit) {
+    SetIdData(id_data);
+    offset_ = offset;
+    type_ = type;
+    bit_ = bit;
+  }
+
+  const TurnRestriction::TREdge& GetActiveTREdge(
+      const Graph& g, const CTRList& ctr_list) const {
+    // Get arbitrary CTRPosition, which knows the active TREdge.
+    const CTRPosition& ctrpos = ctr_list.at(GetCtrConfigId()).at(0);
+    const TurnRestriction& tr = g.complex_turn_restrictions.at(ctrpos.ctr_idx);
+    return tr.path.at(ctrpos.position);
+  }
 
   void SetIdData(uint32_t id_data) {
     id_data_low_ = id_data & ((1ul << 16) - 1);

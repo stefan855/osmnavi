@@ -223,7 +223,7 @@ class EdgeRouter2 {
 
   std::string VisitedEdgeToString(const VisitedEdge& ve) {
     std::string tr_str;
-    if (ve.key.GetType() == EdgeRoutingLabel::TURN_RESTRICTION) {
+    if (ve.key.GetType() == EdgeRoutingLabel::COMPLEX_TURN_RESTRICTION) {
       tr_str =
           ActiveCtrsToDebugString(g_, ctr_list_.at(ve.key.GetCtrConfigId()));
     }
@@ -347,24 +347,17 @@ class EdgeRouter2 {
       const Context& ctx, const EdgeRoutingLabel& prev_key, uint32_t start_idx,
       const GEdge& next_edge, bool next_in_target_area) {
     const bool active_key =
-        prev_key.GetType() == EdgeRoutingLabel::TURN_RESTRICTION;
-
-    // (prev.v_idx != INFU32 && visited_edges_.at(prev.v_idx).key.GetType() ==
-    //                              EdgeRoutingLabel::TURN_RESTRICTION);
+        prev_key.GetType() == EdgeRoutingLabel::COMPLEX_TURN_RESTRICTION;
 
     if (!active_key && !next_edge.complex_turn_restriction_trigger) {
       // Common case, no turn restriction active, no turn restriction triggered.
-      return EdgeRoutingLabel::CreateGraphEdge(g_, start_idx, next_edge,
-                                               next_in_target_area);
+      return EdgeRoutingLabel::CreateGraphEdgeLabel(g_, start_idx, next_edge,
+                                                    next_in_target_area);
     }
 
     ActiveCtrs active_ctrs;
     if (active_key) {
       // We have active turn restrictions. Check if they forbid the next edge.
-      /*
-      active_ctrs =
-          ctr_list_.at(visited_edges_.at(prev.v_idx).key.GetCtrConfigId());
-          */
       active_ctrs = ctr_list_.at(prev_key.GetCtrConfigId());
       if (!ActiveCtrsAddNextEdge(g_, next_edge, &active_ctrs)) {
         // Forbidden turn!
@@ -378,13 +371,13 @@ class EdgeRouter2 {
 
     if (active_ctrs.empty()) {
       // No active ctrs exist. Return normal edge key.
-      return EdgeRoutingLabel::CreateGraphEdge(g_, start_idx, next_edge,
-                                               next_in_target_area);
+      return EdgeRoutingLabel::CreateGraphEdgeLabel(g_, start_idx, next_edge,
+                                                    next_in_target_area);
     } else {
       uint32_t id = ctr_list_.size();
       ctr_list_.push_back(active_ctrs);
-      return EdgeRoutingLabel::CreateTurnRestrictionEdge(g_, id, 0,
-                                                         next_in_target_area);
+      return EdgeRoutingLabel::CreateCTREdgeLabel(g_, id, 0,
+                                                  next_in_target_area);
     }
   }
 
@@ -410,7 +403,7 @@ class EdgeRouter2 {
       // that might trigger on the edge.
       // Note that no matter what, we're not in the target restricted area, so
       // set 'next_in_target_area' to false.
-      EdgeRoutingLabel edge_label = EdgeRoutingLabel::CreateGraphEdge(
+      EdgeRoutingLabel edge_label = EdgeRoutingLabel::CreateGraphEdgeLabel(
           g_, start_idx, curr_ge, /*next_in_target_area=*/false);
       if (curr_ge.complex_turn_restriction_trigger) {
         ActiveCtrs active_ctrs;
@@ -418,7 +411,7 @@ class EdgeRouter2 {
         if (!active_ctrs.empty()) {
           uint32_t id = ctr_list_.size();
           ctr_list_.push_back(active_ctrs);
-          edge_label = EdgeRoutingLabel::CreateTurnRestrictionEdge(
+          edge_label = EdgeRoutingLabel::CreateCTREdgeLabel(
               g_, id, 0, /*next_in_target_area=*/false);
         }
       }
@@ -451,8 +444,9 @@ class EdgeRouter2 {
     }
 
     // Get turn cost data.
-    const static TurnCostData all_good = {
-        .turn_costs = std::vector<uint8_t>(32, TURN_COST_ZERO_COMPRESSED)};
+    // const static TurnCostData all_good = {
+    //     .turn_costs = std::vector<uint8_t>(32, TURN_COST_ZERO_COMPRESSED)};
+    const static TurnCostData all_good(32, TURN_COST_ZERO_COMPRESSED);
     const TurnCostData* turn_cost_data = &all_good;
 
     const EdgeRoutingLabel prev_key = visited_edges_.at(prev.v_idx).key;
@@ -571,7 +565,7 @@ class EdgeRouter2 {
 
         // TODO: check for potential overflow.
         std::uint32_t v_idx =
-            FindOrAddVisitedEdge(EdgeRoutingLabel::CreateClusterEdge(
+            FindOrAddVisitedEdge(EdgeRoutingLabel::CreateClusterEdgeLabel(
                                      g_, prev.other_idx, i, /*bit=*/false),
                                  ctx.opt.use_astar_heuristic);
 
@@ -588,7 +582,8 @@ class EdgeRouter2 {
           // (cluster_id, offset), not (start_node, offset). So here, we have
           // to set again the current start node, because it might be
           // different from what is in an already existing edge.
-          ve.key = EdgeRoutingLabel::CreateClusterEdge(g_, prev.other_idx, i,
+          ve.key =
+              EdgeRoutingLabel::CreateClusterEdgeLabel(g_, prev.other_idx, i,
                                                        /*bit=*/false);
           ve.min_metric = new_metric;
           ve.prev_v_idx = prev.v_idx;
@@ -694,6 +689,7 @@ class EdgeRouter2 {
   }
 
   const Graph& g_;
+  // Vector of ActiveCtrs (which is std::vector<CTRPosition>).
   CTRList ctr_list_;
   std::vector<VisitedEdge> visited_edges_;
 

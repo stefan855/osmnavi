@@ -97,7 +97,8 @@ inline std::vector<HIGHWAY_LABEL> HighwayLabelsByPrefix(
   std::vector<HIGHWAY_LABEL> hws;
   for (HIGHWAY_LABEL hw = HW_MOTORWAY; hw < HW_MAX;
        hw = (HIGHWAY_LABEL)(hw + 1)) {
-    if (absl::StartsWith(HighwayLabelToString(hw), prefix)) {
+    // if (absl::StartsWith(HighwayLabelToString(hw), prefix)) {
+    if (HighwayLabelToString(hw).starts_with(prefix)) {
       hws.push_back(hw);
     }
   }

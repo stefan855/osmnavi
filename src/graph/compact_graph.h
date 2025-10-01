@@ -69,8 +69,7 @@ class CompactDirectedGraph {
   CompactDirectedGraph(uint32_t num_nodes,
                        const std::vector<FullEdge>& full_edges)
       : num_nodes_(num_nodes) {
-    turn_costs_.emplace_back(
-        std::vector<uint8_t>(32, TURN_COST_ZERO_COMPRESSED));
+    turn_costs_.push_back(TurnCostData(32, TURN_COST_ZERO_COMPRESSED));
     BuildGraph(full_edges);
   }
 
@@ -152,7 +151,8 @@ class CompactDirectedGraph {
 
     const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
     const uint32_t c_stop = edges_start_.at(in_ce.to_c_idx + 1);
-    TurnCostData tcd{{c_stop - c_start, TURN_COST_ZERO_COMPRESSED}};
+    // TurnCostData tcd{{c_stop - c_start, TURN_COST_ZERO_COMPRESSED}};
+    TurnCostData tcd(c_stop - c_start, TURN_COST_ZERO_COMPRESSED);
 
     for (uint32_t ce_idx = c_start; ce_idx < c_stop; ++ce_idx) {
       // Find corresponding edge in graph 'g'.
@@ -212,8 +212,8 @@ class CompactDirectedGraph {
         const GEdge& in_ge =
             gnode_find_edge(g, compact_to_graph.at(cn_idx),
                             compact_to_graph.at(in_ce.to_c_idx), in_ce.way_idx);
-        TurnCostData tcd =
-            ConvertTurnCostsAtEdge(g, in_ce, in_ge, compact_to_graph/*, &tcd*/);
+        TurnCostData tcd = ConvertTurnCostsAtEdge(g, in_ce, in_ge,
+                                                  compact_to_graph /*, &tcd*/);
 
         // No turn costs except blocked turns for non-time metrics.
         if (!is_time_metric) {

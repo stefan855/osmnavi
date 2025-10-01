@@ -65,7 +65,8 @@ OsmWayWrapper FillWayData(std::string_view xml_tags, int num_nodes = 2) {
   if (!xml_tags.empty()) {
     for (std::string_view tag :
          absl::StrSplit(xml_tags, "\n", absl::SkipEmpty())) {
-      if (absl::StartsWith(tag, "#")) {
+      // if (absl::StartsWith(tag, "#")) {
+      if (tag.starts_with('#')) {
         continue;
       }
       CHECK_S(ConsumePrefixIf("<tag k=\"", &tag)) << "tag <" << tag << "> err";

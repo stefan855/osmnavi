@@ -328,6 +328,7 @@ nlohmann::json ComputeRoute(const Graph& g,
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
 
+  build_graph::BuildGraphOptions opt;
   const Argli argli(argc, argv,
                     {
                         {.name = "pbf",
@@ -337,16 +338,15 @@ int main(int argc, char* argv[]) {
                          .desc = "Input OSM pbf file (such as planet file)."},
                         {.name = "n_threads",
                          .type = "int",
-                         .dflt = "10",
+                         .dflt = absl::StrCat(opt.n_threads),
                          .desc = "Number of threads to use"},
 
                     });
 
-  const std::string pbf = argli.GetString("pbf");
-  const int n_threads = argli.GetInt("n_threads");
+  opt.pbf = argli.GetString("pbf");
+  opt.n_threads = argli.GetInt("n_threads");
 
   // Read Road Network.
-  build_graph::BuildGraphOptions opt = {.pbf = pbf, .n_threads = n_threads};
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   // Release memory.
   meta.tiler.reset();

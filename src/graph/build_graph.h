@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #include "algos/components.h"
 #include "algos/tarjan.h"
@@ -21,6 +22,14 @@
 namespace build_graph {
 
 struct BuildGraphOptions {
+  BuildGraphOptions() {
+    unsigned int n = std::thread::hardware_concurrency();
+    if (n > 3) {
+      n_threads = n - 2;
+    } else {
+      n_threads = 2;
+    }
+  }
   // When building the graph, Support the following vehicle type.
   // Possible values are VH_MOTORCAR, VH_BICYCLE, VH_FOOT.
   // Note that currently only cars and partially bicycle are supported.
@@ -41,7 +50,7 @@ struct BuildGraphOptions {
   bool merge_tiny_clusters = false;
 
   // Max number of threads to use for parallel processing.
-  int n_threads = 8;
+  int n_threads;
 
   // Development, Debugging...
   Verbosity verb_turn_restrictions = Verbosity::Brief;

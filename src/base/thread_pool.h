@@ -15,7 +15,7 @@
       usleep(i * 10000);
       std::cerr << "Work" << i << " Thread" << thread_idx << std::endl;
     });
- 
+
   pool.Start(2);  // Start with two threads.
   pool.WaitAllFinished();
 
@@ -106,4 +106,36 @@ class ThreadPool {
       worker_func(thread_idx);
     }
   }
+};
+
+// Helper class to process data in an array/vector using a ThreadPool. The array
+// is partitioned into contiguous chunks, which are processed be threads.
+// ChunkDataT can be used to store data for each thread. For instance, it can be
+// used to store in which thread a chunk was executed in.
+template <typename ChunkDataT=int>
+class ArrayChunker {
+ public:
+  struct Chunk {
+    const size_t start;
+    const size_t stop;
+    ChunkDataT chunk_data;
+  };
+
+  ArrayChunker(size_t array_size, uint32_t chunk_size,
+               ChunkDataT chunk_data_default = (int)-1)
+      : chunk_size_(chunk_size) {
+    chunks.reserve(array_size / chunk_size + 1);
+    for (size_t i = 0; i < array_size; i += chunk_size) {
+      chunks.emplace_back(i, std::min(array_size, i + chunk_size),
+                          chunk_data_default);
+    }
+  }
+
+  size_t ChunkNo(size_t pos) const { return pos / chunk_size_; }
+  const Chunk& ChunkAt(size_t pos) const { return chunks.at(ChunkNo(pos)); }
+
+  std::vector<Chunk> chunks;
+
+ private:
+  uint32_t chunk_size_;
 };
