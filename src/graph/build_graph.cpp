@@ -1056,6 +1056,10 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
+              // Inverted edges should have the same contra way as the
+              // non-inverted original edge. This way, using EDGE_DIR(e) when
+              // querying the way information works the same for inverted and
+              // non-inverted edges.
               AddEdge(graph, idx2, idx1, /*inverted=*/true,
                       /*contra_way=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
@@ -1067,6 +1071,10 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/true,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
+              // Inverted edges should have the same contra way as the
+              // non-inverted original edge. This way, using EDGE_DIR(e) when
+              // querying the way information works the same for inverted and
+              // non-inverted edges.
               AddEdge(graph, idx1, idx2, /*inverted=*/true,
                       /*contra_way=*/true,
                       /*both_directions=*/false, way_idx, distance_cm,
@@ -1222,9 +1230,8 @@ void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
     ThreadPool pool;
     for (GCluster& cluster : meta->graph.clusters) {
       pool.AddWork([meta, &metric, &cluster](int) {
-        // TODO: support the other vehicle types.
         build_clusters::ComputeShortestClusterPaths(meta->graph, metric,
-                                                    VH_MOTORCAR, &cluster);
+                                                    meta->opt.vt, &cluster);
       });
     }
     // Faster with few threads only.
@@ -1235,16 +1242,16 @@ void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
 
 void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   FUNC_TIMER();
-  build_clusters::ExecuteLouvain(opt.n_threads, opt.align_clusters_to_ncc,
-                                 &meta->graph);
-  build_clusters::UpdateGraphClusterInformation(opt.align_clusters_to_ncc,
-                                                &meta->graph);
+  build_clusters::ExecuteLouvain(opt.n_threads, &meta->graph);
+  build_clusters::UpdateGraphClusterInformation(&meta->graph);
 
+#if 0
   if (opt.align_clusters_to_ncc && opt.merge_tiny_clusters) {
     build_clusters::MergeTinyClusters(&(meta->graph));
     build_clusters::UpdateGraphClusterInformation(opt.align_clusters_to_ncc,
                                                   &meta->graph);
   }
+#endif
 
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::PrintClusterInformation(meta->graph);
@@ -1262,6 +1269,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
                BuildGraphStats* stats) {
   FUNC_TIMER();
   const Graph& g = meta->graph;
+
+  for (const GCluster& c : g.clusters) {
+    stats->num_cluster_border_in_edges += c.border_in_edges.size();
+    stats->num_cluster_border_out_edges += c.border_out_edges.size();
+  }
 
   stats->num_nodes_in_pbf = reader.CountEntries(OsmPbfReader::ContentNodes);
   stats->num_ways_in_pbf = reader.CountEntries(OsmPbfReader::ContentWays);
@@ -1296,9 +1308,15 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
   std::vector<int64_t> num_forwards_node_id(MAX_NUM_EDGES_OUT + 1, 0);
   for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
     const GNode& n = g.nodes.at(node_idx);
-    if (n.cluster_id != INVALID_CLUSTER_ID) {
-      stats->num_nodes_in_cluster++;
+
+    if (n.cluster_border_node) {
+      stats->num_cluster_border_nodes++;
+    } else if (n.cluster_id != INVALID_CLUSTER_ID) {
+      stats->num_cluster_inside_nodes++;
+    } else {
+      stats->num_cluster_outside_nodes++;
     }
+
     if (n.large_component == 0) {
       stats->num_nodes_in_small_component++;
     }
@@ -1369,23 +1387,27 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       stats->num_cross_country_restricted +=
           (!e.inverted && e.cross_country && e.car_label != GEdge::LABEL_FREE);
 
-      if (n.cluster_id != other.cluster_id &&
-          n.cluster_id != INVALID_CLUSTER_ID &&
-          other.cluster_id != INVALID_CLUSTER_ID) {
-        stats->num_cross_cluster_edges += 1;
-        stats->num_cross_cluster_restricted +=
-            (e.car_label != GEdge::LABEL_FREE);
+      if (n.cluster_id == INVALID_CLUSTER_ID ||
+          other.cluster_id == INVALID_CLUSTER_ID) {
+        stats->num_cluster_outside_edges += 1;
+      } else if (n.cluster_id != other.cluster_id) {
+        stats->num_cluster_border_edges += 1;
         if (e.car_label != GEdge::LABEL_FREE) {
+          stats->num_cluster_border_edges_restr += 1;
           LOG_S(INFO) << absl::StrFormat(
-              "Cross cluster restricted edge %lld to %lld, label:%d way:%lld",
+              "Cluster border cluster restricted edge %lld to %lld, label:%d "
+              "way:%lld",
               n.node_id, other.node_id, (int)e.car_label,
               g.ways.at(e.way_idx).id);
         }
-        // By construction, this is 0, because dead-ends are omitted from
-        // clusters.
-        // stats->num_cross_cluster_restricted_dead_end +=
-        //     (e.car_label != GEdge::LABEL_FREE && edge_dead_end);
+      } else {
+        stats->num_cluster_inside_edges += 1;
       }
+
+      // By construction, this is 0, because dead-ends are omitted from
+      // clusters.
+      // stats->num_cross_cluster_restricted_dead_end +=
+      //     (e.car_label != GEdge::LABEL_FREE && edge_dead_end);
     }
     stats->max_edges =
         std::max(stats->max_edges, num_forward_edges + num_inverted_edges);
@@ -1498,8 +1520,6 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("Nodes needed:       %12lld", g.nodes.size());
   LOG_S(INFO) << absl::StrFormat("  Deadend nodes:    %12lld",
                                  stats.num_dead_end_nodes);
-  LOG_S(INFO) << absl::StrFormat("  Node in cluster:  %12lld",
-                                 stats.num_nodes_in_cluster);
   LOG_S(INFO) << absl::StrFormat("  Node in small comp:%11lld",
                                  stats.num_nodes_in_small_component);
   LOG_S(INFO) << absl::StrFormat("  Nodes no country: %12lld",
@@ -1568,12 +1588,32 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   LOG_S(INFO) << absl::StrFormat("  Cross country restr:%10lld",
                                  stats.num_cross_country_restricted);
 
-  LOG_S(INFO) << absl::StrFormat("  Cross cluster edges:%10lld",
-                                 stats.num_cross_cluster_edges);
-  LOG_S(INFO) << absl::StrFormat("  Cross cluster restr:%10lld",
-                                 stats.num_cross_cluster_restricted);
+  LOG_S(INFO) << absl::StrFormat("Clusters:           %12lld",
+                                 g.clusters.size());
+  LOG_S(INFO) << absl::StrFormat("  Num border nodes: %12lld",
+                                 stats.num_cluster_border_nodes);
+  LOG_S(INFO) << absl::StrFormat("  Num inside nodes: %12lld",
+                                 stats.num_cluster_inside_nodes);
+  LOG_S(INFO) << absl::StrFormat("  Num outside nodes:%12lld",
+                                 stats.num_cluster_outside_nodes);
+
+  LOG_S(INFO) << absl::StrFormat("  Num border edges: %12lld",
+                                 stats.num_cluster_border_edges);
+  LOG_S(INFO) << absl::StrFormat("  Num inside edges: %12lld",
+                                 stats.num_cluster_inside_edges);
+  LOG_S(INFO) << absl::StrFormat("  Num outside edges:%12lld",
+                                 stats.num_cluster_outside_edges);
+
+  LOG_S(INFO) << absl::StrFormat("  Num border in edges:%10lld",
+                                 stats.num_cluster_border_in_edges);
+  LOG_S(INFO) << absl::StrFormat("  Num border out edges:%9lld",
+                                 stats.num_cluster_border_out_edges);
+
+  LOG_S(INFO) << absl::StrFormat("  Num restr border edges:%7lld",
+                                 stats.num_cluster_border_edges_restr);
+
   // LOG_S(INFO) << absl::StrFormat("  Cross clust restr+de:%9lld",
-  //                                stats.num_cross_cluster_restricted_dead_end);
+  //                           stats.num_cross_cluster_restricted_dead_end);
 
   LOG_S(INFO) << "========= Memory Stats ===========";
   LOG_S(INFO) << absl::StrFormat("Bitset memory:      %12.2f MB",

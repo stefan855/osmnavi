@@ -278,6 +278,8 @@ struct GEdge {
   // Note that inverted edges have the same 'contra_way' as the non-inverted
   // edges, although (from, to) of the inverted edge does not exists in the
   // way's node list!
+  // This way, using EDGE_DIR(e) when querying the way's access (or other
+  // information) works the same for inverted and non-inverted edges.
   std::uint32_t contra_way : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
@@ -286,10 +288,10 @@ struct GEdge {
   // inverted edge is added to enable backward search.
   std::uint32_t inverted : 1;
   // True if the edge represents a way that enables both directions for at least
-  // one vehicle. In this case, there are two out edges at both end nodes.
-  // If false, then the way only enables one direction, and the other direction
-  // is represented by an inverted edge at the other node.
-  // Inverted edges always have false as value.
+  // one vehicle. In this case, there are is a forward edge at each of the two
+  // connected end nodes. If false, then the way only enables one direction,
+  // and the other direction is represented by an inverted edge at the other
+  // node. Inverted edges always have false as value.
   std::uint32_t both_directions : 1;
   // TODO: If the edge is restricted in access (DESTINATION etc). For cars only.
   RESTRICTION car_label : 3;
@@ -317,6 +319,13 @@ struct GEdge {
 
 // Contains the list of border nodes and some metadata for a cluster.
 struct GCluster {
+  struct EdgeDescriptor {
+    uint32_t g_from_idx = INFU32;
+    uint32_t g_edge_idx = INFU32;
+    uint32_t c_from_idx = INFU32;
+    uint32_t c_edge_idx = INFU32;
+    uint32_t pos = INFU32;
+  };
   std::uint32_t cluster_id = 0;
   std::uint32_t num_nodes = 0;
   std::uint32_t num_border_nodes = 0;
@@ -325,15 +334,20 @@ struct GCluster {
   std::uint32_t num_inner_edges = 0;
   std::uint32_t num_outer_edges = 0;
   // Sorted vector containing the border node indexes (pointing into
-  // Graph::nodes). Sorted to improve data locality.
+  // Graph::nodes).
   std::vector<std::uint32_t> border_nodes;
   // For each border node, list distances to all other border nodes.
   // Distance INFU32 indicates that a node can't be reached.
+
+  // Incoming edges from the border node of another cluster.
+  std::vector<EdgeDescriptor> border_in_edges;
+  // Outgoing edges to a border node of another cluster.
+  std::vector<EdgeDescriptor> border_out_edges;
+
   std::vector<std::vector<std::uint32_t>> distances;
   // Color number for drawing clusters. Avoids neighbouring clusters having the
   // same color.
   std::uint16_t color_no = 0;
-  std::uint16_t ncc = 0;
 
   uint32_t FindBorderNodePos(uint32_t node_idx) const {
     const auto it =
@@ -492,6 +506,18 @@ struct Graph {
     }
   }
 };
+
+inline const GCluster::EdgeDescriptor* FindEdgeDesc(
+    const Graph& g, const std::vector<GCluster::EdgeDescriptor>& descs,
+    uint32_t g_from_idx, uint32_t g_target_idx) {
+  for (const auto& d : descs) {
+    if (d.g_from_idx == g_from_idx &&
+        g.edges.at(d.g_edge_idx).target_idx == g_target_idx) {
+      return &d;
+    }
+  }
+  return nullptr;
+}
 
 inline int64_t GetGNodeId(const Graph& g, uint32_t node_idx) {
   return g.nodes.at(node_idx).node_id;

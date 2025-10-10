@@ -4,6 +4,7 @@
 
 #include <charconv>
 #include <filesystem>
+#include <optional>
 #include <regex>
 #include <string>
 #include <vector>
@@ -171,6 +172,42 @@ inline std::vector<std::string> GetFilesWithWildcard(
     }
   }
   return files;
+}
+
+#define FindInMapOrFail(container, key) \
+  FindInMapOrFailInternal(container, key, __FILE__, __LINE__)
+
+template <typename Map>
+auto FindInMapOrFailInternal(const Map& container,
+                             const typename Map::key_type& key,
+                             std::string filename, int line) -> const
+    typename Map::mapped_type& {
+  auto it = container.find(key);
+  CHECK_S(it != container.end())
+      << "can't find element for key <" << key << "> file:" << filename << ":"
+      << line;
+  return it->second;
+}
+
+template <typename Map>
+auto FindInMapOptional(const Map& container, const typename Map::key_type& key)
+    -> std::optional<typename Map::mapped_type> {
+  auto it = container.find(key);
+  if (it != container.end()) {
+    return it->second;
+  }
+  return std::nullopt;
+}
+
+template <typename Map>
+auto FindInMapOrDefault(const Map& container, const typename Map::key_type& key,
+                        const typename Map::mapped_type& dflt) -> const
+    typename Map::mapped_type& {
+  auto it = container.find(key);
+  if (it != container.end()) {
+    it->second;
+  }
+  return dflt;
 }
 
 inline void LogMemoryUsage() {

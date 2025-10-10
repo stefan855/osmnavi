@@ -177,12 +177,22 @@ struct NodeLineRemover {
             precluster_nodes->AddBit(node_pos);
           }
         } else {
+          // The line needs at least 3 nodes (one is intermediate. Only
+          // intermediate nodes are preclustered.
+          //
+          // TODO: Probably in general (tested for Switzerland and Germany),
+          // commenting the following code out improves the clustering, but
+          // increases running time.
+#if 0
           CHECK_GT_S(nl.vnodes.size(), 2);
-          count_line_nodes += nl.vnodes.size() - 2;
-          for (size_t i = 1; i < nl.vnodes.size() - 1; ++i) {
-            const uint32_t node_pos = nl.vnodes.at(i);
-            precluster_nodes->AddBit(node_pos);
+          if (nl.vnodes.size() > 2) {
+            count_line_nodes += nl.vnodes.size() - 2;
+            for (size_t i = 1; i < nl.vnodes.size() - 1; ++i) {
+              const uint32_t node_pos = nl.vnodes.at(i);
+              precluster_nodes->AddBit(node_pos);
+            }
           }
+#endif
         }
       }
     }

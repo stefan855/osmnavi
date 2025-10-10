@@ -14,7 +14,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
-#include "algos/compact_dijkstra.h"
+#include "algos/compact_edge_dijkstra.h"
 #include "algos/edge_router.h"
 #include "algos/edge_router2.h"
 #include "algos/router.h"
@@ -193,6 +193,9 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
   DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/false,
                           RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/false,
+                          RoutingMetricTime(),
+                          /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
   DoCompactRoute(comp_data, start_idx, target_idx, csv_prefix);
   // RouteOnCompactGraph(comp_data, start_idx, target_idx, Verbosity::Brief);
@@ -218,6 +221,9 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
   DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/true,
                           RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/false, csv_prefix);
+  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/true,
+                          RoutingMetricTime(),
+                          /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
@@ -514,7 +520,7 @@ int main(int argc, char* argv[]) {
         .type = "string",
         .dflt = opt.left_traffic_config,
         .desc = "Location of left traffic countries config file."},
-
+#if 0
        {.name = "align_clusters_to_ncc",
         .type = "bool",
         .dflt = opt.align_clusters_to_ncc ? "true" : "false",
@@ -525,6 +531,7 @@ int main(int argc, char* argv[]) {
         .type = "bool",
         .dflt = opt.merge_tiny_clusters ? "true" : "false",
         .desc = "Merge tiny clusters at country borders."},
+#endif
 
        {.name = "n_threads",
         .type = "int",
@@ -566,9 +573,11 @@ int main(int argc, char* argv[]) {
   opt.admin_filepattern = argli.GetString("admin_filepattern");
   opt.routing_config = argli.GetString("routing_config");
   opt.left_traffic_config = argli.GetString("left_traffic_config");
+#if 0
   opt.align_clusters_to_ncc = argli.GetBool("align_clusters_to_ncc");
   opt.merge_tiny_clusters =
       opt.align_clusters_to_ncc && argli.GetBool("merge_tiny_clusters");
+#endif
   opt.n_threads = argli.GetInt("n_threads");
   opt.verb_turn_restrictions =
       ParseVerbosityFlag(argli.GetString("verb_turn_restrictions"));

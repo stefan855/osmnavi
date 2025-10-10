@@ -5,6 +5,7 @@
 
 #include "absl/strings/str_format.h"
 #include "algos/compact_dijkstra.h"
+#include "algos/compact_edge_dijkstra.h"
 #include "algos/routing_metric.h"
 #include "base/argli.h"
 #include "base/thread_pool.h"
@@ -116,8 +117,7 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
       const GNode& n1 =
           gd.g.nodes.at(gd.compact_to_graph_nodemap.at(from_node));
       uint32_t n2_idx = gd.compact_to_graph_nodemap.at(edges.at(i).to_c_idx);
-      const GEdge* edge =
-          FindEdgeBetweenNodes(gd.g, n1, n2_idx, VH_MOTORCAR);
+      const GEdge* edge = FindEdgeBetweenNodes(gd.g, n1, n2_idx, VH_MOTORCAR);
       const GNode& n2 = gd.g.nodes.at(n2_idx);
       CHECK_NE_S(edge, nullptr);
       int64_t way_id = gd.g.ways.at(edge->way_idx).id;
@@ -198,7 +198,7 @@ void SingleSourceEdgeDijkstraWorker(const GraphData& gd, uint32_t poi_c_idx,
                                           poi_c_idx);
 #endif
   router.Route(
-      gd.cg, poi_c_idx,
+      gd.cg, {.c_start_idx = poi_c_idx},
       {.store_spanning_tree_edges = true, .handle_restricted_access = true,
        /* .restricted_access_nodes = restricted_access_nodes */});
   const std::vector<uint32_t>& spanning_tree_edges =

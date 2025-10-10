@@ -111,7 +111,11 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
   }
 
   const GNode& other = g.nodes.at(edge.target_idx);
-  if (opt.restrict_to_cluster && other.cluster_id != opt.restrict_cluster_id) {
+  if (opt.restrict_to_cluster &&
+      from_node.cluster_id != opt.restrict_cluster_id &&
+      other.cluster_id != opt.restrict_cluster_id) {
+    // Prevents edges that aren't at least connected to one cluster node.
+    // Note that this allows border edges between clusters.
     return true;
   }
 

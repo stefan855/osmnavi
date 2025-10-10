@@ -240,61 +240,6 @@ class CompactDirectedGraph {
         deduper.num_added());
   }
 
-#if 0
-  // Add simple turn restrictions, transforming from Graph format to
-  // CompactGraph format.
-  void AddSimpleTurnRestrictions(
-      const Graph& g, const SimpleTurnRestrictionMap& simple_tr_map,
-      const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
-    CHECK_S(simple_tr_map_.empty());
-    for (const auto& [g_key, g_data] : simple_tr_map) {
-      TurnRestriction::TREdge new_key;
-      if (!ConvertGraphBasedTurnRestrictionEdge(g_key, graph_to_compact_nodemap,
-                                                &new_key)) {
-        continue;
-      }
-      const int64_t key_edge_idx =
-          FindEdge(new_key.from_node_idx, new_key.to_node_idx, new_key.way_idx);
-      if (key_edge_idx < 0) {
-        continue;
-      }
-
-      uint32_t allowed_edge_bits = 0;
-      uint32_t bits = g_data.allowed_edge_bits;
-      uint64_t g_start = g.nodes.at(g_key.to_node_idx).edges_start_pos;
-      uint64_t cg_start = edges_start_.at(new_key.to_node_idx);
-      bool error = false;
-      // Iterate edges starting at new_key.to_node_idx (via-node).
-      // Iterates over the offsets of the allowed edges.
-      while (!error && bits != 0) {
-        uint32_t g_offset = __builtin_ctz(bits);
-        bits = bits - (1u << g_offset);
-
-        const GEdge& g_edge = g.edges.at(g_start + g_offset);
-        const auto iter = graph_to_compact_nodemap.find(g_edge.target_idx);
-        if (iter == graph_to_compact_nodemap.end()) {
-          error = true;
-          break;
-        }
-        // Now find this edge in the compact graph.
-        const int64_t to_edge_idx =
-            FindEdge(new_key.to_node_idx, iter->second, g_edge.way_idx);
-        if (to_edge_idx < 0) {
-          error = true;
-          break;
-        }
-
-        // Encode offset into the new data;
-        allowed_edge_bits |= (1u << (to_edge_idx - cg_start));
-      }
-      if (!error) {
-        simple_tr_map_[static_cast<uint32_t>(key_edge_idx)] = allowed_edge_bits;
-        edges_.at(key_edge_idx).simple_tr_trigger = 1;
-      }
-    }
-  }
-#endif
-
   // Add complex turn restrictions from the standard Graph format, which means
   // that node references have to be converted to reference within the
   // compact_graph.
@@ -345,12 +290,6 @@ class CompactDirectedGraph {
     LOG_S(INFO) << complex_trs_.size() << " of " << graph_based_trs.size()
                 << " complex turn restrictions added";
   }
-
-#if 0
-  inline const absl::flat_hash_map<uint32_t, uint32_t>& GetSimpleTRMap() const {
-    return simple_tr_map_;
-  }
-#endif
 
   inline const std::vector<ComplexTurnRestriction>& GetComplexTRS() const {
     return complex_trs_;
@@ -544,6 +483,12 @@ inline void CollectEdgesForCompactGraph(
   for (uint32_t node_idx : routing_nodes) {
     // Check for duplicates.
     if (!graph_to_compact_nodemap->contains(node_idx)) {
+      /*
+      LOG_S(INFO) << absl::StrFormat(
+          "Add mapping node_idx %lld(%u) to c_idx %lld",
+          GetGNodeIdSafe(g, node_idx), node_idx,
+          graph_to_compact_nodemap->size());
+          */
       (*graph_to_compact_nodemap)[node_idx] = graph_to_compact_nodemap->size();
       q.push(node_idx);
     }
@@ -559,9 +504,18 @@ inline void CollectEdgesForCompactGraph(
   if (opt.avoid_dead_end) {
     for (uint32_t node_idx : routing_nodes) {
       if (g.nodes.at(node_idx).dead_end) {
+        CHECK_S(!opt.restrict_to_cluster)
+            << "Restricted cluster not allowed when routing node in dead end "
+            << g.nodes.at(node_idx).node_id;
         uint32_t bridge_idx;
         FindBridge(g, node_idx, nullptr, &bridge_idx);
         if (!graph_to_compact_nodemap->contains(bridge_idx)) {
+          /*
+          LOG_S(INFO) << absl::StrFormat(
+              "Add mapping bridge_idx %lld(%u) to c_idx %lld",
+              GetGNodeIdSafe(g, bridge_idx), bridge_idx,
+              graph_to_compact_nodemap->size());
+              */
           (*graph_to_compact_nodemap)[bridge_idx] =
               graph_to_compact_nodemap->size();
           q.push(bridge_idx);
@@ -593,7 +547,10 @@ inline void CollectEdgesForCompactGraph(
     }
 
     // Examine neighbours.
+    // LOG_S(INFO) << "Expanding node " << GetGNodeIdSafe(g, node_idx);
     for (const GEdge& edge : gnode_forward_edges(g, node_idx)) {
+      // LOG_S(INFO) << "Edge to " << GetGNodeIdSafe(g, edge.target_idx);
+
       const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
       if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
@@ -601,25 +558,8 @@ inline void CollectEdgesForCompactGraph(
         LOG_S(INFO) << "Reject edge from " << GetGNodeIdSafe(g, node_idx)
                     << " to " << GetGNodeIdSafe(g, edge.target_idx);
 #endif
-#if 0
-        if (GetGNodeIdSafe(g, node_idx) == 3108533807 ||
-            GetGNodeIdSafe(g, node_idx) == 10679042406) {
-          LOG_S(INFO) << absl::StrFormat(
-              "Disallow travel ifrom %lld to node %lld",
-              GetGNodeIdSafe(g, node_idx),
-              GetGNodeIdSafe(g, edge.target_idx));
-        }
-#endif
         continue;
       }
-#if 0
-      if (GetGNodeIdSafe(g, node_idx) == 3108533807 ||
-          GetGNodeIdSafe(g, node_idx) == 10679042406) {
-        LOG_S(INFO) << absl::StrFormat("Allow travel from %lld to node %lld",
-                                       GetGNodeIdSafe(g, node_idx),
-                                       GetGNodeIdSafe(g, edge.target_idx));
-      }
-#endif
 
       uint32_t other_c_idx;
       auto iter = graph_to_compact_nodemap->find(edge.target_idx);
@@ -627,6 +567,12 @@ inline void CollectEdgesForCompactGraph(
         // The node hasn't been seen before. This means we need to allocate a
         // new id, and we need to enqueue the node because it hasn't been
         // handled yet.
+        /*
+        LOG_S(INFO) << absl::StrFormat(
+            "Add mapping node_idx %lld(%u) to c_idx %lld",
+            GetGNodeIdSafe(g, edge.target_idx), edge.target_idx,
+            graph_to_compact_nodemap->size());
+            */
         other_c_idx = graph_to_compact_nodemap->size();
         (*graph_to_compact_nodemap)[edge.target_idx] =
             graph_to_compact_nodemap->size();
@@ -648,20 +594,36 @@ inline void CollectEdgesForCompactGraph(
            .uturn_allowed = edge.car_uturn_allowed});
     }
 
-    if (undirected_expand) {
+    // Expand in inverse direction if necessary.
+    // Special case: Expand border nodes of clusters in inverse direction too,
+    // because we need the incoming edges.
+    //
+    // TODO: This is actually too complicated. Move cluster edge collection
+    // somewhere else.
+    if (undirected_expand ||
+        (opt.restrict_to_cluster && c_idx < routing_nodes.size())) {
       // Examine neighbours connected by backward edges and add them to the
       // queue if they haven't been seen yet.
+      // LOG_S(INFO) << "Inverse Expanding node " << GetGNodeIdSafe(g,
+      // node_idx);
       for (const GEdge& edge : gnode_inverted_edges(g, node_idx)) {
         // for (size_t i = node.num_edges_out; i < gnode_total_edges(node);
         // ++i) { const GEdge& edge = node.edges[i];
+        // LOG_S(INFO) << "Edge to " << GetGNodeIdSafe(g, edge.target_idx);
         const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
         if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
-                              EDGE_INVERSE_DIR(edge))) {
+                              EDGE_DIR(edge))) {
           continue;
         }
 
         auto iter = graph_to_compact_nodemap->find(edge.target_idx);
         if (iter == graph_to_compact_nodemap->end()) {
+          /*
+          LOG_S(INFO) << absl::StrFormat(
+              "Add mapping node_idx %lld(%u) to c_idx %lld",
+              GetGNodeIdSafe(g, edge.target_idx), edge.target_idx,
+              graph_to_compact_nodemap->size());
+              */
           (*graph_to_compact_nodemap)[edge.target_idx] =
               graph_to_compact_nodemap->size();
           q.push(edge.target_idx);

@@ -63,6 +63,7 @@ class OsmWrapper {
 
 inline void AddCluster(Graph& g, uint32_t cluster_id, GCluster c) {
   CHECK_EQ_S(cluster_id, g.clusters.size());
+  c.cluster_id = cluster_id;
   g.clusters.push_back(c);
 }
 

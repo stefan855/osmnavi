@@ -9,6 +9,7 @@
 #include "absl/container/btree_map.h"
 #include "absl/strings/str_format.h"
 #include "algos/compact_dijkstra.h"
+#include "algos/compact_edge_dijkstra.h"
 #include "algos/louvain.h"
 #include "algos/louvain_precluster.h"
 #include "algos/router.h"
@@ -31,71 +32,61 @@ inline bool EligibleNodeForLouvain(const GNode& n) {
   return n.dead_end == 0 && n.large_component == 1;
 }
 
-// Check if node is eligible for louvain clustering and if it has country code
-// 'ncc'.
-inline bool EligibleNodeForLouvain(const GNode& n, std::uint16_t ncc) {
-  return EligibleNodeForLouvain(n) && n.ncc == ncc;
-}
-
 // Create The first two levels of the Louvain graph and return them in a vector.
 // The first level is a straight copy of the input. The second level has
 // specific kinds of nodes(line nodes, restricted nodes, turn restriction nodes)
 // clustered.
 inline TGVec CreateInitalLouvainGraph(
-    const Graph& graph, const GNodeToLouvainIdx& np_to_louvain_pos,
-    uint16_t ncc) {
+    const Graph& graph, const GNodeToLouvainIdx& np_to_louvain_pos) {
   TGVec gvec;
   gvec.push_back(std::make_unique<louvain::LouvainGraph>());
   louvain::LouvainGraph* lg = gvec.back().get();
-  // Nodes that have a restricted edge.
-  HugeBitset precluster_restricted_nodes;
-  // Nodes that are on a line, which can be collapsed.
+  // "Normal" nodes that should be preclustered such as nodes in restricted
+  // areas or nodes that are part of a complex turn restriction.
+  HugeBitset precluster_common_nodes;
+  // Nodes that are on a line, which can be collapsed into one edge.
   HugeBitset precluster_line_nodes;
+
+  // Add nodes from complex turn restrictions.
+  for (const TurnRestriction& ctr : graph.complex_turn_restrictions) {
+    for (const TurnRestriction::TREdge& tre : ctr.path) {
+      const auto it1 = np_to_louvain_pos.find(tre.from_node_idx);
+      if (it1 != np_to_louvain_pos.end()) {
+        precluster_common_nodes.AddBit(it1->second);
+      }
+      const auto it2 = np_to_louvain_pos.find(tre.to_node_idx);
+      if (it2 != np_to_louvain_pos.end()) {
+        precluster_common_nodes.AddBit(it2->second);
+      }
+    }
+  }
 
   for (auto [gnode_pos, louvain_pos] : np_to_louvain_pos) {
     lg->AddNode(louvain_pos, gnode_pos);
     const GNode& n = graph.nodes.at(gnode_pos);
+    // const bool n_has_node_tags = (graph.FindNodeTags(n.node_id) != nullptr);
 
     for (const GEdge& e : gnode_all_edges(graph, gnode_pos)) {
       const GNode& other = graph.nodes.at(e.target_idx);
 
-      if (ncc == INVALID_NCC) {
-        if (e.target_idx != gnode_pos && EligibleNodeForLouvain(other)) {
-          auto it = np_to_louvain_pos.find(e.target_idx);
-          CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
-          if (e.unique_target) {
-            lg->AddEdge(it->second, /*weight=*/1);
-          }
-          // The code below needs to run for all, also non-unique edges.
-          if (e.car_label != GEdge::LABEL_FREE) {
-            // Precluster node connected to restricted edges.
-            precluster_restricted_nodes.AddBit(louvain_pos);
-            precluster_restricted_nodes.AddBit(it->second);
-          }
-          if (n.simple_turn_restriction_via_node ||
-              other.simple_turn_restriction_via_node) {
-            // This edge might be part of a turn restriction. Add both endpoints
-            // of the edge to preclustering.
-            precluster_restricted_nodes.AddBit(louvain_pos);
-            precluster_restricted_nodes.AddBit(it->second);
-          }
+      if (e.target_idx != gnode_pos && EligibleNodeForLouvain(other)) {
+        auto it = np_to_louvain_pos.find(e.target_idx);
+        CHECK_S(it != np_to_louvain_pos.end());
+
+        if (e.unique_target) {
+          lg->AddEdge(it->second, /*weight=*/1);
         }
-      } else {
-        CHECK_S(false);
-        if (e.unique_target && e.target_idx != gnode_pos &&
-            EligibleNodeForLouvain(other, n.ncc)) {
-          auto it = np_to_louvain_pos.find(e.target_idx);
-          CHECK_S(it != np_to_louvain_pos.end()) << ncc << ":" << n.ncc;
-          lg->AddEdge(it->second, /*weight=*/n.ncc != other.ncc ? 1 : 1);
-          // If the edge is restricted then we want to precluster the node.
-          if (e.car_label != GEdge::LABEL_FREE) {
-            precluster_restricted_nodes.AddBit(louvain_pos);
-          }
+
+        // The code below needs to run for all, also non-unique edges.
+        if (e.car_label != GEdge::LABEL_FREE ||
+            n.simple_turn_restriction_via_node ||
+            other.simple_turn_restriction_via_node /* || n_has_node_tags ||
+            graph.FindNodeTags(other.node_id) != nullptr*/) {
+          precluster_common_nodes.AddBit(louvain_pos);
+          precluster_common_nodes.AddBit(it->second);
         }
       }
     }
-    // Check that the new node has actually some edges.
-    // CHECK_GT_S(lg->nodes.back().num_edges, 0);
   }
 
   LOG_S(INFO) << absl::StrFormat("Louvain nodes: %12d", lg->nodes.size());
@@ -105,11 +96,11 @@ inline TGVec CreateInitalLouvainGraph(
     // Create the first level with preclustering.
     // louvain::NodeLineRemover::ClusterLineNodes(lg);
     louvain::NodeLineRemover::CollectLineNodes(*lg, &precluster_line_nodes);
-    LOG_S(INFO) << absl::StrFormat("Louvain precluster restricted: %12d",
-                                   precluster_restricted_nodes.CountBits());
+    LOG_S(INFO) << absl::StrFormat("Louvain precluster common: %12d",
+                                   precluster_common_nodes.CountBits());
     LOG_S(INFO) << absl::StrFormat("Louvain precluster lines:      %12d",
                                    precluster_line_nodes.CountBits());
-    precluster_line_nodes.AddFrom(precluster_restricted_nodes);
+    precluster_line_nodes.AddFrom(precluster_common_nodes);
     LOG_S(INFO) << absl::StrFormat("Louvain precluster combined:   %12d",
                                    precluster_line_nodes.CountBits());
     louvain::PreclusterNodes(&precluster_line_nodes, lg);
@@ -172,7 +163,6 @@ void MainLouvainLoop(TGVec* gvec) {
 
 // Store the cluster information in Graph g.
 void AddClustersAndClusterIds(
-    std::uint16_t ncc,
     const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec, Graph* g) {
   FUNC_TIMER();
   const louvain::LouvainGraph& lg = *gvec.front();
@@ -185,7 +175,7 @@ void AddClustersAndClusterIds(
   CHECK_LT_S(g->clusters.size(), INVALID_CLUSTER_ID);
   for (uint32_t cluster_id = offset; cluster_id < g->clusters.size();
        ++cluster_id) {
-    g->clusters.at(cluster_id).ncc = ncc;
+    // g->clusters.at(cluster_id).ncc = INVALID_NCC;
     g->clusters.at(cluster_id).cluster_id = cluster_id;
   }
 
@@ -204,12 +194,12 @@ void AddClustersAndClusterIds(
 }  // namespace
 
 // Experimental.
-inline void ExecuteLouvain(int n_threads, bool align_clusters_to_ncc,
-                           Graph* graph) {
+inline void ExecuteLouvain(int n_threads, Graph* graph) {
   FUNC_TIMER();
 
-  // node_maps contains for each country a mapping from node positions in
-  // graph.nodes to the precomputed node positions in the louvain graph.
+  // 'np_to_louvain_pos' contains a mapping from node positions in graph.nodes
+  // to the precomputed node positions in the louvain graph.
+  //
   // The map is sorted by key in ascending order, and by construction, the
   // pointed to values are also sorted.
   //
@@ -222,8 +212,9 @@ inline void ExecuteLouvain(int n_threads, bool align_clusters_to_ncc,
   // TODO: Instead of a btree, a vector could be used. Binary search is needed
   // to find a node. It is not clear if this would be faster though, because
   // lookup in btrees is more cpu-cache friendly than binary search in a vector.
-  std::vector<GNodeToLouvainIdx*> node_maps(MAX_NCC, nullptr);
-  // Iterate over all nodes in the graph and - per country - update the node for
+
+  GNodeToLouvainIdx np_to_louvain_pos;
+  // Iterate over all nodes in the graph and update the node for
   // eligble nodes.
   for (uint32_t gnode_pos = 0; gnode_pos < graph->nodes.size(); ++gnode_pos) {
     const GNode& n = graph->nodes.at(gnode_pos);
@@ -234,19 +225,19 @@ inline void ExecuteLouvain(int n_threads, bool align_clusters_to_ncc,
             EligibleNodeForLouvain(graph->nodes.at(e.target_idx))) {
           // Edge between two eligible nodes.
           // Node 'n' at position 'gnode_pos' is good to use.
-          const auto ncc = align_clusters_to_ncc ? n.ncc : INVALID_NCC;
-          GNodeToLouvainIdx* np_to_louvain_pos = node_maps.at(ncc);
-          if (np_to_louvain_pos == nullptr) {
-            np_to_louvain_pos = new GNodeToLouvainIdx();
-            node_maps.at(ncc) = np_to_louvain_pos;
-          }
-          (*np_to_louvain_pos)[gnode_pos] = np_to_louvain_pos->size();
+          np_to_louvain_pos[gnode_pos] = np_to_louvain_pos.size();
           break;
         }
       }
     }
   }
 
+  TGVec gvec = CreateInitalLouvainGraph(*graph, np_to_louvain_pos);
+  np_to_louvain_pos.clear();
+  MainLouvainLoop(&gvec);
+  AddClustersAndClusterIds(gvec, graph);
+
+#if 0
   // For each country, launch a worker that builds the louvain graph.
   ThreadPool pool;
   for (size_t ncc = 0; ncc < node_maps.size(); ++ncc) {
@@ -264,10 +255,10 @@ inline void ExecuteLouvain(int n_threads, bool align_clusters_to_ncc,
   }
   pool.Start(n_threads);
   pool.WaitAllFinished();
+#endif
 }
 
-inline void UpdateGraphClusterInformation(bool align_clusters_to_ncc,
-                                          Graph* g) {
+inline void UpdateGraphClusterInformation(Graph* g) {
   FUNC_TIMER();
   // Mark cross-cluster edges and count edge types.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
@@ -296,14 +287,7 @@ inline void UpdateGraphClusterInformation(bool align_clusters_to_ncc,
           cluster.num_inner_edges++;
         }
       } else {
-        if (align_clusters_to_ncc) {
-          if (other.cluster_id == INVALID_CLUSTER_ID) {
-            CHECK_NE_S(n.ncc, other.ncc);
-          }
-        } else {
-          // We didn't align to country borders. All nodes must be clustered.
-          CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
-        }
+        CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
         cluster.num_outer_edges++;
         n.cluster_border_node = 1;
         other.cluster_border_node = 1;
@@ -336,6 +320,75 @@ inline void UpdateGraphClusterInformation(bool align_clusters_to_ncc,
   }
 }
 
+// This finds and adds information about border incoming/outgoing edges, i.e.
+// edges that connect 'cluster' with another cluster at border edges.
+void AddBorderEdgeInformation(
+    const Graph& g, const CompactDirectedGraph& cg,
+    const absl::flat_hash_map<uint32_t, uint32_t>& gnode_to_compact,
+    GCluster* cluster) {
+  // const std::vector<uint32_t>& cg_edges_start = cg.edges_start();
+  // const std::vector<CompactDirectedGraph::PartialEdge>& cg_edges =
+  // cg.edges();
+
+  // Iterate over all border nodes and collect information about
+  // incoming/outgoing edges from/to other clusters.
+  for (uint32_t cn_idx = 0; cn_idx < cluster->border_nodes.size(); ++cn_idx) {
+    uint32_t gn_idx = cluster->border_nodes.at(cn_idx);
+    const GNode& gn = g.nodes.at(gn_idx);
+    CHECK_EQ_S(gn.cluster_id, cluster->cluster_id) << gn.node_id;
+
+    // Iterate over edges leaving from border node to another cluster.
+    for (uint32_t ge_idx = gn.edges_start_pos;
+         ge_idx < gn.edges_start_pos + gn.num_forward_edges; ++ge_idx) {
+      const GEdge& ge = g.edges.at(ge_idx);
+      const GNode& gother = g.nodes.at(ge.target_idx);
+      // Is this an edge connecting to another cluster?
+      if (gother.cluster_id != cluster->cluster_id &&
+          gother.cluster_id != INVALID_CLUSTER_ID) {
+        uint32_t ct_idx = FindInMapOrFail(gnode_to_compact, ge.target_idx);
+        int64_t ce_idx = cg.FindEdge(cn_idx, ct_idx, ge.way_idx);
+        CHECK_S(ce_idx >= 0);
+        cluster->border_out_edges.push_back(
+            {.g_from_idx = gn_idx,
+             .g_edge_idx = ge_idx,
+             .c_from_idx = cn_idx,
+             .c_edge_idx = (uint32_t)ce_idx,
+             .pos = (uint32_t)cluster->border_out_edges.size()});
+        // Edges between clusters should not trigger complex restrictions.
+        CHECK_S(cg.edges().at(ce_idx).complex_tr_trigger == 0);
+      }
+    }
+
+    // Iterate over edges arriving from another cluster to border node.
+    for (const FullEdge& gfe : gnode_incoming_edges(g, gn_idx)) {
+      CHECK_EQ_S(gfe.target_idx(g), gn_idx);
+      uint32_t g_from_idx = gfe.start_idx();
+      const GNode& gn_from = g.nodes.at(g_from_idx);
+      if (gn_from.cluster_id != cluster->cluster_id &&
+          gn_from.cluster_id != INVALID_CLUSTER_ID) {
+        /*
+        LOG_S(INFO) << absl::StrFormat("Edge %lld->%lld cluster %u->%u",
+                                       gn_from.node_id, gn.node_id,
+                                       gn_from.cluster_id, gn.cluster_id);
+                                       */
+        uint32_t c_from_idx = FindInMapOrFail(gnode_to_compact, g_from_idx);
+        int64_t ce_idx = cg.FindEdge(c_from_idx, cn_idx, gfe.gedge(g).way_idx);
+        CHECK_S(ce_idx >= 0);
+        cluster->border_in_edges.push_back(
+            {.g_from_idx = g_from_idx,
+             .g_edge_idx = gfe.gedge_idx(g),
+             .c_from_idx = c_from_idx,
+             .c_edge_idx = (uint32_t)ce_idx,
+             .pos = (uint32_t)cluster->border_in_edges.size()});
+      }
+    }
+  }
+  LOG_S(INFO) << absl::StrFormat(
+      "Cluster %d has border nodes:%lld in edges:%lld out edges:%lld",
+      cluster->cluster_id, cluster->border_nodes.size(),
+      cluster->border_in_edges.size(), cluster->border_out_edges.size());
+}
+
 // Compute all shortest paths between border nodes in a cluster. The results
 // are stored in 'cluster.distances'.
 inline void ComputeShortestClusterPaths(const Graph& g,
@@ -350,6 +403,7 @@ inline void ComputeShortestClusterPaths(const Graph& g,
   // Construct a minimal graph with all necessary information.
   uint32_t num_nodes = 0;
   std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  absl::flat_hash_map<uint32_t, uint32_t> gnode_to_compact;
   CollectEdgesForCompactGraph(g, metric,
                               {.vt = vt,
                                .avoid_restricted_access_edges = true,
@@ -357,9 +411,10 @@ inline void ComputeShortestClusterPaths(const Graph& g,
                                .restrict_cluster_id = cluster->cluster_id},
                               cluster->border_nodes,
                               /*undirected_expand=*/false, &num_nodes,
-                              &full_edges);
+                              &full_edges, &gnode_to_compact);
   CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
   const CompactDirectedGraph cg(num_nodes, full_edges);
+  AddBorderEdgeInformation(g, cg, gnode_to_compact, cluster);
   cg.LogStats();
 
   // Execute single source Dijkstra from every border node.
@@ -374,6 +429,55 @@ inline void ComputeShortestClusterPaths(const Graph& g,
     }
   };
   CHECK_EQ_S(cluster->distances.size(), cluster->border_nodes.size());
+}
+
+// Compute all shortest paths between border nodes in a cluster. The results
+// are stored in 'cluster.distances'.
+inline void ComputeShortestClusterEdgePaths(const Graph& g,
+                                            const RoutingMetric& metric,
+                                            VEHICLE vt, GCluster* cluster) {
+  CHECK_S(cluster->distances.empty());
+  const size_t num_border_nodes = cluster->border_nodes.size();
+  if (num_border_nodes == 0) {
+    return;  // Nothing to compute, cluster is isolated.
+  }
+
+  // Construct a minimal graph with all necessary information.
+  uint32_t num_nodes = 0;
+  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  absl::flat_hash_map<uint32_t, uint32_t> gnode_to_compact;
+  CollectEdgesForCompactGraph(g, metric,
+                              {.vt = vt,
+                               .avoid_restricted_access_edges = true,
+                               .restrict_to_cluster = true,
+                               .restrict_cluster_id = cluster->cluster_id},
+                              cluster->border_nodes,
+                              /*undirected_expand=*/false, &num_nodes,
+                              &full_edges, &gnode_to_compact);
+  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
+  const CompactDirectedGraph cg(num_nodes, full_edges);
+  AddBorderEdgeInformation(g, cg, gnode_to_compact, cluster);
+  cg.LogStats();
+
+  // Execute single source Dijkstra for every incoming border edge
+  for (const auto& in_edge : cluster->border_in_edges) {
+    // Now store the distances for this border node.
+    cluster->distances.emplace_back();
+    SingleSourceEdgeDijkstra router;
+    int off =
+        (int)(in_edge.c_edge_idx - cg.edges_start().at(in_edge.c_from_idx));
+    router.Route(cg, {.c_start_idx = in_edge.c_from_idx, .c_edge_offset = off},
+                 {.handle_restricted_access = true});
+
+    const std::vector<SingleSourceEdgeDijkstra::VisitedEdge>& vis =
+        router.GetVisitedEdges();
+    for (const auto& out_edge : cluster->border_out_edges) {
+      // Get the best min_weight if there is more than one entry.
+      cluster->distances.back().push_back(
+          vis.at(out_edge.c_edge_idx).min_weight);
+    }
+  };
+  CHECK_EQ_S(cluster->distances.size(), cluster->border_in_edges.size());
 }
 
 inline void CheckShortestClusterPaths(const Graph& g, int n_threads) {
@@ -415,7 +519,7 @@ inline void CheckShortestClusterPaths(const Graph& g, int n_threads) {
 inline void PrintClusterInformation(const Graph& g) {
   std::vector<GCluster> stats(g.clusters.begin(), g.clusters.end());
   std::sort(stats.begin(), stats.end(), [](const auto& a, const auto& b) {
-    if (a.ncc != b.ncc) return a.ncc < b.ncc;
+    // if (a.ncc != b.ncc) return a.ncc < b.ncc;
     double va = (100.0 * a.num_outer_edges) / std::max(a.num_inner_edges, 1u);
     double vb = (100.0 * b.num_outer_edges) / std::max(b.num_inner_edges, 1u);
     return va > vb;
@@ -455,10 +559,10 @@ inline void PrintClusterInformation(const Graph& g) {
         (rec.num_border_nodes * (rec.num_border_nodes - 1)) / 2;
 
     LOG_S(INFO) << absl::StrFormat(
-        "%s Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In:%5u Out:%5u  "
+        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In:%5u Out:%5u  "
         "Out/In:%2.2f%% ex-id:%lld",
-        CountryNumToString(rec.ncc), i, rec.cluster_id, rec.num_nodes,
-        rec.num_border_nodes, rec.num_inner_edges, rec.num_outer_edges,
+        i, rec.cluster_id, rec.num_nodes, rec.num_border_nodes,
+        rec.num_inner_edges, rec.num_outer_edges,
         (100.0 * rec.num_outer_edges) / std::max(rec.num_inner_edges, 1u),
         rec.border_nodes.empty() ? 0
                                  : g.nodes.at(rec.border_nodes.at(0)).node_id);

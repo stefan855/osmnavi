@@ -25,7 +25,7 @@ constexpr std::uint32_t MAX_NUM_LOUVAIN_EDGES = (1 << 10) - 1;
 
 struct alignas(4) LouvainNode {
   uint32_t cluster_pos;     // Cluster of node.
-  uint32_t num_edges : 10;  // number of 'unique' edges.
+  uint32_t num_edges;       // number of 'unique' edges.
   uint32_t edge_start;      // Pos of first edge in edges vector.
   uint32_t w_self;          // Sum of self edge weights.
   uint32_t w_tot;           // Sum of edge weights.
@@ -196,7 +196,7 @@ struct LouvainGraph {
     CHECK_NE_S(other_node_pos + 1, nodes.size());  // No self edge.
     CHECK_GT_S(weight, 0);
     edges.push_back({.other_node_pos = other_node_pos, .weight = weight});
-    CHECK_LT_S(nodes.back().num_edges, MAX_NUM_LOUVAIN_EDGES);
+    // CHECK_LT_S(nodes.back().num_edges, MAX_NUM_LOUVAIN_EDGES);
     nodes.back().num_edges += 1;
     nodes.back().w_tot += weight;
     clusters.at(nodes.back().cluster_pos).w_tot_edges += weight;

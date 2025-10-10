@@ -40,6 +40,8 @@ struct BuildGraphOptions {
   std::string admin_filepattern = "../../data/admin/??_*.csv";
   std::string routing_config = "../config/routing.cfg";
   std::string left_traffic_config = "../config/left_traffic_countries.cfg";
+
+#if 0
   // Align clusters as much as possible with country borders.
   bool align_clusters_to_ncc = false;
   // Clusters are aligned to country border. This sometimes causes small
@@ -48,6 +50,7 @@ struct BuildGraphOptions {
   // clusters across the border, such that some clusters at the border contain a
   // few nodes across the border.
   bool merge_tiny_clusters = false;
+#endif
 
   // Max number of threads to use for parallel processing.
   int n_threads;
@@ -98,11 +101,19 @@ struct BuildGraphStats {
 
   int64_t num_cross_country_edges = 0;
   int64_t num_cross_country_restricted = 0;
-  int64_t num_cross_cluster_edges = 0;
-  int64_t num_cross_cluster_restricted = 0;
-  // int64_t num_cross_cluster_restricted_dead_end = 0;
 
-  int64_t num_nodes_in_cluster = 0;
+  int64_t num_cluster_border_nodes = 0;
+  int64_t num_cluster_inside_nodes = 0;
+  int64_t num_cluster_outside_nodes = 0;
+
+  int64_t num_cluster_border_edges = 0;
+  int64_t num_cluster_inside_edges = 0;
+  int64_t num_cluster_outside_edges = 0;
+  int64_t num_cluster_border_in_edges = 0;
+  int64_t num_cluster_border_out_edges = 0;
+
+  int64_t num_cluster_border_edges_restr = 0;
+
   int64_t num_nodes_in_small_component = 0;
   int64_t num_nodes_no_country = 0;
   int64_t num_nodes_simple_tr_via = 0;
@@ -168,10 +179,21 @@ struct BuildGraphStats {
 
     num_cross_country_edges += other.num_cross_country_edges;
     num_cross_country_restricted += other.num_cross_country_restricted;
-    num_cross_cluster_edges += other.num_cross_cluster_edges;
-    num_cross_cluster_restricted += other.num_cross_cluster_restricted;
 
-    num_nodes_in_cluster += other.num_nodes_in_cluster;
+
+    num_cluster_border_nodes += other.num_cluster_border_nodes;
+    num_cluster_inside_nodes += other.num_cluster_inside_nodes;
+    num_cluster_outside_nodes += other.num_cluster_outside_nodes;
+
+    num_cluster_border_edges += other.num_cluster_border_edges;
+    num_cluster_inside_edges += other.num_cluster_inside_edges;
+    num_cluster_outside_edges += other.num_cluster_outside_edges;
+
+    num_cluster_border_in_edges += other.num_cluster_border_in_edges;
+    num_cluster_border_out_edges += other.num_cluster_border_out_edges;
+
+    num_cluster_border_edges_restr += other.num_cluster_border_edges_restr;
+
     num_nodes_in_small_component += other.num_nodes_in_small_component;
     num_nodes_no_country += other.num_nodes_no_country;
     num_nodes_simple_tr_via += other.num_nodes_simple_tr_via;

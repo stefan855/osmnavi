@@ -4,6 +4,7 @@
 #include <stdlib.h>
 
 #include "algos/compact_dijkstra.h"
+#include "algos/compact_edge_dijkstra.h"
 #include "algos/edge_key.h"
 #include "algos/edge_router.h"
 #include "algos/edge_router2.h"
@@ -11,6 +12,7 @@
 #include "algos/tarjan.h"
 #include "base/country_code.h"
 #include "base/util.h"
+#include "graph/build_clusters.h"
 #include "graph/compact_graph.h"
 #include "graph/graph_def.h"
 #include "graph/routing_attrs.h"
@@ -1068,7 +1070,7 @@ void CompareShortestPaths(const Graph& g, bool test_compact_edge) {
 
     SingleSourceEdgeDijkstra edge_router;
     edge_router.Route(
-        cg, start,
+        cg, {.c_start_idx = start},
         {.store_spanning_tree_edges = false,
          .handle_restricted_access = true,
          /*.restricted_access_nodes = edge_router.ComputeRestrictedAccessNodes(
@@ -1317,6 +1319,92 @@ void TestCountryBitset() {
   }
 }
 
+/*
+ * This graph contains 4 nodes in three clusters 0:[a], 1:[b,c] and 2:[d].
+ * Test cluster construction and routing for edge based routers.
+ *
+ *   [a] ----- [b] ----- [c] ----- [d]
+ *         1         2         4
+ */
+Graph CreateEdgeClusterGraph(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D };  // Node names.
+  Graph g;
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
+
+  AddCluster(g, 0, {.num_nodes = 1, .border_nodes = {A}});
+  AddCluster(g, 1, {.num_nodes = 2, .border_nodes = {B, C}});
+  AddCluster(g, 2, {.num_nodes = 2, .border_nodes = {D}});
+
+  AddNode(g, A, /*cluster_id=*/0);
+  AddNode(g, B, /*cluster_id=*/1);
+  AddNode(g, C, /*cluster_id=*/1);
+  AddNode(g, D, /*cluster_id=*/2);
+
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, 2000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, 4000, GEdge::LABEL_FREE, both_dirs, &edges);
+  StoreEdges(edges, &g);
+
+  return g;
+}
+
+void TestEdgeClusterRoute() {
+  FUNC_TIMER();
+  enum : uint32_t { A = 0, B, C, D };  // Node names.
+  Graph g = CreateEdgeClusterGraph(/*both_dirs=*/true);
+
+  GCluster& cl0 = g.clusters.at(0);
+  GCluster& cl1 = g.clusters.at(1);
+  // GCluster& cl2 = g.clusters.at(2);
+
+  build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
+                                                  VH_MOTORCAR, &cl0);
+  CHECK_EQ_S(cl0.border_in_edges.size(), 1);
+  CHECK_EQ_S(cl0.border_out_edges.size(), 1);
+
+  build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
+                                                  VH_MOTORCAR, &cl1);
+  CHECK_EQ_S(cl1.border_in_edges.size(), 2);
+  CHECK_EQ_S(cl1.border_out_edges.size(), 2);
+
+  // Now check the distance from B to C. For this, we need an incoming edge at B
+  // and an outgoing edge at C,
+  const GCluster::EdgeDescriptor* ed_in_ab =
+      FindEdgeDesc(g, cl1.border_in_edges, A, B);
+  const GCluster::EdgeDescriptor* ed_out_cd =
+      FindEdgeDesc(g, cl1.border_out_edges, C, D);
+  CHECK_S(ed_in_ab != nullptr);
+  CHECK_S(ed_out_cd != nullptr);
+  
+  CHECK_LT_S((size_t)ed_in_ab->pos, cl1.distances.size());
+  auto dist = cl1.distances.at(ed_in_ab->pos);
+  CHECK_LT_S((size_t)ed_out_cd->pos, dist.size());
+  uint32_t metric =  dist.at(ed_out_cd->pos);
+  CHECK_EQ_S(metric, 7000);
+
+
+#if 0
+  {
+    EdgeRouter2 router(g, 3);
+    auto res = router.Route(A, D, RoutingMetricDistance(), RoutingOptions());
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 7000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 4);
+  }
+  {
+    EdgeRouter2 router(g, 3);
+    RoutingOptions opt;
+    opt.SetHybridOptions(g, A, D);
+    auto res = router.Route(A, D, RoutingMetricDistance(), opt);
+    CHECK_S(res.found);
+    CHECK_EQ_S(res.found_distance, 5000);
+    CHECK_EQ_S(res.num_shortest_route_nodes, 6);
+  }
+#endif
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1345,6 +1433,8 @@ int main(int argc, char* argv[]) {
   TestTurnCosts_SpeedChange();
 
   TestCountryBitset();
+
+  TestEdgeClusterRoute();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

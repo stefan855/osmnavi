@@ -284,8 +284,9 @@ class EdgeRouter2 {
                                      bool use_astar_heuristic) {
     // Prevent doing two lookups by following
     // https://stackoverflow.com/questions/1409454.
-    const auto iter = edgekey_to_v_idx_.insert(EdgeIdMap::value_type(
-        key.UInt64Key(g_, ctr_list_), visited_edges_.size()));
+    const auto iter =
+        edge_label_to_v_idx_.insert(EdgeLabelToVIdxMap::value_type(
+            key.UInt64Key(g_, ctr_list_), visited_edges_.size()));
     if (iter.second) {
       // Key didn't exist and was inserted, so add it to visited_edges_ too.
       visited_edges_.push_back(
@@ -480,15 +481,6 @@ class EdgeRouter2 {
                                            &next_in_target_area)) {
         continue;
       }
-#if 0
-      bool next_in_target_area = prev.in_target_area;
-      if (prev.restricted != (curr_ge.car_label != GEdge::LABEL_FREE)) {
-        if (!CheckRestrictedAccessTransition(ctx, prev, curr_ge,
-                                             &next_in_target_area)) {
-          continue;
-        }
-      }
-#endif
 
       // Create the edge key for the current edge, also handles complex turn
       // restrictions.
@@ -683,7 +675,7 @@ class EdgeRouter2 {
   void Clear() {
     ctr_list_.clear();
     visited_edges_.clear();
-    edgekey_to_v_idx_.clear();
+    edge_label_to_v_idx_.clear();
     CHECK_S(pq_.empty());  // No clear() method, should be empty anyways.
     target_visited_index_ = INFU32;
   }
@@ -693,8 +685,8 @@ class EdgeRouter2 {
   CTRList ctr_list_;
   std::vector<VisitedEdge> visited_edges_;
 
-  typedef absl::flat_hash_map<uint64_t, uint32_t> EdgeIdMap;
-  EdgeIdMap edgekey_to_v_idx_;
+  typedef absl::flat_hash_map<uint64_t, uint32_t> EdgeLabelToVIdxMap;
+  EdgeLabelToVIdxMap edge_label_to_v_idx_;
 
   std::priority_queue<QueuedEdge, std::vector<QueuedEdge>, decltype(&MetricCmp)>
       pq_;
