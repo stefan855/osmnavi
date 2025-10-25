@@ -235,11 +235,18 @@ bool VehicleBlockedAtNode(const NodeTags* node_tags) {
 // at the end of a street or when facing a restricted access area.
 //
 // TODO: handle vehicle types properly.
+#define DEBUG_UTURN_ALLOWED 0
 inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
                            const NodeTags* node_tags, const N3Path& n3p) {
   CHECK_EQ_S(n3p.node0_idx, n3p.node2_idx);
 
   if (node_tags != nullptr && node_tags->bit_turning_circle) {
+#if DEBUG_UTURN_ALLOWED
+      LOG_S(INFO) << absl::StrFormat("TT1 Allowed UTurn %lld -> %lld -> %lld",
+                                     GetGNodeIdSafe(g, n3p.node0_idx),
+                                     GetGNodeIdSafe(g, n3p.node1_idx),
+                                     GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
     return true;
   }
 
@@ -248,17 +255,35 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
 
   // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
   if (way0.highway_label <= HW_TRUNK_LINK) {
+#if DEBUG_UTURN_ALLOWED
+    LOG_S(INFO) << absl::StrFormat(
+        "TT1b Not allowed UTurn %lld -> %lld -> %lld",
+        GetGNodeIdSafe(g, n3p.node0_idx), GetGNodeIdSafe(g, n3p.node1_idx),
+        GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
     return false;
   }
 
   // Special case: Way is an area and both edges are on this way.
   if (way0.area && edge0.way_idx == n3p.edge1(g).way_idx) {
+#if DEBUG_UTURN_ALLOWED
+      LOG_S(INFO) << absl::StrFormat("TT2 Allowed UTurn %lld -> %lld -> %lld",
+                                     GetGNodeIdSafe(g, n3p.node0_idx),
+                                     GetGNodeIdSafe(g, n3p.node1_idx),
+                                     GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
     return true;
   }
 
   // Special case, vehicle is blocked at node and returns on the same way.
   if (VehicleBlockedAtNode(node_tags) &&
       edge0.way_idx == n3p.edge1(g).way_idx) {
+#if DEBUG_UTURN_ALLOWED
+      LOG_S(INFO) << absl::StrFormat("TT3 Allowed UTurn %lld -> %lld -> %lld",
+                                     GetGNodeIdSafe(g, n3p.node0_idx),
+                                     GetGNodeIdSafe(g, n3p.node1_idx),
+                                     GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
     return true;
   }
 
@@ -272,12 +297,33 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
     }
   }
 
+  // Vehicle can't continue except for returning.
   if (!found_continuation) {
+#if DEBUG_UTURN_ALLOWED
+      LOG_S(INFO) << absl::StrFormat("TT4 Allowed UTurn %lld -> %lld -> %lld",
+                                     GetGNodeIdSafe(g, n3p.node0_idx),
+                                     GetGNodeIdSafe(g, n3p.node1_idx),
+                                     GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
     return true;
   }
-  if (edge0.car_label != GEdge::LABEL_FREE && !found_free_continuation) {
+  // when arriving through a free edge, it is allowed to do a u-turn if there
+  // are only restricted edges to continue on.
+  if (edge0.car_label == GEdge::LABEL_FREE && !found_free_continuation) {
+#if DEBUG_UTURN_ALLOWED
+      LOG_S(INFO) << absl::StrFormat("TT5 Allowed UTurn %lld -> %lld -> %lld",
+                                     GetGNodeIdSafe(g, n3p.node0_idx),
+                                     GetGNodeIdSafe(g, n3p.node1_idx),
+                                     GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
     return true;
   }
+#if DEBUG_UTURN_ALLOWED
+  LOG_S(INFO) << absl::StrFormat("TT5b not allowed UTurn %lld -> %lld -> %lld",
+                                 GetGNodeIdSafe(g, n3p.node0_idx),
+                                 GetGNodeIdSafe(g, n3p.node1_idx),
+                                 GetGNodeIdSafe(g, n3p.node2_idx));
+#endif
   return false;
 }
 
@@ -337,37 +383,61 @@ inline void ProcessSimpleTurnRestrictions(
 }
 #endif
 
-// Check if there is a turn restrictions matching the first edge in n3p.
+// Check if there are turn restrictions matching the first leg in n3p. Use this
+// to determine if the second leg in n3p is allowed or not.
 //
 // Return TRStatus::EMPTY if no turn restriction was found, or the TRStatus of
 // the second edge in n3p.
 inline TRStatus CheckSimpleTurnRestriction(
     const Graph& g, const IndexedTurnRestrictions& indexed_trs,
     const N3Path& n3p) {
-  TRStatus result = TRStatus::EMPTY;
   const GEdge& e0 = n3p.edge0(g);
   const std::span<const TurnRestriction> trs =
       indexed_trs.FindTurnRestrictions({.from_node_idx = n3p.node0_idx,
                                         .way_idx = e0.way_idx,
                                         .to_node_idx = e0.target_idx});
-  if (trs.empty()) return result;
+  if (trs.empty()) {
+    return TRStatus::EMPTY;
+  }
+
   const GEdge& e1 = n3p.edge1(g);
-  for (const TurnRestriction& tr : trs) {
-    CHECK_EQ_S(tr.path.size(), 2) << tr.relation_id;
-    const bool matches_edge = (e1.way_idx == tr.path.back().way_idx &&
-                               e1.target_idx == tr.path.back().to_node_idx);
-    if (tr.forbidden == matches_edge) {
-      result = TRStatus::FORBIDDEN;
-    } else {
-      result = TRStatus::ALLOWED;
+  if (n3p.node0_idx == n3p.node2_idx) {  // u-turn
+    // Handle u-turns separately, because they are not implicitly
+    // allowed/forbidden when another direction is forbidden/allowed.
+    // Only use turn restrictions if they match the second leg.
+    for (const TurnRestriction& tr : trs) {
+      if (e1.way_idx == tr.path.back().way_idx &&
+          e1.target_idx == tr.path.back().to_node_idx) {
+        return tr.forbidden ? TRStatus::FORBIDDEN : TRStatus::ALLOWED;
+      }
     }
+    return TRStatus::EMPTY;
+  } else {
+    // Use all turn restrictions matching the first leg. If the second leg is
+    // different, then the result is inverted. If there is a direct mach of the
+    // second leg, then always use this value.
+    TRStatus result = TRStatus::EMPTY;
+    for (const TurnRestriction& tr : trs) {
+      CHECK_EQ_S(tr.path.size(), 2) << tr.relation_id;
+      const bool matches_edge = (e1.way_idx == tr.path.back().way_idx &&
+                                 e1.target_idx == tr.path.back().to_node_idx);
+      if (tr.forbidden == matches_edge) {
+        result = TRStatus::FORBIDDEN;
+      } else {
+        result = TRStatus::ALLOWED;
+      }
+      if (matches_edge) {
+        // We have a direct match of the second leg. Use this value anyways.
+        break;
+      }
+    }
+    if (result == TRStatus::EMPTY) {
+      LOG_S(INFO) << absl::StrFormat(
+          "Warning, no match found for turn restriction %lld",
+          trs.front().relation_id);
+    }
+    return result;
   }
-  if (result == TRStatus::EMPTY) {
-    LOG_S(INFO) << absl::StrFormat(
-        "Warning, no match found for turn restriction %lld",
-        trs.front().relation_id);
-  }
-  return result;
 }
 
 uint32_t CurveCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
@@ -480,6 +550,7 @@ inline uint32_t ComputeTurnCostForN3Path(
     const N3Path& n3p) {
   const TRStatus tr_status = CheckSimpleTurnRestriction(g, indexed_trs, n3p);
   if (tr_status == TRStatus::FORBIDDEN) {
+    // If the leg is explicitly forbidden (also u-turns), then block it.
     return TURN_COST_INFINITY;
   }
 
@@ -490,11 +561,25 @@ inline uint32_t ComputeTurnCostForN3Path(
   const bool uturn = (n3p.node0_idx == n3p.node2_idx);
   if (uturn) {
     if (tr_status == TRStatus::ALLOWED) {
+      /*
+      LOG_S(INFO) << absl::StrFormat("FF1 Allowed UTurn %lld -> %lld -> %lld",
+                                     GetGNodeIdSafe(g, n3p.node0_idx),
+                                     GetGNodeIdSafe(g, n3p.node1_idx),
+                                     GetGNodeIdSafe(g, n3p.node2_idx));
+
+                                     */
+      // Explicitly allowed by turn restriction.
       return TURN_COST_U_TURN;
     }
     if (!IsUTurnAllowed(g, vt, node_tags, n3p)) {
       return TURN_COST_INFINITY;
     }
+    /*
+    LOG_S(INFO) << absl::StrFormat("FF2 Allowed UTurn %lld -> %lld -> %lld",
+                                   GetGNodeIdSafe(g, n3p.node0_idx),
+                                   GetGNodeIdSafe(g, n3p.node1_idx),
+                                   GetGNodeIdSafe(g, n3p.node2_idx));
+                                   */
     return TURN_COST_U_TURN;
   }
 

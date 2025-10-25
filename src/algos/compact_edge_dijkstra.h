@@ -1,5 +1,5 @@
 // Compute all shortest paths between a set of nodes, for instance between
-// border nodes in a cluster, using a CompactDirectedGraph.
+// border nodes in a cluster, using a CompactGraph.
 
 #pragma once
 
@@ -27,12 +27,17 @@ class SingleSourceEdgeDijkstra {
     uint32_t c_start_idx = INFU32;
     // If >= 0, then routing starts at the edge at the given offset, otherwise
     // at all edges of node 'c_node_idx'.
-    int c_edge_offset = -1;
+    int16_t c_edge_offset = -1;
+    // Which fraction of the weight of the edge should be used for the metric?
+    // If only turn costs but not the edge weight should be used then set to 0.
+    // If for instance the vehicle starts at 33% of the edge, then set this to
+    // 0.67. Default is using all weight, i.e. 1.0.
+    float edge_weight_fraction = 1.0;
   };
 
   // The vector for visited edges is preallocated with cg.edges().size()
   // elements, so there is a standard ("base") slot for each edge of the graph.
-  // But there might be more than one visited edge for a real edge, because of
+  // But there might be more than one visited edge for a graph edge, because of
   // edge labelling (restricted areas, complex turn restrictions).
   //
   // Visited edges that can't be stored in the base position are added to the
@@ -45,8 +50,11 @@ class SingleSourceEdgeDijkstra {
     std::uint32_t active_ctr_id : 30;
     std::uint32_t in_target_restricted_access_area : 1;
     std::uint32_t done : 1;  // 1 <=> node has been finalized.
-    // if next != INFU32 then the next entry with different key. The last entry
-    // points to the first entry (i.e. a loop).
+    // Is INFU32 if the slot is empty. Otherwise, it points to the next entry
+    // for the same edge but with a different label. The last entry points to
+    // the first entry (i.e. a loop). A list of edges has exactly one entry with
+    // index < cg.edges.size(). This is the 'base' index, i.e. it points to the
+    // edge in cg.edges(). See GetBaseIdx().
     std::uint32_t next;
   };
 
@@ -72,12 +80,13 @@ class SingleSourceEdgeDijkstra {
   // earlier position in the same vector, except for a few edges leaving the
   // start node. For example, this is useful to visit all edges bottom up or top
   // down as they were visited during single source edge based Dijkstra.
-  void Route(const CompactDirectedGraph& cg, const RoutingStart& start,
+  void Route(const CompactGraph& cg, const RoutingStart& start,
              const Options opt) {
 #if DEBUG_PRINT
     LOG_S(INFO) << absl::StrFormat("CompactDijkstra: Start routing at %u",
                                    start_idx);
 #endif
+
     const size_t cg_edges_size = cg.edges().size();
     CHECK_LT_S(cg_edges_size, 1 << 31) << "currently not supported";
     Clear();
@@ -93,9 +102,8 @@ class SingleSourceEdgeDijkstra {
     std::priority_queue<QueuedEdge, std::vector<QueuedEdge>, MetricCmpEdge> pq;
 
     const std::vector<uint32_t>& edges_start = cg.edges_start();
-    const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
+    const std::vector<CompactGraph::PartialEdge>& edges = cg.edges();
     const std::vector<TurnCostData>& turn_costs = cg.turn_costs();
-    // const auto& compact_tr_map = cg.GetSimpleTRMap();
     ActiveCtrs active_ctrs;
 
     // ======================================
@@ -108,12 +116,10 @@ class SingleSourceEdgeDijkstra {
         continue;
       }
 
-      const CompactDirectedGraph::PartialEdge& edge = edges.at(i);
-
+      const CompactGraph::PartialEdge& edge = edges.at(i);
       // Do the first edges trigger complex turn restrictions?
       if (edge.complex_tr_trigger) {
         AddTriggeringCTRs(cg, i, &active_ctrs);
-        LOG_S(INFO) << "Initial edge is triggering CTR " << active_ctrs.size();
       }
 #if DEBUG_PRINT
       LOG_S(INFO) << absl::StrFormat(
@@ -121,11 +127,13 @@ class SingleSourceEdgeDijkstra {
           start_idx, edge.to_c_idx, edge.way_idx, active_ctrs.size());
 #endif
 
+      // TODO: restricted access area: should be 1 if the edge is in a
+      // restricted area?
       uint32_t v_idx = FindOrAllocEdge(
           i, /*in_target_restricted_access_area=*/0, active_ctrs);
       CHECK_EQ_S(i, v_idx);
-      vis_.at(i).min_weight = edge.weight;
-      pq.emplace(edge.weight, i, start.c_start_idx);
+      vis_.at(i).min_weight = edge.weight * start.edge_weight_fraction;
+      pq.emplace(vis_.at(i).min_weight, i, start.c_start_idx);
     }
 
     // =======================================
@@ -140,6 +148,7 @@ class SingleSourceEdgeDijkstra {
       // Make a copy, because the vector might see reallocations below, which
       // invalidates references.
       const VisitedEdge prev_v = vis_.at(qedge.ve_idx);
+
 #if DEBUG_PRINT
       LOG_S(INFO) << absl::StrFormat(
           "prev_v(%u): minw:%u from_v_idx:%u active_ctr_id:%u in_target_ra:%u "
@@ -148,6 +157,7 @@ class SingleSourceEdgeDijkstra {
           prev_v.active_ctr_id, prev_v.in_target_restricted_access_area,
           prev_v.done, prev_v.next);
 #endif
+
       if (prev_v.done == 1) {
         continue;  // "old" entry in priority queue.
       }
@@ -159,52 +169,33 @@ class SingleSourceEdgeDijkstra {
         spanning_tree_edges_.push_back(qedge.ve_idx);
       }
       const uint32_t prev_v_base_idx = GetBaseIdx(cg_edges_size, qedge.ve_idx);
-      const CompactDirectedGraph::PartialEdge& prev_cg_edge =
-          edges.at(prev_v_base_idx);
+      const CompactGraph::PartialEdge& prev_cg_edge = edges.at(prev_v_base_idx);
       const uint32_t start = edges_start.at(prev_cg_edge.to_c_idx);
       const uint32_t num_edges =
           edges_start.at(prev_cg_edge.to_c_idx + 1) - start;
-
-#if 0
-      uint32_t allowed_offset_bits = -1;  // Set all bits
-      if (prev_cg_edge.simple_tr_trigger) {
-        // LOG_S(INFO) << "Search simple TR trigger!";
-        auto iter = compact_tr_map.find(prev_v_base_idx);
-        if (iter != compact_tr_map.end()) {
-          allowed_offset_bits = iter->second;
-          // LOG_S(INFO) << "Found simple TR trigger!";
-        }
-      }
-#endif
 
       // LOG_S(INFO) << "XX:" << prev_cg_edge.turn_cost_idx;
       const TurnCostData& tcd = turn_costs.at(prev_cg_edge.turn_cost_idx);
 
       for (uint32_t off = 0; off < num_edges; ++off) {
         const uint32_t i = start + off;
-        const CompactDirectedGraph::PartialEdge& e = edges.at(i);
+        const CompactGraph::PartialEdge& e = edges.at(i);
+
 #if DEBUG_PRINT
         LOG_S(INFO) << absl::StrFormat(
             "Examine edge from_idx:%u to_idx:%u way_idx:%u",
             prev_cg_edge.to_c_idx, e.to_c_idx, e.way_idx);
 #endif
-        // LOG_S(INFO) << "AA1";
 
-#if 0
-        if (!(allowed_offset_bits & (1u << off)) ||
-            (opt.handle_restricted_access &&
-             prev_v.in_target_restricted_access_area && !e.restricted_access)) {
-          // At least one of these holds:
-          // 1) Not all edges are allowed because of a TR
-          // 2) We're in the target restricted access area, not allowed to
-          // transition to a free edge.
-          continue;
-        }
-#endif
+        /*
+        LOG_S(INFO) << absl::StrFormat(
+            "BB5 nodes:%u->%u->%u  cost:%d", qedge.from_node_idx,
+            prev_cg_edge.to_c_idx, e.to_c_idx, (int)tcd.turn_costs.at(off));
+            */
+
         if ((tcd.turn_costs.at(off) == TURN_COST_INFINITY_COMPRESSED) ||
             (opt.handle_restricted_access &&
              prev_v.in_target_restricted_access_area && !e.restricted_access)) {
-          // LOG_S(INFO) << "XX2:" << (int)tcd.turn_costs.at(off);
           // At least one of these holds:
           // 1) Not all edges are allowed because of a TR
           // 2) We're in the target restricted access area, not allowed to
@@ -212,44 +203,49 @@ class SingleSourceEdgeDijkstra {
           continue;
         }
 
-        // LOG_S(INFO) << "AA2";
+#if 0
+        // Obsolete because turn restrictions are now handled via turn costs.
+        // Turn costs handle areas in a different way (u-turns are always 
+        // allowed), so the code here will check fail for these.
+        //
         // We need the start node of the prev edge, which we can get at the
         // prev-prev edge.
         if (!prev_cg_edge.uturn_allowed && e.to_c_idx == qedge.from_node_idx) {
+          LOG_S(INFO) << absl::StrFormat(
+              "UTURN-ISSUE nodes:%s -> %s -> %s  cost:%d",
+              cg.DescribeCNodeIdx(qedge.from_node_idx),
+              cg.DescribeCNodeIdx(prev_cg_edge.to_c_idx),
+              cg.DescribeCNodeIdx(e.to_c_idx), (int)tcd.turn_costs.at(off));
+            CHECK_S(0);
+          }
           continue;
         }
+#endif
 
-        // LOG_S(INFO) << "AA3";
         // Create/Update the turn restriction edge key information for the
         // current edge.
         active_ctrs.clear();  // This is reused throughout the loop.
-        if (!NextCtrKey(cg, prev_v, i, e.complex_tr_trigger, &active_ctrs)) {
+        if (!UpdateActiveCtrs(cg, prev_v, i, e.complex_tr_trigger,
+                              &active_ctrs)) {
 #if DEBUG_PRINT
           LOG_S(INFO) << "Forbidden by TR";
 #endif
+
           continue;
         }
 
-#if 0
-        LOG_S(INFO) << "AA4: off=" << off << " size=" << tcd.turn_costs.size();
-        for (uint32_t pos = 0; pos < tcd.turn_costs.size(); ++pos) {
-          LOG_S(INFO) << absl::StrFormat("val[%u]=%d", pos,
-                                         (int)tcd.turn_costs.at(off));
-        }
-#endif
-
         const uint32_t new_weight =
-            prev_v.min_weight + e.weight +
-            decompress_turn_cost(tcd.turn_costs.at(off));
-        // LOG_S(INFO) << "AA4b";
+            prev_v.min_weight + decompress_turn_cost(tcd.turn_costs.at(off)) +
+            e.weight;
         const bool in_target_raa =
             opt.handle_restricted_access &&
-            (prev_v.in_target_restricted_access_area |
+            (prev_v.in_target_restricted_access_area ||
              (!edges.at(prev_v_base_idx).restricted_access &&
               e.restricted_access));
 
         const uint32_t new_v_idx =
             FindOrAllocEdge(i, in_target_raa, active_ctrs);
+
 #if DEBUG_PRINT
         LOG_S(INFO) << absl::StrFormat(
             "Push edge from_idx:%u to_idx:%u way_idx:%u target_ra:%u #ctr:%llu",
@@ -257,14 +253,12 @@ class SingleSourceEdgeDijkstra {
             active_ctrs.size());
 #endif
 
-        // LOG_S(INFO) << "AA5";
         VisitedEdge& ve = vis_.at(new_v_idx);
         if (!ve.done && new_weight < ve.min_weight) {
           ve.min_weight = new_weight;
           ve.from_v_idx = qedge.ve_idx;
           pq.emplace(new_weight, new_v_idx, prev_cg_edge.to_c_idx);
         }
-        // LOG_S(INFO) << "AA6";
       }
     }
   }
@@ -279,10 +273,9 @@ class SingleSourceEdgeDijkstra {
   // It also may be used to compute the traffic on the shortest paths after
   // executing SSD, because each of the min edges is the end of a shortest
   // path and as such should be initialised with traffic '1'.
-  std::vector<uint32_t> GetMinEdgesAtNodes(
-      const CompactDirectedGraph& cg) const {
+  std::vector<uint32_t> GetMinEdgesAtNodes(const CompactGraph& cg) const {
     std::vector<uint32_t> min_edges(cg.num_nodes(), INFU32);
-    const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
+    const std::vector<CompactGraph::PartialEdge>& edges = cg.edges();
     for (size_t i = 0; i < edges.size(); ++i) {
       uint32_t to_c_idx = edges.at(i).to_c_idx;
       // TODO: handle multiple visited edges per edge.
@@ -297,8 +290,8 @@ class SingleSourceEdgeDijkstra {
   // Construct the shortest path at target_node_idx. This is slow and should
   // only be used for small graphs in testing.
   // Returns the visited edge indexes on the path.
-  std::vector<uint32_t> GetShortestPathToTargetSlow(
-      const CompactDirectedGraph& cg, uint32_t target_node_idx) {
+  std::vector<uint32_t> GetShortestPathToTargetSlow(const CompactGraph& cg,
+                                                    uint32_t target_node_idx) {
     // Find the minimal visited edge that ends at 'target_node_idx'.
     uint32_t found_min_weight = INFU32;
     uint32_t found_last_edge_idx = INFU32;
@@ -334,7 +327,7 @@ class SingleSourceEdgeDijkstra {
   // For each node, store the min_weight of the edge that reaches the node
   // first. If a node wasn't reached, store INFU32.
   std::vector<uint32_t> GetNodeWeightsFromVisitedEdges(
-      const CompactDirectedGraph& cg, uint32_t start_idx) const {
+      const CompactGraph& cg, uint32_t start_idx) const {
     std::vector<uint32_t> w(cg.num_nodes(), INFU32);
     for (size_t i = 0; i < cg.edges().size(); ++i) {
       /*
@@ -354,8 +347,8 @@ class SingleSourceEdgeDijkstra {
     return w;
   }
 
-  inline CompactDirectedGraph::PartialEdge GetEdge(
-      const CompactDirectedGraph& cg, uint32_t v_idx) const {
+  inline CompactGraph::PartialEdge GetPartialEdge(const CompactGraph& cg,
+                                                  uint32_t v_idx) const {
     return cg.edges().at(GetBaseIdx(cg.edges().size(), v_idx));
   }
 
@@ -384,12 +377,15 @@ class SingleSourceEdgeDijkstra {
     CHECK_S(active_ctrs_vec_.at(NO_ACTIVE_CTR_ID).empty());
   }
 
+  // Find or allocate a visited edge element at 'v_base_index'. Each base index
+  // might contain a list of visited edge, all for the same edge in the graph,
+  // but with different labels. If edge+label is not found, then a new edge is
+  // allocated at the end of the vector and added to the list of edges at this
+  // specific base index.
   inline uint32_t FindOrAllocEdge(uint32_t v_base_idx,
                                   bool in_target_restricted_access_area,
                                   const ActiveCtrs& ctrs) {
-    // LOG_S(INFO) << "BB1";
     VisitedEdge& v_base = vis_.at(v_base_idx);
-    // LOG_S(INFO) << "BB2";
     // Slot unused?
     if (v_base.next == INFU32) {
       v_base.in_target_restricted_access_area =
@@ -403,35 +399,10 @@ class SingleSourceEdgeDijkstra {
       v_base.next = v_base_idx;  // loops back to itself.
       return v_base_idx;
     }
-    // LOG_S(INFO) << "BB3";
-#if 0
-    // Is base element matching the key information?
-    if (v_base.in_target_restricted_access_area ==
-            in_target_restricted_access_area &&
-        ((v_base.active_ctr_id == NO_ACTIVE_CTR_ID && ctrs.empty()) ||
-         (v_base.active_ctr_id != NO_ACTIVE_CTR_ID &&
-          active_ctrs_.at(v_base.active_ctr_id) == ctrs))) {
-      return v_base_idx;
-    }
-    // Find matching element in list.
-    uint32_t v_curr_idx = v_base.next;
-    while (v_curr_idx != v_base_idx) {
-      const VisitedEdge& v_curr = vis_.at(v_curr_idx);
-      if (v_curr.in_target_restricted_access_area ==
-              in_target_restricted_access_area &&
-          ((v_curr.active_ctr_id == NO_ACTIVE_CTR_ID && ctrs.empty()) ||
-         (v_curr.active_ctr_id != NO_ACTIVE_CTR_ID &&
-          active_ctrs_.at(v_curr.active_ctr_id) == ctrs))) {
-        return v_curr_idx;
-      }
-      v_curr_idx = v_curr.next;
-    }
-#endif
 
     // Find matching element in list.
     uint32_t v_curr_idx = v_base_idx;
     do {
-      // LOG_S(INFO) << "BB4";
       const VisitedEdge& v_curr = vis_.at(v_curr_idx);
       if (v_curr.in_target_restricted_access_area ==
               in_target_restricted_access_area &&
@@ -442,7 +413,6 @@ class SingleSourceEdgeDijkstra {
       }
       v_curr_idx = v_curr.next;
     } while (v_curr_idx != v_base_idx);
-    // LOG_S(INFO) << "BB5";
 
     // Allocate new element.
     v_curr_idx = vis_.size();
@@ -451,7 +421,6 @@ class SingleSourceEdgeDijkstra {
       active_ctr_id = active_ctrs_vec_.size();
       active_ctrs_vec_.push_back(ctrs);
     }
-    // LOG_S(INFO) << "BB6";
     // Note, that this might invalidate reference v_base.
     const uint32_t v_base_next_val = v_base.next;
     vis_.push_back(
@@ -463,7 +432,6 @@ class SingleSourceEdgeDijkstra {
          .next = v_base_next_val});
     // Do not use v_base, pushing to vector might invalidated the reference.
     vis_.at(v_base_idx).next = v_curr_idx;
-    // LOG_S(INFO) << "BB7";
     return v_curr_idx;
   }
 
@@ -475,7 +443,7 @@ class SingleSourceEdgeDijkstra {
     return vis_.at(v_idx).next;
   }
 
-  void AddTriggeringCTRs(const CompactDirectedGraph& cg, uint32_t next_edge_idx,
+  void AddTriggeringCTRs(const CompactGraph& cg, uint32_t next_edge_idx,
                          ActiveCtrs* active_ctrs) {
     // Find new triggering turn restrictions.
     const auto it = cg.GetComplexTRMap().find(next_edge_idx);
@@ -496,10 +464,11 @@ class SingleSourceEdgeDijkstra {
   // Given a previous and a new edge, compute the new active_ctr_id.
   // Return false if adding the new edge is forbidden, or true when there is a
   // new value in 'active_ctrs'.
-  inline bool NextCtrKey(const CompactDirectedGraph& cg,
-                         const VisitedEdge& prev_v,
-                         const uint32_t next_edge_idx,
-                         bool next_complex_trigger, ActiveCtrs* active_ctrs) {
+  inline bool UpdateActiveCtrs(const CompactGraph& cg,
+                               const VisitedEdge& prev_v,
+                               const uint32_t next_edge_idx,
+                               bool next_complex_trigger,
+                               ActiveCtrs* active_ctrs) {
     if (prev_v.active_ctr_id == 0 && !next_complex_trigger) {
       // Common case, no turn restriction active, no turn restriction triggered.
       active_ctrs->clear();
@@ -510,34 +479,15 @@ class SingleSourceEdgeDijkstra {
       // We have active turn restrictions. Check if they forbid the next edge.
       // *active_ctrs = active_ctrs_vec_.at(prev_v.active_ctr_id);
       *active_ctrs = VECTOR_AT(active_ctrs_vec_, prev_v.active_ctr_id);
-      // LOG_S(INFO) << "AA1: ActiveCtrsAddNextEdge() before call with #ctrs="
-      //             << active_ctrs->size() << " edge idx=" << next_edge_idx;
       if (!ActiveCtrsAddNextEdge(cg, next_edge_idx, active_ctrs)) {
-        // LOG_S(INFO) << "AA2: Can't add edge " << next_edge_idx;
         return false;
       }
-      // LOG_S(INFO) << "AA3: ActiveCtrsAddNextEdge() after call with #ctrs="
-      //             << active_ctrs->size();
     }
 
     if (next_complex_trigger) {
       AddTriggeringCTRs(cg, next_edge_idx, active_ctrs);
     }
-
     return true;
-
-#if 0
-    if (active_ctrs.empty()) {
-      // No active ctrs exist.
-      *active_ctr_id = NO_ACTIVE_CTR_ID;
-      return true;
-    } else {
-      *active_ctr_id = active_ctrs_vec_.size();
-      // TODO: more efficient way to copy or better move the content?
-      active_ctrs_vec_.push_back(active_ctrs);
-      return true;
-    }
-#endif
   }
 
   std::vector<VisitedEdge> vis_;
@@ -547,8 +497,7 @@ class SingleSourceEdgeDijkstra {
 
 struct CompactDijkstraRoutingData {
   const Graph& g;
-  const absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
-  const CompactDirectedGraph cg;
+  const CompactGraph cg;
 };
 
 // Important: Unless opt.avoid_dead_end==false, all start/end nodes need to be
@@ -562,22 +511,26 @@ inline CompactDijkstraRoutingData CreateCompactDijkstraRoutingData(
     LOG_S(INFO) << "Create compact routing data";
   }
   uint32_t num_nodes;
-  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  std::vector<CompactGraph::FullEdge> full_edges;
   absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
   CollectEdgesForCompactGraph(g, metric, opt, routing_nodes,
                               /*undirected_expand=*/true, &num_nodes,
                               &full_edges, &graph_to_compact_nodemap);
+
   if (verb >= Verbosity::Brief) {
     LOG_S(INFO) << "Collected " << graph_to_compact_nodemap.size()
                 << " nodes and " << full_edges.size() << " edges";
     ;
   }
-  CompactDirectedGraph cg(num_nodes, full_edges);
-  // cg.AddSimpleTurnRestrictions(g, g.simple_turn_restriction_map,
-  //                              graph_to_compact_nodemap);
+
+  CompactGraph cg(num_nodes, full_edges);
+  // graph_to_compact_nodemap invalid after this call.
+  cg.AddGNodeMap(g, std::move(graph_to_compact_nodemap),
+                 /*create_inverted=*/true);
+
   cg.AddComplexTurnRestrictions(g.complex_turn_restrictions,
-                                graph_to_compact_nodemap);
-  cg.AddTurnCosts(g, metric.IsTimeMetric(), graph_to_compact_nodemap);
+                                cg.graph_to_compact_map());
+  cg.AddTurnCosts(g, metric.IsTimeMetric(), cg.graph_to_compact_map());
 
   cg.LogStats();
   if (verb >= Verbosity::Debug) {
@@ -587,8 +540,7 @@ inline CompactDijkstraRoutingData CreateCompactDijkstraRoutingData(
     LOG_S(INFO) << "Compact routing data built (nodes:" << num_nodes
                 << " edges:" << cg.edges().size() << ")";
   }
-  return {
-      .g = g, .graph_to_compact_nodemap = graph_to_compact_nodemap, .cg = cg};
+  return {.g = g, .cg = cg};
 }
 
 // Use a compact graph instead of routing on the graph data structure directly.
@@ -597,20 +549,14 @@ inline RoutingResult RouteOnCompactGraph(const CompactDijkstraRoutingData data,
                                          Verbosity verb = Verbosity::Brief) {
   if (verb >= Verbosity::Brief) {
     LOG_S(INFO) << "Route using compact routing data";
-    // LOG_S(INFO) << "AA g_start:" << g_start;
-    // LOG_S(INFO) << "AA g_target:" << g_target;
-    // LOG_S(INFO) << "AA map size:" << data.graph_to_compact_nodemap.size();
-    // for (const auto& [key, val] : data.graph_to_compact_nodemap) {
-    //   LOG_S(INFO) << "map entry:" << key << ":" << val;
-    // }
   }
 
-  CHECK_S(data.graph_to_compact_nodemap.contains(g_start));
-  CHECK_S(data.graph_to_compact_nodemap.contains(g_target));
+  CHECK_S(data.cg.graph_to_compact_map().contains(g_start));
+  CHECK_S(data.cg.graph_to_compact_map().contains(g_target));
   const uint32_t cg_start_idx =
-      data.graph_to_compact_nodemap.find(g_start)->second;
+      data.cg.graph_to_compact_map().find(g_start)->second;
   const uint32_t cg_target_idx =
-      data.graph_to_compact_nodemap.find(g_target)->second;
+      data.cg.graph_to_compact_map().find(g_target)->second;
 
   SingleSourceEdgeDijkstra compact_router;
   compact_router.Route(data.cg, {.c_start_idx = cg_start_idx},
@@ -641,8 +587,9 @@ inline RoutingResult RouteOnCompactGraph(const CompactDijkstraRoutingData data,
     uint32_t pos = 1;
     LOG_S(INFO) << "CompactDijkstra: Shortest path";
     for (uint32_t v_idx : res.route_v_idx) {
-      const auto& ve = vis.at(v_idx);
-      const auto& e = compact_router.GetEdge(data.cg, v_idx);
+      const SingleSourceEdgeDijkstra::VisitedEdge& ve = vis.at(v_idx);
+      const CompactGraph::PartialEdge& e =
+          compact_router.GetPartialEdge(data.cg, v_idx);
       LOG_S(INFO) << absl::StrFormat(
           "  %u. Edge %u to %u minw:%u ctrid:%llu target_ra:%u done:%u", pos++,
           from_idx, e.to_c_idx, ve.min_weight, ve.active_ctr_id,

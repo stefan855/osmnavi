@@ -93,6 +93,7 @@ struct RoutingResult {
 };
 
 // Check if the routing options 'opt' make us reject to follow 'edge'.
+#define DEBUG_REJECT_EDGE 0
 inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
                               const GNode& from_node,
                               std::uint32_t from_node_idx, const GEdge& edge,
@@ -102,44 +103,61 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
       from_node_idx != opt.allow_bridge_node_idx) {
     // Node is in the non-dead-end side of the bridge, so ignore edge and
     // do not enter the dead end.
+#if DEBUG_REJECT_EDGE
+    LOG_S(INFO) << "Reject Edge 1";
+#endif
     return true;
   }
 
   if (opt.avoid_restricted_access_edges && opt.vt == VH_MOTORCAR &&
       edge.car_label != GEdge::LABEL_FREE) {
+#if DEBUG_REJECT_EDGE
+    LOG_S(INFO) << "Reject Edge 2";
+#endif
     return true;
   }
 
-  const GNode& other = g.nodes.at(edge.target_idx);
+  const GNode& target = g.nodes.at(edge.target_idx);
   if (opt.restrict_to_cluster &&
       from_node.cluster_id != opt.restrict_cluster_id &&
-      other.cluster_id != opt.restrict_cluster_id) {
+      target.cluster_id != opt.restrict_cluster_id) {
     // Prevents edges that aren't at least connected to one cluster node.
     // Note that this allows border edges between clusters.
+#if DEBUG_REJECT_EDGE
+    LOG_S(INFO) << "Reject Edge 3";
+#endif
     return true;
   }
 
   // Hybrid search.
   // If we are in a dead-end (or entering one), then we must be in start or
   // target cluster. That's ok in all cases.
-  if (opt.hybrid.on && !from_node.dead_end && !other.dead_end) {
-    bool to_start_or_end = (other.cluster_id == opt.hybrid.start_cluster_id) ||
-                           (other.cluster_id == opt.hybrid.target_cluster_id);
+  if (opt.hybrid.on && !from_node.dead_end && !target.dead_end) {
     // Always ok if the edge goes to the start or to the end cluster.
-    if (!to_start_or_end) {
+    if (target.cluster_id != opt.hybrid.start_cluster_id &&
+        target.cluster_id != opt.hybrid.target_cluster_id) {
       // A connection to outside start/target clusters must be - by construction
       // - from a border node (in any cluster).
       CHECK_S(from_node.cluster_border_node) << from_node.node_id;
       // Outside connections must be between border nodes in different clusters.
       // Same cluster is not ok because this would be an inner edge for this
       // cluster, even if it connects border nodes.
-      if (!other.cluster_border_node ||
-          from_node.cluster_id == other.cluster_id) {
+      if (!target.cluster_border_node ||
+          from_node.cluster_id == target.cluster_id) {
+#if DEBUG_REJECT_EDGE
+        LOG_S(INFO) << "Reject Edge 4";
+#endif
         return true;
       }
     }
   }
 
   // Is edge routable in 'opt' for the given vehicle type?
-  return !RoutableAccess(GetRAFromWSA(wsa, opt.vt, edge_direction).access);
+  bool res = !RoutableAccess(GetRAFromWSA(wsa, opt.vt, edge_direction).access);
+#if DEBUG_REJECT_EDGE
+  if (res) {
+    LOG_S(INFO) << "Reject Edge 5 - no access";
+  }
+#endif
+  return res;
 }

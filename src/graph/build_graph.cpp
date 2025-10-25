@@ -759,6 +759,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.stop_sign = 0;
   e.traffic_signal = 0;
   e.road_priority = GEdge::PRIO_UNSET;
+  e.cluster_border_edge = 0;
   e.turn_cost_idx = INVALID_TURN_COST_IDX;
 
   const GWay& way = g.ways.at(way_idx);
@@ -1150,10 +1151,17 @@ void MarkUniqueEdges(GraphMetaData* meta) {
 // with no way to continue the travel, which is true at the end of a street or
 // when facing a restricted access area.
 // TODO: handle vehicle types properly.
+#define DEBUG_IS_UTURN_ALLOWED_OLD 0
 inline bool IsUTurnAllowedEdgeOld(const Graph& g, uint32_t node_idx,
                                   const GEdge& out_edge) {
   // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
   if (g.ways.at(out_edge.way_idx).highway_label <= HW_TRUNK_LINK) {
+#if DEBUG_IS_UTURN_ALLOWED_OLD
+    LOG_S(INFO) << absl::StrFormat("No u-turn 1 for %lld->%lld w:%lld",
+                                   GetGNodeIdSafe(g, node_idx),
+                                   GetGNodeIdSafe(g, out_edge.target_idx),
+                                   GetGWayIdSafe(g, out_edge.way_idx));
+#endif
     return false;
   }
   uint32_t to_idx = out_edge.target_idx;
@@ -1172,12 +1180,27 @@ inline bool IsUTurnAllowedEdgeOld(const Graph& g, uint32_t node_idx,
 
   if (found_u_turn) {
     if (!found_continuation) {
+#if DEBUG_IS_UTURN_ALLOWED_OLD
+      LOG_S(INFO) << absl::StrFormat(
+          "Allow 1 u-turn for %lld->%lld w:%lld", GetGNodeIdSafe(g, node_idx),
+          GetGNodeIdSafe(g, to_idx), GetGWayIdSafe(g, out_edge.way_idx));
+#endif
       return true;
     }
     if (!restr && !found_free_continuation) {
+#if DEBUG_IS_UTURN_ALLOWED_OLD
+      LOG_S(INFO) << absl::StrFormat(
+          "Allow 2 u-turn for %lld->%lld w:%lld", GetGNodeIdSafe(g, node_idx),
+          GetGNodeIdSafe(g, to_idx), GetGWayIdSafe(g, out_edge.way_idx));
+#endif
       return true;
     }
   }
+#if DEBUG_IS_UTURN_ALLOWED_OLD
+  LOG_S(INFO) << absl::StrFormat(
+      "No u-turn 2 for %lld->%lld w:%lld", GetGNodeIdSafe(g, node_idx),
+      GetGNodeIdSafe(g, to_idx), GetGWayIdSafe(g, out_edge.way_idx));
+#endif
   return false;
 }
 
@@ -1234,7 +1257,22 @@ void ComputeShortestPathsInAllClusters(GraphMetaData* meta) {
                                                     meta->opt.vt, &cluster);
       });
     }
-    // Faster with few threads only.
+    pool.Start(meta->opt.n_threads);
+    pool.WaitAllFinished();
+  }
+}
+
+void ComputeShortestEdgePathsInAllClusters(GraphMetaData* meta) {
+  FUNC_TIMER();
+  RoutingMetricTime metric;
+  if (!meta->graph.clusters.empty()) {
+    ThreadPool pool;
+    for (GCluster& cluster : meta->graph.clusters) {
+      pool.AddWork([meta, &metric, &cluster](int) {
+        build_clusters::ComputeShortestClusterEdgePaths(meta->graph, metric,
+                                                        meta->opt.vt, &cluster);
+      });
+    }
     pool.Start(meta->opt.n_threads);
     pool.WaitAllFinished();
   }
@@ -1257,6 +1295,7 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   build_clusters::PrintClusterInformation(meta->graph);
 
   ComputeShortestPathsInAllClusters(meta);
+  ComputeShortestEdgePathsInAllClusters(meta);
 
   if (meta->opt.check_shortest_cluster_paths) {
     // Check if astar and dijkstra find the same shortest paths.
@@ -1351,6 +1390,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       }
       num_inverted_edges += e.inverted;
       num_forward_edges += (e.inverted == 0);
+      stats->num_edges_bridge += e.bridge;
 
       stats->num_edges_low_priority +=
           (!e.inverted && (e.road_priority == GEdge::PRIO_LOW));
@@ -1565,6 +1605,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_low_priority);
   LOG_S(INFO) << absl::StrFormat("  High priority:    %12lld",
                                  stats.num_edges_high_priority);
+  LOG_S(INFO) << absl::StrFormat("  Bridge:           %12lld",
+                                 stats.num_edges_bridge);
 
   LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
                                  stats.min_edge_length_cm);

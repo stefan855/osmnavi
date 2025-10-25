@@ -41,8 +41,8 @@ struct CTRPosition {
     return UpdateNewEdge(ctr.path.size(), ctr_edge_match, ctr.forbidden);
   }
 
-  Status AddNextEdge(const CompactDirectedGraph& cg, uint32_t edge_idx) {
-    const CompactDirectedGraph::ComplexTurnRestriction& ctr =
+  Status AddNextEdge(const CompactGraph& cg, uint32_t edge_idx) {
+    const CompactGraph::ComplexTurnRestriction& ctr =
         cg.GetComplexTRS().at(ctr_idx);
     // We're not allowed to point to the last edge in the path.
     CHECK_LT_S(position + 1, ctr.path.size());

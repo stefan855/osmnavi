@@ -15,8 +15,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "algos/compact_edge_dijkstra.h"
-#include "algos/edge_router.h"
-#include "algos/edge_router2.h"
+#include "algos/edge_router3.h"
 #include "algos/router.h"
 #include "base/argli.h"
 #include "base/huge_bitset.h"
@@ -64,12 +63,10 @@ void PrintStructSizes() {
                                  sizeof(GEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):               %4u",
                                  sizeof(GEdgeKey));
-  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter::VisitedEdge):%4u",
-                                 sizeof(EdgeRouter::VisitedEdge));
-  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter2::VisitedEdge):%3u",
-                                 sizeof(EdgeRouter2::VisitedEdge));
-  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRoutingLabel):       %4u",
-                                 sizeof(EdgeRoutingLabel));
+  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter3::VisitedEdge):%3u",
+                                 sizeof(EdgeRouter3::VisitedEdge));
+  LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRoutingLabel3):      %4u",
+                                 sizeof(EdgeRoutingLabel3));
   LOG_S(INFO) << absl::StrFormat("sizeof(GWay):                   %4u",
                                  sizeof(GWay));
   LOG_S(INFO) << absl::StrFormat("sizeof(NodeTags):               %4u",
@@ -120,8 +117,7 @@ void DoOneRoute(const Graph& g, std::uint32_t start_idx,
 
   uint32_t num_len_gt_1 = 0;
   uint32_t max_len = 0;
-  if constexpr (std::is_same_v<RouterT, EdgeRouter> ||
-                std::is_same_v<RouterT, EdgeRouter2>) {
+  if constexpr (std::is_same_v<RouterT, EdgeRouter3>) {
     router.TurnRestrictionSpecialStats(&num_len_gt_1, &max_len);
   }
 
@@ -142,14 +138,6 @@ void DoCompactRoute(const CompactDijkstraRoutingData& comp_data,
   auto res =
       RouteOnCompactGraph(comp_data, g_start, g_target, Verbosity::Quiet);
   const double elapsed = ToDoubleSeconds(absl::Now() - start);
-
-  /*
-  if (!csv_prefix.empty()) {
-    router.SaveSpanningTreeSegments(absl::StrFormat(
-        "/tmp/%s_%s_%s%s.csv", csv_prefix, router.AlgoName(opt).substr(0, 5),
-        backward ? "backward" : "forward", hybrid ? "_hybrid" : ""));
-  }
-  */
 
   uint32_t num_len_gt_1 = 0;
   uint32_t max_len = 0;
@@ -187,18 +175,14 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
-                         RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/false,
+  DoOneRoute<EdgeRouter3>(g, start_idx, target_idx, /*astar=*/false,
                           RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/false,
+  DoOneRoute<EdgeRouter3>(g, start_idx, target_idx, /*astar=*/false,
                           RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
   DoCompactRoute(comp_data, start_idx, target_idx, csv_prefix);
-  // RouteOnCompactGraph(comp_data, start_idx, target_idx, Verbosity::Brief);
 
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/false,
                      RoutingMetricTime(),
@@ -207,21 +191,14 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
-  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/false,
-                         RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/true, csv_prefix);
-
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/true,
-                         RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/false, csv_prefix);
 
-  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/true,
+  DoOneRoute<EdgeRouter3>(g, start_idx, target_idx, /*astar=*/true,
                           RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/false, csv_prefix);
-  DoOneRoute<EdgeRouter2>(g, start_idx, target_idx, /*astar=*/true,
+  DoOneRoute<EdgeRouter3>(g, start_idx, target_idx, /*astar=*/true,
                           RoutingMetricTime(),
                           /*backward=*/false, /*hybrid=*/true, csv_prefix);
 
@@ -231,37 +208,7 @@ void TestRoute(const Graph& g, const CompactDijkstraRoutingData& comp_data,
   DoOneRoute<Router>(g, start_idx, target_idx, /*astar=*/true,
                      RoutingMetricTime(),
                      /*backward=*/false, /*hybrid=*/true, csv_prefix);
-
-  DoOneRoute<EdgeRouter>(g, start_idx, target_idx, /*astar=*/true,
-                         RoutingMetricTime(),
-                         /*backward=*/false, /*hybrid=*/true, csv_prefix);
 }
-
-#if 0
-void TestRouteLatLong(const Graph& g, double start_lat, double start_lon,
-                      double target_lat, double target_lon,
-                      std::string_view csv_prefix = "") {
-  ClosestNodeResult start =
-      FindClosestNodeSlow(g, std::llround(TEN_POW_7 * start_lat),
-                          std::llround(TEN_POW_7 * start_lon));
-  ClosestNodeResult target =
-      FindClosestNodeSlow(g, std::llround(TEN_POW_7 * target_lat),
-                          std::llround(TEN_POW_7 * target_lon));
-
-  if (start.dist > 500 * 100 || target.dist > 500 * 100) {
-    LOG_S(INFO) << absl::StrFormat(
-        "Start-node %lld: %.2fm and/or end-node: %lld: %.2fm too far away",
-        g.nodes.at(start.node_pos).node_id, start.dist / 100.0,
-        g.nodes.at(target.node_pos).node_id, target.dist / 100.0);
-    return;
-  }
-
-  const GNode& sn = g.nodes.at(start.node_pos);
-  const GNode& tn = g.nodes.at(target.node_pos);
-
-  TestRoute(g, sn.node_id, tn.node_id, "start=", "target=", csv_prefix);
-}
-#endif
 
 void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
   FuncTimer timer(absl::StrFormat("Write graph to %s", filename.c_str()),

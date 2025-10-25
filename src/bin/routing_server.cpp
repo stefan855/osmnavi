@@ -10,7 +10,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_split.h"
-#include "algos/edge_router2.h"
+#include "algos/edge_router3.h"
 #include "base/argli.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
@@ -147,8 +147,8 @@ float GetLon(const GNode& n) { return n.lon / static_cast<float>(TEN_POW_7); }
 float GetLat(const GNode& n) { return n.lat / static_cast<float>(TEN_POW_7); }
 
 std::string GetEdgeName(const Graph& g, const CTRList& ctr_list,
-                        const EdgeRouter2::VisitedEdge& ve) {
-  if (ve.key.GetType() == EdgeRoutingLabel::CLUSTER) {
+                        const EdgeRouter3::VisitedEdge& ve) {
+  if (ve.key.GetType() == EdgeRoutingLabel3::CLUSTER) {
     return "cluster edge";
   }
   const GWay& way = g.ways.at(ve.key.GetEdge(g, ctr_list).way_idx);
@@ -160,13 +160,13 @@ std::string GetEdgeName(const Graph& g, const CTRList& ctr_list,
 
 double Round1(double val) { return std::round(val * 10.0) / 10.0; }
 
-JsonResult CreateOneStep(const Graph& g, const EdgeRouter2& router,
+JsonResult CreateOneStep(const Graph& g, const EdgeRouter3& router,
                          const RoutingResult& res, uint32_t pos,
                          bool arrival = false) {
   const CTRList& ctr_list = router.GetCTRList();
   uint32_t v_idx = res.route_v_idx.at(pos);
-  const EdgeRouter2::VisitedEdge& ve = router.GetVEdge(v_idx);
-  const EdgeRouter2::VisitedEdge* prev_edge = nullptr;
+  const EdgeRouter3::VisitedEdge& ve = router.GetVEdge(v_idx);
+  const EdgeRouter3::VisitedEdge* prev_edge = nullptr;
   if (ve.prev_v_idx != INFU32) {
     prev_edge = &router.GetVEdge(ve.prev_v_idx);
   }
@@ -182,7 +182,7 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter2& router,
     duration = (prev_edge != nullptr ? ve.min_metric - prev_edge->min_metric
                                      : ve.min_metric) /
                1000.0;
-    if (ve.key.GetType() == EdgeRoutingLabel::CLUSTER) {
+    if (ve.key.GetType() == EdgeRoutingLabel3::CLUSTER) {
       dist = 11111;
     } else {
       dist = ve.key.GetEdge(g, ctr_list).distance_cm / 100.0;
@@ -209,7 +209,7 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter2& router,
           .last_name = GetEdgeName(g, ctr_list, ve)};
 }
 
-JsonResult CreateSteps(const Graph& g, const EdgeRouter2& router,
+JsonResult CreateSteps(const Graph& g, const EdgeRouter3& router,
                        const RoutingResult& res) {
   JsonResult result;
   result.j = nlohmann::json::array();
@@ -229,7 +229,7 @@ JsonResult CreateSteps(const Graph& g, const EdgeRouter2& router,
 }
 
 nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
-                           const EdgeRouter2& router,
+                           const EdgeRouter3& router,
                            const RoutingResult& res) {
   if (res.route_v_idx.empty()) {
     return {{"code", "NoRoute"}};
@@ -238,7 +238,7 @@ nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
 
   nlohmann::json waypoints = nlohmann::json::array();
   {
-    const EdgeRouter2::VisitedEdge& ve =
+    const EdgeRouter3::VisitedEdge& ve =
         router.GetVEdge(res.route_v_idx.front());
     const GNode& n = ve.key.FromNode(g, ctr_list);
     waypoints.push_back({{"distance", std::roundf(dist_p1 / 10.0) / 10.0},
@@ -246,7 +246,7 @@ nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
                          {"location", {GetLon(n), GetLat(n)}}});
   }
   {
-    const EdgeRouter2::VisitedEdge& ve =
+    const EdgeRouter3::VisitedEdge& ve =
         router.GetVEdge(res.route_v_idx.back());
     const GNode& n = ve.key.ToNode(g, ctr_list);
     waypoints.push_back({{"distance", std::roundf(dist_p2 / 10.0) / 10.0},
@@ -304,7 +304,7 @@ nlohmann::json ComputeRoute(const Graph& g,
   }
 
   const absl::Time start = absl::Now();
-  EdgeRouter2 router(g, 0);
+  EdgeRouter3 router(g, 0);
   auto res = router.Route(start_idx, target_idx, metric, opt);
   const double elapsed = ToDoubleSeconds(absl::Now() - start);
 

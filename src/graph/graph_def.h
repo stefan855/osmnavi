@@ -23,7 +23,8 @@
 // restriction forbids the turn, a barrier disallows passing the target node, a
 // u-turn is not allowed or something else.
 struct TurnCostData {
-  TurnCostData(uint32_t size, uint8_t dflt) : turn_costs(size, dflt) {}
+  constexpr TurnCostData(uint32_t size, uint8_t dflt)
+      : turn_costs(size, dflt) {}
 
   std::vector<uint8_t> turn_costs;
   // TODO: Use a more memory-efficient data structure than a vector.
@@ -251,8 +252,7 @@ struct GEdge {
   std::uint32_t target_idx;
   std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
-  // std::uint64_t distance_cm : 40;
-  std::uint32_t distance_cm;  // MAX_EDGE_DISTANCE_CM_BITS is 32 anyways.
+  std::uint32_t distance_cm;
   // True iff this is the first time 'target_idx' has this value in the list
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
@@ -288,7 +288,7 @@ struct GEdge {
   // inverted edge is added to enable backward search.
   std::uint32_t inverted : 1;
   // True if the edge represents a way that enables both directions for at least
-  // one vehicle. In this case, there are is a forward edge at each of the two
+  // one vehicle. In this case, there is a forward edge at each of the two
   // connected end nodes. If false, then the way only enables one direction,
   // and the other direction is represented by an inverted edge at the other
   // node. Inverted edges always have false as value.
@@ -314,11 +314,16 @@ struct GEdge {
   // Priority of the road when arriving at the target node.
   ROAD_PRIORITY road_priority : 2;
 
+  // An edge that connects two border nodes of different clusters.
+  std::uint32_t cluster_border_edge : 1;
+
   std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
 struct GCluster {
+  // Information about border edges (incoming and outgoing). This is used during
+  // computation of shortest paths and during routing.
   struct EdgeDescriptor {
     uint32_t g_from_idx = INFU32;
     uint32_t g_edge_idx = INFU32;
@@ -339,12 +344,13 @@ struct GCluster {
   // For each border node, list distances to all other border nodes.
   // Distance INFU32 indicates that a node can't be reached.
 
-  // Incoming edges from the border node of another cluster.
+  // Incoming edges from the border node of another cluster. Sorted
   std::vector<EdgeDescriptor> border_in_edges;
   // Outgoing edges to a border node of another cluster.
   std::vector<EdgeDescriptor> border_out_edges;
 
   std::vector<std::vector<std::uint32_t>> distances;
+  std::vector<std::vector<std::uint32_t>> edge_distances;
   // Color number for drawing clusters. Avoids neighbouring clusters having the
   // same color.
   std::uint16_t color_no = 0;
@@ -358,11 +364,30 @@ struct GCluster {
     return it - border_nodes.begin();
   }
 
+  uint32_t FindIncomingEdgePos(uint32_t g_edge_idx) const {
+    const auto it = std::lower_bound(
+        border_in_edges.begin(), border_in_edges.end(), g_edge_idx,
+        [](const EdgeDescriptor& ed, uint32_t g_edge_idx) {
+          return ed.g_edge_idx < g_edge_idx;
+        });
+    if (it == border_in_edges.end()) {
+      return border_in_edges.size();
+    }
+    return it - border_in_edges.begin();
+  }
+
   const std::vector<std::uint32_t>& GetBorderNodeDistances(
       uint32_t node_idx) const {
     const uint32_t bn_pos = FindBorderNodePos(node_idx);
     CHECK_LT_S(bn_pos, border_nodes.size());
     return distances.at(bn_pos);
+  }
+
+  const std::vector<std::uint32_t>& GetEdgeOutDistances(
+      uint32_t edge_idx) const {
+    const uint32_t pos = FindIncomingEdgePos(edge_idx);
+    CHECK_LT_S(pos, edge_distances.size());
+    return edge_distances.at(pos);
   }
 };
 

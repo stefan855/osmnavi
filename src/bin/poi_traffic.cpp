@@ -20,7 +20,7 @@ namespace {
 
 struct GraphData {
   const Graph& g;
-  const CompactDirectedGraph& cg;
+  const CompactGraph& cg;
   const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap;
   const std::vector<std::uint32_t>& compact_to_graph_nodemap;
 };
@@ -89,7 +89,7 @@ const GEdge* FindEdgeBetweenNodes(const Graph& g, const GNode& n1,
 void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
               std::string_view export_file) {
   const std::vector<uint32_t>& edges_start = gd.cg.edges_start();
-  const std::vector<CompactDirectedGraph::PartialEdge>& edges = gd.cg.edges();
+  const std::vector<CompactGraph::PartialEdge>& edges = gd.cg.edges();
   int64_t count = 0;
 
   std::ofstream myfile;
@@ -142,7 +142,7 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
 
 // Runs single source Dijkstra for every POI and adds up the traffic for every
 // edge in the spanning tree.
-void SingleSourceDijkstraWorker(const CompactDirectedGraph& cg,
+void SingleSourceDijkstraWorker(const CompactGraph& cg,
                                 uint32_t poi_c_idx,
                                 std::vector<int64_t>* edge_traffic) {
   std::vector<uint32_t> spanning_tree_nodes;
@@ -316,7 +316,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   CHECK_S(!g.large_components.empty());
   const std::vector<std::uint32_t>& start_nodes = {
       g.large_components.front().start_node};
-  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  std::vector<CompactGraph::FullEdge> full_edges;
   // Maps node index in graph.nodes to node index in compact graph.
   absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;
 
@@ -333,10 +333,10 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
                               &graph_to_compact_nodemap);
 
   const std::vector<std::uint32_t> compact_to_graph_nodemap =
-      CompactDirectedGraph::InvertGraphToCompactNodeMap(
+      CompactGraph::InvertGraphToCompactNodeMap(
           graph_to_compact_nodemap);
-  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
-  const CompactDirectedGraph cg(num_nodes, full_edges);
+  CompactGraph::SortAndCleanupEdges(&full_edges);
+  const CompactGraph cg(num_nodes, full_edges);
   cg.LogStats();
 
   const GraphData gd = {.g = g,

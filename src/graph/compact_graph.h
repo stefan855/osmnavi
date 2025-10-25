@@ -14,9 +14,11 @@
 // This is a compact, i.e. memory efficient view on the nodes and edges of a
 // graph, with precomputed weights for every edge. The nodes in the graph have
 // ids 0..num_nodes()-1.
-class CompactDirectedGraph {
+class CompactGraph {
  public:
-  // Edges that are used as input to build the compact graph.
+  using GraphToCompactMap = absl::flat_hash_map<uint32_t, uint32_t>;
+  // Edges that are used as input to build the compact graph. They contain more
+  // data, especially the from_node.
   struct FullEdge {
     uint32_t from_c_idx;
     uint32_t to_c_idx;
@@ -66,8 +68,7 @@ class CompactDirectedGraph {
   //
   // Note: this file implements operator "<" for full edges, i.e. you can sort
   // the edges with std::sort(full_edges.begin(), full_edges.end());
-  CompactDirectedGraph(uint32_t num_nodes,
-                       const std::vector<FullEdge>& full_edges)
+  CompactGraph(uint32_t num_nodes, const std::vector<FullEdge>& full_edges)
       : num_nodes_(num_nodes) {
     turn_costs_.push_back(TurnCostData(32, TURN_COST_ZERO_COMPRESSED));
     BuildGraph(full_edges);
@@ -107,17 +108,16 @@ class CompactDirectedGraph {
   // weight) and remove duplicates (from, to, way_idx, restricted) keeping the
   // one with the lowest weight.
   static void SortAndCleanupEdges(
-      std::vector<CompactDirectedGraph::FullEdge>* full_edges) {
+      std::vector<CompactGraph::FullEdge>* full_edges) {
     std::sort(full_edges->begin(), full_edges->end());
     // Remove dups.
-    auto last = std::unique(full_edges->begin(), full_edges->end(),
-                            [](const CompactDirectedGraph::FullEdge& a,
-                               const CompactDirectedGraph::FullEdge& b) {
-                              return a.to_c_idx == b.to_c_idx &&
-                                     a.from_c_idx == b.from_c_idx &&
-                                     a.way_idx == b.way_idx &&
-                                     a.restricted_access == b.restricted_access;
-                            });
+    auto last = std::unique(
+        full_edges->begin(), full_edges->end(),
+        [](const CompactGraph::FullEdge& a, const CompactGraph::FullEdge& b) {
+          return a.to_c_idx == b.to_c_idx && a.from_c_idx == b.from_c_idx &&
+                 a.way_idx == b.way_idx &&
+                 a.restricted_access == b.restricted_access;
+        });
     if (last != full_edges->end()) {
       full_edges->erase(last, full_edges->end());
     }
@@ -140,10 +140,61 @@ class CompactDirectedGraph {
     return node_refs;
   }
 
+  // Add mapping from graph node indices to compact graph indices.
+  // This is important especially when debugging. It allows DescribeCNodeIdx()
+  // below to use OSM node ids when logging.
+  // 'm' is created when collecting edges for the compact graph, so just pass it
+  // here. AddGNodeMap() takes ownership, so use std::move().
+  void AddGNodeMap(const Graph& g, GraphToCompactMap&& m,
+                   bool create_inverted = false) {
+    CHECK_EQ_S(m.size(), num_nodes());
+    g_ptr_ = &g;
+    graph_to_compact_map_ = std::move(m);
+    if (create_inverted) {
+      compact_to_graph_map_ =
+          InvertGraphToCompactNodeMap(graph_to_compact_map_);
+      CHECK_EQ_S(compact_to_graph_map_.size(), num_nodes());
+    }
+  }
+
+  const GraphToCompactMap& graph_to_compact_map() const {
+    return graph_to_compact_map_;
+  }
+
+  // Maps graph node index to compact graph index.
+  // Returns -1 if AddGNodeMap() was not called.
+  int64_t gnode_to_cnode_idx(uint32_t gnode_idx) const {
+    if (!graph_to_compact_map_.empty()) {
+      return FindInMapOrFail(graph_to_compact_map_, gnode_idx);
+    }
+    return -1;
+  }
+
+  // Maps compact graph node index to graph index.
+  // Returns -1 if AddGNodeMap() was not called.
+  int64_t cnode_to_gnode_idx(uint32_t cnode_idx) const {
+    if (!compact_to_graph_map_.empty()) {
+      return compact_to_graph_map_.at(cnode_idx);
+    }
+    return -1;
+  }
+
+  // Return a string containing cnode_idx, gnode_idx and OSM node id. Depends on
+  // availability of the mapping tables, See AddGNodeMap().
+  std::string DescribeCNodeIdx(uint32_t cnode_idx) const {
+    int64_t g_idx = cnode_to_gnode_idx(cnode_idx);
+    int64_t node_id = -1;
+    if (g_ptr_ != nullptr && g_idx >= 0) {
+      node_id = GetGNodeIdSafe(*g_ptr_, g_idx);
+    }
+    return absl::StrFormat("%u(G:%lld[%lld])", cnode_idx, g_idx, node_id);
+  }
+
  private:
   // Compute turn costs for edge 'in_ce'.
   TurnCostData ConvertTurnCostsAtEdge(
-      const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
+      const Graph& g, uint32_t cn_from_idx, const PartialEdge& in_ce,
+      const GEdge& in_ge,
       const std::vector<std::uint32_t>& compact_to_graph) const {
     const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
     CHECK_EQ_S(g.nodes.at(in_ge.target_idx).num_forward_edges,
@@ -151,9 +202,7 @@ class CompactDirectedGraph {
 
     const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
     const uint32_t c_stop = edges_start_.at(in_ce.to_c_idx + 1);
-    // TurnCostData tcd{{c_stop - c_start, TURN_COST_ZERO_COMPRESSED}};
     TurnCostData tcd(c_stop - c_start, TURN_COST_ZERO_COMPRESSED);
-
     for (uint32_t ce_idx = c_start; ce_idx < c_stop; ++ce_idx) {
       // Find corresponding edge in graph 'g'.
       const PartialEdge& out_ce = edges_.at(ce_idx);
@@ -162,33 +211,34 @@ class CompactDirectedGraph {
           out_ce.way_idx);
       // Copy turn cost for this one edge.
       tcd.turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
+#if 0
+      if (true || tcd.turn_costs.at(ce_idx - c_start) == 0) {
+        uint32_t g_idx0 = compact_to_graph.at(cn_from_idx);
+        uint32_t g_idx1 = in_ge.target_idx;
+        uint32_t g_idx2 = compact_to_graph.at(out_ce.to_c_idx);
+        if (g_idx0 == g_idx2) {
+          LOG_S(INFO) << absl::StrFormat(
+              "CC0 U-turn with cost:%d way0:%lld way1:%lld nodes:%lld -> %lld "
+              "-> %lld c_idx1:%u",
+              (int)tcd.turn_costs.at(ce_idx - c_start),
+              GetGWayIdSafe(g, in_ge.way_idx), GetGWayIdSafe(g, out_ce.way_idx),
+              GetGNodeIdSafe(g, g_idx0), GetGNodeIdSafe(g, g_idx1),
+              GetGNodeIdSafe(g, g_idx2), in_ce.to_c_idx);
+        }
+      }
+#endif
+
+#if 0
+    LOG_S(INFO) << absl::StrFormat(
+        "BB1 Node id:%lld g_idx:%u c_from_idx:%u c_to_idx:%u c_edge_idx:%u "
+        "#num_g:%llu #num_c:%llu",
+        GetGNodeIdSafe(g, in_ge.target_idx), in_ge.target_idx, cn_from_idx,
+        in_ce.to_c_idx, 0 /*in_ce - cg.edges()*/, g_tcd.turn_costs.size(),
+        tcd.turn_costs.size());
+#endif
     }
     return tcd;
   }
-#if 0
-  void ConvertTurnCostsAtEdge(
-      const Graph& g, const PartialEdge& in_ce, const GEdge& in_ge,
-      const std::vector<std::uint32_t>& compact_to_graph,
-      TurnCostData* tcd) const {
-    const TurnCostData& g_tcd = g.turn_costs.at(in_ge.turn_cost_idx);
-    CHECK_EQ_S(g.nodes.at(in_ge.target_idx).num_forward_edges,
-               g_tcd.turn_costs.size());
-
-    const uint32_t c_start = edges_start_.at(in_ce.to_c_idx);
-    const uint32_t c_stop = edges_start_.at(in_ce.to_c_idx + 1);
-    tcd->turn_costs.assign(c_stop - c_start, TURN_COST_ZERO_COMPRESSED);
-
-    for (uint32_t ce_idx = c_start; ce_idx < c_stop; ++ce_idx) {
-      // Find corresponding edge in graph 'g'.
-      const PartialEdge& out_ce = edges_.at(ce_idx);
-      uint32_t g_off = gnode_find_forward_edge_offset(
-          g, in_ge.target_idx, compact_to_graph.at(out_ce.to_c_idx),
-          out_ce.way_idx);
-      // Copy turn cost for this one edge.
-      tcd->turn_costs.at(ce_idx - c_start) = g_tcd.turn_costs.at(g_off);
-    }
-  }
-#endif
 
  public:
   // Add the turn costs that are stored with every outgoing edge in 'g' to the
@@ -203,7 +253,6 @@ class CompactDirectedGraph {
         InvertGraphToCompactNodeMap(graph_to_compact_nodemap);
 
     DeDuperWithIds<TurnCostData> deduper;
-    // TurnCostData tcd;
     for (uint32_t cn_idx = 0; cn_idx < num_nodes_; cn_idx++) {
       for (uint32_t ce_idx = edges_start_.at(cn_idx);
            ce_idx < edges_start_.at(cn_idx + 1); ce_idx++) {
@@ -212,8 +261,8 @@ class CompactDirectedGraph {
         const GEdge& in_ge =
             gnode_find_edge(g, compact_to_graph.at(cn_idx),
                             compact_to_graph.at(in_ce.to_c_idx), in_ce.way_idx);
-        TurnCostData tcd = ConvertTurnCostsAtEdge(g, in_ce, in_ge,
-                                                  compact_to_graph /*, &tcd*/);
+        TurnCostData tcd =
+            ConvertTurnCostsAtEdge(g, cn_idx, in_ce, in_ge, compact_to_graph);
 
         // No turn costs except blocked turns for non-time metrics.
         if (!is_time_metric) {
@@ -313,12 +362,13 @@ class CompactDirectedGraph {
       uturn += e.uturn_allowed;
     }
     LOG_S(INFO) << absl::StrFormat(
-        "CompactGraph #nodes:%u #edges:%u restricted:%u uturn:%u #turncosts:%u "
+        "CompactGraph #nodes:%u #edges:%u restricted:%u uturn:%u "
+        "#turncosts:%u "
         "mem:%u weight=[%u,%u]",
         edges_start_.size() - 1, edges_.size(), restricted_access, uturn,
         turn_costs_.size(),
         edges_start_.size() * sizeof(uint32_t) +
-            edges_.size() * sizeof(PartialEdge) + sizeof(CompactDirectedGraph),
+            edges_.size() * sizeof(PartialEdge) + sizeof(CompactGraph),
         min_weight, max_weight);
   }
 
@@ -431,10 +481,21 @@ class CompactDirectedGraph {
 
   // Turn costs indexed by edges, see 'PartialEdge.turn_cost_idx'.
   std::vector<TurnCostData> turn_costs_;
+
+  // Maps graph node indices to compact graph node indices.
+  // Only available if AddGNodeMap() was called.
+  GraphToCompactMap graph_to_compact_map_;
+
+  // Maps compact node indices to graph node indices. Only available if
+  // AddGNodeMap() was called.
+  std::vector<uint32_t> compact_to_graph_map_;
+
+  // Only available if AddGNodeMap() was called.
+  const Graph* g_ptr_ = nullptr;
 };
 
-inline bool operator<(const CompactDirectedGraph::FullEdge& a,
-                      const CompactDirectedGraph::FullEdge& b) {
+inline bool operator<(const CompactGraph::FullEdge& a,
+                      const CompactGraph::FullEdge& b) {
   return std::tie(a.from_c_idx, a.to_c_idx, a.restricted_access, a.weight) <
          std::tie(b.from_c_idx, b.to_c_idx, b.restricted_access, b.weight);
 }
@@ -461,11 +522,11 @@ inline bool operator<(const CompactDirectedGraph::FullEdge& a,
 // If 'graph_to_compact_nodemap' is not nullptr, then it will contain a
 // mapping from indexes in graph.nodes to indexes in the compact graph
 // [0..num_nodes-1].
+#define DEBUG_COLLECT_EDGES 0
 inline void CollectEdgesForCompactGraph(
     const Graph& g, const RoutingMetric& metric, RoutingOptions opt,
     const std::vector<std::uint32_t>& routing_nodes, bool undirected_expand,
-    uint32_t* num_nodes,
-    std::vector<CompactDirectedGraph::FullEdge>* full_edges,
+    uint32_t* num_nodes, std::vector<CompactGraph::FullEdge>* full_edges,
     absl::flat_hash_map<uint32_t, uint32_t>* graph_to_compact_nodemap =
         nullptr) {
   CHECK_S(!routing_nodes.empty());
@@ -483,12 +544,12 @@ inline void CollectEdgesForCompactGraph(
   for (uint32_t node_idx : routing_nodes) {
     // Check for duplicates.
     if (!graph_to_compact_nodemap->contains(node_idx)) {
-      /*
+#if DEBUG_COLLECT_EDGES
       LOG_S(INFO) << absl::StrFormat(
           "Add mapping node_idx %lld(%u) to c_idx %lld",
           GetGNodeIdSafe(g, node_idx), node_idx,
           graph_to_compact_nodemap->size());
-          */
+#endif
       (*graph_to_compact_nodemap)[node_idx] = graph_to_compact_nodemap->size();
       q.push(node_idx);
     }
@@ -510,12 +571,12 @@ inline void CollectEdgesForCompactGraph(
         uint32_t bridge_idx;
         FindBridge(g, node_idx, nullptr, &bridge_idx);
         if (!graph_to_compact_nodemap->contains(bridge_idx)) {
-          /*
+#if DEBUG_COLLECT_EDGES
           LOG_S(INFO) << absl::StrFormat(
               "Add mapping bridge_idx %lld(%u) to c_idx %lld",
               GetGNodeIdSafe(g, bridge_idx), bridge_idx,
               graph_to_compact_nodemap->size());
-              */
+#endif
           (*graph_to_compact_nodemap)[bridge_idx] =
               graph_to_compact_nodemap->size();
           q.push(bridge_idx);
@@ -547,14 +608,18 @@ inline void CollectEdgesForCompactGraph(
     }
 
     // Examine neighbours.
-    // LOG_S(INFO) << "Expanding node " << GetGNodeIdSafe(g, node_idx);
+#if DEBUG_COLLECT_EDGES
+    LOG_S(INFO) << "Expanding node " << GetGNodeIdSafe(g, node_idx);
+#endif
     for (const GEdge& edge : gnode_forward_edges(g, node_idx)) {
-      // LOG_S(INFO) << "Edge to " << GetGNodeIdSafe(g, edge.target_idx);
+#if DEBUG_COLLECT_EDGES
+      LOG_S(INFO) << "Edge to " << GetGNodeIdSafe(g, edge.target_idx);
+#endif
 
       const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
       if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                             EDGE_DIR(edge))) {
-#if 0
+#if DEBUG_COLLECT_EDGES
         LOG_S(INFO) << "Reject edge from " << GetGNodeIdSafe(g, node_idx)
                     << " to " << GetGNodeIdSafe(g, edge.target_idx);
 #endif
@@ -567,12 +632,12 @@ inline void CollectEdgesForCompactGraph(
         // The node hasn't been seen before. This means we need to allocate a
         // new id, and we need to enqueue the node because it hasn't been
         // handled yet.
-        /*
+#if DEBUG_COLLECT_EDGES
         LOG_S(INFO) << absl::StrFormat(
             "Add mapping node_idx %lld(%u) to c_idx %lld",
             GetGNodeIdSafe(g, edge.target_idx), edge.target_idx,
             graph_to_compact_nodemap->size());
-            */
+#endif
         other_c_idx = graph_to_compact_nodemap->size();
         (*graph_to_compact_nodemap)[edge.target_idx] =
             graph_to_compact_nodemap->size();
@@ -581,7 +646,7 @@ inline void CollectEdgesForCompactGraph(
         other_c_idx = iter->second;
       }
 
-#if 0
+#if DEBUG_COLLECT_EDGES
       LOG_S(INFO) << "Add edge from " << GetGNodeIdSafe(g, node_idx) << " to "
                   << GetGNodeIdSafe(g, edge.target_idx);
 #endif
@@ -604,12 +669,15 @@ inline void CollectEdgesForCompactGraph(
         (opt.restrict_to_cluster && c_idx < routing_nodes.size())) {
       // Examine neighbours connected by backward edges and add them to the
       // queue if they haven't been seen yet.
-      // LOG_S(INFO) << "Inverse Expanding node " << GetGNodeIdSafe(g,
-      // node_idx);
+#if DEBUG_COLLECT_EDGES
+      LOG_S(INFO) << "Inverse Expanding node " << GetGNodeIdSafe(g, node_idx);
+#endif
       for (const GEdge& edge : gnode_inverted_edges(g, node_idx)) {
         // for (size_t i = node.num_edges_out; i < gnode_total_edges(node);
         // ++i) { const GEdge& edge = node.edges[i];
-        // LOG_S(INFO) << "Edge to " << GetGNodeIdSafe(g, edge.target_idx);
+#if DEBUG_COLLECT_EDGES
+        LOG_S(INFO) << "Edge to " << GetGNodeIdSafe(g, edge.target_idx);
+#endif
         const WaySharedAttrs& wsa = GetWSA(g, edge.way_idx);
         if (RoutingRejectEdge(g, opt, node, node_idx, edge, wsa,
                               EDGE_DIR(edge))) {
@@ -618,12 +686,12 @@ inline void CollectEdgesForCompactGraph(
 
         auto iter = graph_to_compact_nodemap->find(edge.target_idx);
         if (iter == graph_to_compact_nodemap->end()) {
-          /*
+#if DEBUG_COLLECT_EDGES
           LOG_S(INFO) << absl::StrFormat(
               "Add mapping node_idx %lld(%u) to c_idx %lld",
               GetGNodeIdSafe(g, edge.target_idx), edge.target_idx,
               graph_to_compact_nodemap->size());
-              */
+#endif
           (*graph_to_compact_nodemap)[edge.target_idx] =
               graph_to_compact_nodemap->size();
           q.push(edge.target_idx);

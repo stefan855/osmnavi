@@ -1,5 +1,5 @@
 // Compute all shortest paths between a set of nodes, for instance between
-// border nodes in a cluster, using a CompactDirectedGraph.
+// border nodes in a cluster, using a CompactGraph.
 
 #pragma once
 
@@ -49,7 +49,7 @@ struct MetricCmp {
 // same vector, except for the root node at position 0. For example, this is
 // useful to visit all nodes and edges bottom up or top down.
 inline std::vector<VisitedNode> SingleSourceDijkstra(
-    const CompactDirectedGraph& cg, std::uint32_t start_idx,
+    const CompactGraph& cg, std::uint32_t start_idx,
     std::vector<uint32_t>* spanning_tree_nodes = nullptr) {
   if (spanning_tree_nodes != nullptr) {
     spanning_tree_nodes->reserve(cg.num_nodes());
@@ -59,7 +59,7 @@ inline std::vector<VisitedNode> SingleSourceDijkstra(
       cg.num_nodes(), {.min_weight = INFU32, .done = 0, .from_v_idx = INFU31});
   std::priority_queue<QueuedNode, std::vector<QueuedNode>, MetricCmp> pq;
   const std::vector<uint32_t>& edges_start = cg.edges_start();
-  const std::vector<CompactDirectedGraph::PartialEdge>& edges = cg.edges();
+  const std::vector<CompactGraph::PartialEdge>& edges = cg.edges();
 
   pq.emplace(0, start_idx);
   visited_nodes.at(start_idx).min_weight = 0;
@@ -90,7 +90,7 @@ inline std::vector<VisitedNode> SingleSourceDijkstra(
     // Search neighbours.
     for (size_t i = edges_start.at(qnode.visited_node_idx);
          i < edges_start.at(qnode.visited_node_idx + 1); ++i) {
-      const CompactDirectedGraph::PartialEdge e = edges.at(i);
+      const CompactGraph::PartialEdge e = edges.at(i);
       const std::uint32_t new_weight = vnode.min_weight + e.weight;
       VisitedNode& other = visited_nodes.at(e.to_c_idx);
       if (!other.done && new_weight < other.min_weight) {

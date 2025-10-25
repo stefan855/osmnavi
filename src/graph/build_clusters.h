@@ -270,7 +270,7 @@ inline void UpdateGraphClusterInformation(Graph* g) {
     GCluster& cluster = g->clusters.at(n.cluster_id);
     cluster.num_nodes++;
 
-    for (const GEdge& e : gnode_all_edges(*g, node_pos)) {
+    for (GEdge& e : gnode_all_edges(*g, node_pos)) {
       // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
       // { GEdge& e = n.edges[edge_pos];
       GNode& other = g->nodes.at(e.target_idx);
@@ -291,6 +291,7 @@ inline void UpdateGraphClusterInformation(Graph* g) {
         cluster.num_outer_edges++;
         n.cluster_border_node = 1;
         other.cluster_border_node = 1;
+        e.cluster_border_edge = 1;
       }
     }
   }
@@ -312,22 +313,77 @@ inline void UpdateGraphClusterInformation(Graph* g) {
 
   for (GCluster& cluster : g->clusters) {
     // By construction, we should not have empty clusters.
-    CHECK_GT_S(cluster.num_nodes, 0);
+    CHECK_GT_S(cluster.num_nodes, 0) << cluster.cluster_id;
     // By construction, the node positions should be sorted.
     CHECK_S(std::is_sorted(cluster.border_nodes.begin(),
-                           cluster.border_nodes.end()));
+                           cluster.border_nodes.end()))
+        << cluster.cluster_id;
     // std::sort(cluster.border_nodes.begin(), cluster.border_nodes.end());
+  }
+}
+
+// Compute all shortest paths between border nodes in a cluster. The results
+// are stored in 'cluster.distances'.
+inline void ComputeShortestClusterPaths(const Graph& g,
+                                        const RoutingMetric& metric, VEHICLE vt,
+                                        GCluster* cluster) {
+  CHECK_S(cluster->distances.empty());
+  const size_t num_border_nodes = cluster->border_nodes.size();
+  if (num_border_nodes == 0) {
+    return;  // Nothing to compute, cluster is isolated.
+  }
+
+  // Construct a minimal graph with all necessary information.
+  uint32_t num_nodes = 0;
+  std::vector<CompactGraph::FullEdge> full_edges;
+  absl::flat_hash_map<uint32_t, uint32_t> gnode_to_compact;
+  CollectEdgesForCompactGraph(g, metric,
+                              {.vt = vt,
+                               .avoid_restricted_access_edges = true,
+                               .restrict_to_cluster = true,
+                               .restrict_cluster_id = cluster->cluster_id},
+                              cluster->border_nodes,
+                              /*undirected_expand=*/false, &num_nodes,
+                              &full_edges, &gnode_to_compact);
+  CompactGraph::SortAndCleanupEdges(&full_edges);
+  const CompactGraph cg(num_nodes, full_edges);
+  cg.LogStats();
+
+  // Execute single source Dijkstra from every border node.
+  for (size_t border_node = 0; border_node < num_border_nodes; ++border_node) {
+    // Now store the distances for this border node.
+    cluster->distances.emplace_back();
+    const std::vector<compact_dijkstra::VisitedNode> vis =
+        compact_dijkstra::SingleSourceDijkstra(cg, border_node);
+    CHECK_EQ_S(vis.size(), num_nodes);
+    for (size_t i = 0; i < num_border_nodes; ++i) {
+      cluster->distances.back().push_back(vis.at(i).min_weight);
+    }
+  };
+  CHECK_EQ_S(cluster->distances.size(), cluster->border_nodes.size());
+}
+
+namespace {
+
+void SortBorderEdges(std::vector<GCluster::EdgeDescriptor>* edges) {
+  std::sort(
+      edges->begin(), edges->end(),
+      [](const GCluster::EdgeDescriptor& a, const GCluster::EdgeDescriptor& b) {
+        return a.g_edge_idx < b.g_edge_idx;
+      });
+  for (uint32_t i = 0; i < edges->size(); ++i) {
+    edges->at(i).pos = i;
   }
 }
 
 // This finds and adds information about border incoming/outgoing edges, i.e.
 // edges that connect 'cluster' with another cluster at border edges.
 void AddBorderEdgeInformation(
-    const Graph& g, const CompactDirectedGraph& cg,
+    const Graph& g, const CompactGraph& cg,
     const absl::flat_hash_map<uint32_t, uint32_t>& gnode_to_compact,
     GCluster* cluster) {
   // const std::vector<uint32_t>& cg_edges_start = cg.edges_start();
-  // const std::vector<CompactDirectedGraph::PartialEdge>& cg_edges =
+  // const std::vector<CompactGraph::PartialEdge>& cg_edges =
   // cg.edges();
 
   // Iterate over all border nodes and collect information about
@@ -337,29 +393,7 @@ void AddBorderEdgeInformation(
     const GNode& gn = g.nodes.at(gn_idx);
     CHECK_EQ_S(gn.cluster_id, cluster->cluster_id) << gn.node_id;
 
-    // Iterate over edges leaving from border node to another cluster.
-    for (uint32_t ge_idx = gn.edges_start_pos;
-         ge_idx < gn.edges_start_pos + gn.num_forward_edges; ++ge_idx) {
-      const GEdge& ge = g.edges.at(ge_idx);
-      const GNode& gother = g.nodes.at(ge.target_idx);
-      // Is this an edge connecting to another cluster?
-      if (gother.cluster_id != cluster->cluster_id &&
-          gother.cluster_id != INVALID_CLUSTER_ID) {
-        uint32_t ct_idx = FindInMapOrFail(gnode_to_compact, ge.target_idx);
-        int64_t ce_idx = cg.FindEdge(cn_idx, ct_idx, ge.way_idx);
-        CHECK_S(ce_idx >= 0);
-        cluster->border_out_edges.push_back(
-            {.g_from_idx = gn_idx,
-             .g_edge_idx = ge_idx,
-             .c_from_idx = cn_idx,
-             .c_edge_idx = (uint32_t)ce_idx,
-             .pos = (uint32_t)cluster->border_out_edges.size()});
-        // Edges between clusters should not trigger complex restrictions.
-        CHECK_S(cg.edges().at(ce_idx).complex_tr_trigger == 0);
-      }
-    }
-
-    // Iterate over edges arriving from another cluster to border node.
+    // Iterate over edges arriving from another cluster to this border node.
     for (const FullEdge& gfe : gnode_incoming_edges(g, gn_idx)) {
       CHECK_EQ_S(gfe.target_idx(g), gn_idx);
       uint32_t g_from_idx = gfe.start_idx();
@@ -382,61 +416,45 @@ void AddBorderEdgeInformation(
              .pos = (uint32_t)cluster->border_in_edges.size()});
       }
     }
+
+    // Iterate over edges leaving from this border node to another cluster.
+    for (uint32_t ge_idx = gn.edges_start_pos;
+         ge_idx < gn.edges_start_pos + gn.num_forward_edges; ++ge_idx) {
+      const GEdge& ge = g.edges.at(ge_idx);
+      const GNode& gother = g.nodes.at(ge.target_idx);
+      // Is this an edge connecting to another cluster?
+      if (gother.cluster_id != cluster->cluster_id &&
+          gother.cluster_id != INVALID_CLUSTER_ID) {
+        uint32_t ct_idx = FindInMapOrFail(gnode_to_compact, ge.target_idx);
+        int64_t ce_idx = cg.FindEdge(cn_idx, ct_idx, ge.way_idx);
+        CHECK_S(ce_idx >= 0);
+        cluster->border_out_edges.push_back(
+            {.g_from_idx = gn_idx,
+             .g_edge_idx = ge_idx,
+             .c_from_idx = cn_idx,
+             .c_edge_idx = (uint32_t)ce_idx,
+             .pos = (uint32_t)cluster->border_out_edges.size()});
+        // Edges between clusters should not trigger complex restrictions.
+        CHECK_S(cg.edges().at(ce_idx).complex_tr_trigger == 0);
+      }
+    }
   }
+  SortBorderEdges(&cluster->border_in_edges);
+  SortBorderEdges(&cluster->border_out_edges);
+
   LOG_S(INFO) << absl::StrFormat(
       "Cluster %d has border nodes:%lld in edges:%lld out edges:%lld",
       cluster->cluster_id, cluster->border_nodes.size(),
       cluster->border_in_edges.size(), cluster->border_out_edges.size());
 }
+}  // namespace
 
-// Compute all shortest paths between border nodes in a cluster. The results
-// are stored in 'cluster.distances'.
-inline void ComputeShortestClusterPaths(const Graph& g,
-                                        const RoutingMetric& metric, VEHICLE vt,
-                                        GCluster* cluster) {
-  CHECK_S(cluster->distances.empty());
-  const size_t num_border_nodes = cluster->border_nodes.size();
-  if (num_border_nodes == 0) {
-    return;  // Nothing to compute, cluster is isolated.
-  }
-
-  // Construct a minimal graph with all necessary information.
-  uint32_t num_nodes = 0;
-  std::vector<CompactDirectedGraph::FullEdge> full_edges;
-  absl::flat_hash_map<uint32_t, uint32_t> gnode_to_compact;
-  CollectEdgesForCompactGraph(g, metric,
-                              {.vt = vt,
-                               .avoid_restricted_access_edges = true,
-                               .restrict_to_cluster = true,
-                               .restrict_cluster_id = cluster->cluster_id},
-                              cluster->border_nodes,
-                              /*undirected_expand=*/false, &num_nodes,
-                              &full_edges, &gnode_to_compact);
-  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
-  const CompactDirectedGraph cg(num_nodes, full_edges);
-  AddBorderEdgeInformation(g, cg, gnode_to_compact, cluster);
-  cg.LogStats();
-
-  // Execute single source Dijkstra from every border node.
-  for (size_t border_node = 0; border_node < num_border_nodes; ++border_node) {
-    // Now store the distances for this border node.
-    cluster->distances.emplace_back();
-    const std::vector<compact_dijkstra::VisitedNode> vis =
-        compact_dijkstra::SingleSourceDijkstra(cg, border_node);
-    CHECK_EQ_S(vis.size(), num_nodes);
-    for (size_t i = 0; i < num_border_nodes; ++i) {
-      cluster->distances.back().push_back(vis.at(i).min_weight);
-    }
-  };
-  CHECK_EQ_S(cluster->distances.size(), cluster->border_nodes.size());
-}
-
-// Compute all shortest paths between border nodes in a cluster. The results
-// are stored in 'cluster.distances'.
+// Compute all shortest paths between border edges in a cluster. The results
+// are stored in 'cluster.edge_distances'.
 inline void ComputeShortestClusterEdgePaths(const Graph& g,
                                             const RoutingMetric& metric,
                                             VEHICLE vt, GCluster* cluster) {
-  CHECK_S(cluster->distances.empty());
+  CHECK_S(cluster->edge_distances.empty());
   const size_t num_border_nodes = cluster->border_nodes.size();
   if (num_border_nodes == 0) {
     return;  // Nothing to compute, cluster is isolated.
@@ -444,7 +462,7 @@ inline void ComputeShortestClusterEdgePaths(const Graph& g,
 
   // Construct a minimal graph with all necessary information.
   uint32_t num_nodes = 0;
-  std::vector<CompactDirectedGraph::FullEdge> full_edges;
+  std::vector<CompactGraph::FullEdge> full_edges;
   absl::flat_hash_map<uint32_t, uint32_t> gnode_to_compact;
   CollectEdgesForCompactGraph(g, metric,
                               {.vt = vt,
@@ -454,30 +472,35 @@ inline void ComputeShortestClusterEdgePaths(const Graph& g,
                               cluster->border_nodes,
                               /*undirected_expand=*/false, &num_nodes,
                               &full_edges, &gnode_to_compact);
-  CompactDirectedGraph::SortAndCleanupEdges(&full_edges);
-  const CompactDirectedGraph cg(num_nodes, full_edges);
+  CompactGraph::SortAndCleanupEdges(&full_edges);
+  CompactGraph cg(num_nodes, full_edges);
+  cg.AddComplexTurnRestrictions(g.complex_turn_restrictions, gnode_to_compact);
+  cg.AddTurnCosts(g, metric.IsTimeMetric(), gnode_to_compact);
   AddBorderEdgeInformation(g, cg, gnode_to_compact, cluster);
   cg.LogStats();
 
   // Execute single source Dijkstra for every incoming border edge
   for (const auto& in_edge : cluster->border_in_edges) {
-    // Now store the distances for this border node.
-    cluster->distances.emplace_back();
+    // Now store the edge_distances for this border node.
+    cluster->edge_distances.emplace_back();
     SingleSourceEdgeDijkstra router;
-    int off =
-        (int)(in_edge.c_edge_idx - cg.edges_start().at(in_edge.c_from_idx));
-    router.Route(cg, {.c_start_idx = in_edge.c_from_idx, .c_edge_offset = off},
+    int16_t off =
+        (int16_t)(in_edge.c_edge_idx - cg.edges_start().at(in_edge.c_from_idx));
+    router.Route(cg,
+                 {.c_start_idx = in_edge.c_from_idx,
+                  .c_edge_offset = off,
+                  .edge_weight_fraction = 0.0},
                  {.handle_restricted_access = true});
 
     const std::vector<SingleSourceEdgeDijkstra::VisitedEdge>& vis =
         router.GetVisitedEdges();
     for (const auto& out_edge : cluster->border_out_edges) {
       // Get the best min_weight if there is more than one entry.
-      cluster->distances.back().push_back(
+      cluster->edge_distances.back().push_back(
           vis.at(out_edge.c_edge_idx).min_weight);
     }
   };
-  CHECK_EQ_S(cluster->distances.size(), cluster->border_in_edges.size());
+  CHECK_EQ_S(cluster->edge_distances.size(), cluster->border_in_edges.size());
 }
 
 inline void CheckShortestClusterPaths(const Graph& g, int n_threads) {

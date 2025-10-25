@@ -345,7 +345,7 @@
         L.DomEvent.on(OSRMBtn, 'click', function() {
           var opt = routingControl.getRouter().options;
           opt.serviceUrl = 'https://router.project-osrm.org/route/v1';
-          opt.lineOptions.styles[0].color = 'red';
+          opt.lineOptions.styles[0].color = '#000000';
           routingControl.route();
           map.closePopup();
         });
@@ -353,7 +353,7 @@
         L.DomEvent.on(DIYBtn, 'click', function() {
           var opt = routingControl.getRouter().options;
           opt.serviceUrl = 'http://localhost:8081/route/v1';
-          opt.lineOptions.styles[0].color = 'magenta';
+          opt.lineOptions.styles[0].color = 'red';
           routingControl.route();
           map.closePopup();
         });
@@ -361,7 +361,7 @@
         L.DomEvent.on(DIYHYBBtn, 'click', function() {
           var opt = routingControl.getRouter().options;
           opt.serviceUrl = 'http://localhost:8081/route/v1hybrid';
-          opt.lineOptions.styles[0].color = '#000000';
+          opt.lineOptions.styles[0].color = 'magenta';
           routingControl.route();
           map.closePopup();
         });
