@@ -61,8 +61,6 @@ void PrintStructSizes() {
                                  sizeof(GNode));
   LOG_S(INFO) << absl::StrFormat("sizeof(GEdge):                  %4u",
                                  sizeof(GEdge));
-  LOG_S(INFO) << absl::StrFormat("sizeof(GEdgeKey):               %4u",
-                                 sizeof(GEdgeKey));
   LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRouter3::VisitedEdge):%3u",
                                  sizeof(EdgeRouter3::VisitedEdge));
   LOG_S(INFO) << absl::StrFormat("sizeof(EdgeRoutingLabel3):      %4u",

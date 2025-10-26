@@ -50,6 +50,23 @@ class FullEdge final {
   uint32_t valid_ : 1;
 };
 
+inline FullEdge gnode_find_full_edge(const Graph& g, uint32_t from_node_idx,
+                                    uint32_t to_node_idx, uint32_t way_idx) {
+  FullEdge fe;
+  uint32_t e_start = gnode_edges_start(g, from_node_idx);
+  uint32_t num = gnode_edges_stop(g, from_node_idx) - e_start;
+  for (uint32_t off = 0; off < num; ++off) {
+    if (g.edges.at(e_start + off).target_idx == to_node_idx &&
+        g.edges.at(e_start + off).way_idx == way_idx) {
+      return FullEdge(from_node_idx, off);
+    }
+  }
+  ABORT_S() << absl::StrFormat(
+      "Node %lld has no forward edge to node %lld with way %lld",
+      GetGNodeIdSafe(g, from_node_idx), GetGNodeIdSafe(g, to_node_idx),
+      g.ways.at(way_idx).id);
+}
+
 // Find all unique (deduped by 'e.target_idx') forward edges starting at
 // 'node_idx'. e.target_idx==ignore_node_idx is ignored.
 inline std::vector<FullEdge> gnode_unique_forward_edges(

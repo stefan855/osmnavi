@@ -341,7 +341,7 @@ class Router {
 
       const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
       if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
-                            EDGE_INVERSE_DIR(edge))) {
+                            edge.inverted ? EDGE_DIR(edge) : EDGE_INVERSE_DIR(edge))) {
         continue;
       }
 
@@ -353,7 +353,7 @@ class Router {
       }
       std::uint32_t new_metric =
           vnode.min_metric +
-          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_INVERSE_DIR(edge), edge);
+          ctx.metric.Compute(wsa, ctx.opt.vt, edge.inverted ? EDGE_DIR(edge) : EDGE_INVERSE_DIR(edge), edge);
       if (new_metric < vother.min_metric) {
         vother.min_metric = new_metric;
         vother.from_v_idx = qnode.visited_node_idx;

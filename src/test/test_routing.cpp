@@ -5,9 +5,8 @@
 
 #include "algos/compact_dijkstra.h"
 #include "algos/compact_edge_dijkstra.h"
-#include "algos/edge_key.h"
-// #include "algos/edge_router2.h"
 #include "algos/edge_router3.h"
+#include "algos/edge_routing_label3.h"
 #include "algos/router.h"
 #include "algos/tarjan.h"
 #include "base/country_code.h"
@@ -66,56 +65,141 @@ uint32_t ExecuteSingleSourceDijkstra(const CompactGraph& cg,
   return vis.at(target_c_idx).min_weight;
 }
 
-void TestGEdgeKey() {
-  FUNC_TIMER();
+/*
+ * This graph contains 4 nodes in three clusters 0:[a], 1:[b,c] and 2:[d].
+ * Test cluster construction and routing for edge based routers.
+ *
+ *   [a] ----- [b] ----- [c] ----- [d]
+ *         1         2         4
+ */
+Graph CreateEdgeClusterGraph(bool both_dirs) {
+  enum : uint32_t { A = 0, B, C, D };  // Node names.
   Graph g;
-  CTRDeDuper dd;
-  g.nodes.push_back({.node_id = 100, .cluster_id = 0, .edges_start_pos = 0});
-  g.nodes.push_back({.node_id = 101, .cluster_id = 0, .edges_start_pos = 2});
-  g.nodes.push_back({.node_id = 102, .cluster_id = 0, .edges_start_pos = 4});
-  g.nodes.push_back({.node_id = 103, .cluster_id = 0, .edges_start_pos = 4});
-  g.clusters.push_back({.border_nodes = {2, 3}});
+  AddDefaultWSA(g);
+  AddWay(g, /*way_idx=*/0);
 
-  // Test Cluster Edge.
-  GEdgeKey cl_edge1 =
-      GEdgeKey::CreateClusterEdge(g, /*from_idx=*/0, /*offset=*/1, 0);
-  GEdgeKey cl_edge2 =
-      GEdgeKey::CreateClusterEdge(g, /*from_idx=*/2, /*offset=*/1, 0);
-  CHECK_EQ_S(cl_edge1.GetToIdx(g, dd), 3);
-  CHECK_EQ_S(cl_edge1.ToNode(g, dd).node_id, 103);
-  // Cluster edges hash key encodes cluster_id + offset + bits, i.e. the
-  // from_idx is replaced with cluster_id. Therefore, the two edges must have
-  // the same hash key.
-  CHECK_EQ_S(cl_edge1.UInt64Key(g, dd), cl_edge2.UInt64Key(g, dd));
+  AddCluster(g, 0, {});
+  AddCluster(g, 1, {});
+  AddCluster(g, 2, {});
 
-  // Dummy edges of node 100.
-  g.edges.push_back({});
-  g.edges.push_back({});
-  // Edges of node 101.
-  g.edges.push_back({.target_idx = 2});
-  g.edges.push_back({.target_idx = 3});
+  AddNode(g, A, /*cluster_id=*/0);
+  AddNode(g, B, /*cluster_id=*/1);
+  AddNode(g, C, /*cluster_id=*/1);
+  AddNode(g, D, /*cluster_id=*/2);
 
-  GEdgeKey a = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(2), 1);
-  GEdgeKey b = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(3), 0);
-  CHECK_EQ_S(a.GetFromIdx(g, dd), 1);
-  CHECK_EQ_S(b.GetFromIdx(g, dd), 1);
-  CHECK_EQ_S(a.GetOffset(), 0);
-  CHECK_EQ_S(b.GetOffset(), 1);
-  CHECK_EQ_S(a.GetBit(), 1);
-  CHECK_EQ_S(b.GetBit(), 0);
+  std::vector<TEdge> edges;
+  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, 2000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, 4000, GEdge::LABEL_FREE, both_dirs, &edges);
+  StoreEdges(edges, &g);
 
-  CHECK_EQ_S(a.GetEdge(g, dd).target_idx, 2);
-  CHECK_EQ_S(b.GetEdge(g, dd).target_idx, 3);
+  build_clusters::UpdateGraphClusterInformation(&g);
+  for (GCluster& cl : g.clusters) {
+    build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
+                                                VH_MOTORCAR, &cl);
+    build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
+                                                    VH_MOTORCAR, &cl);
+  }
 
-  CHECK_EQ_S(a.FromNode(g, dd).node_id, 101);
-  CHECK_EQ_S(b.FromNode(g, dd).node_id, 101);
+  return g;
+}
 
-  CHECK_EQ_S(a.ToNode(g, dd).node_id, 102);
-  CHECK_EQ_S(b.ToNode(g, dd).node_id, 103);
+void TestEdgeRoutingLabel3() {
+  FUNC_TIMER();
+  /*
+   * This graph contains 4 nodes in three clusters 0:[a], 1:[b,c] and 2:[d].
+   * Test cluster construction and routing for edge based routers.
+   *
+   *   [a] ----- [b] ----- [c] ----- [d]
+   *         1         2         4
+   */
+  enum : uint32_t { A = 0, B, C, D };  // Node names.
+  Graph g = CreateEdgeClusterGraph(/*both_dirs=*/true);
 
-  CHECK_S(a.UInt64Key(g, dd) != b.UInt64Key(g, dd));
-  GEdgeKey c = GEdgeKey::CreateGraphEdge(g, 1, g.edges.at(2), 1);
-  CHECK_S(a.UInt64Key(g, dd) == c.UInt64Key(g, dd));
+  {
+    CTRList list;
+    const FullEdge fe_bc = gnode_find_full_edge(g, B, C, /*way_idx=*/0);
+    const EdgeRoutingLabel3 bc =
+        EdgeRoutingLabel3::CreateGraphEdgeLabel(g, B, fe_bc.gedge(g), 1);
+    CHECK_S(bc.GetType() == EdgeRoutingLabel3::GRAPH);
+    CHECK_EQ_S(bc.GetFromIdx(g, list), B);
+    CHECK_EQ_S(bc.GetOffset(), fe_bc.offset());
+    CHECK_EQ_S(bc.GetBit(), 1);
+    CHECK_EQ_S(bc.FromNode(g, list).node_id, 'A' + B);
+    CHECK_EQ_S(bc.ToNode(g, list).node_id, 'A' + C);
+    CHECK_EQ_S(bc.GetEdgeIdx(g, list), fe_bc.gedge_idx(g));
+    CHECK_EQ_S(bc.GetEdge(g, list).target_idx, C);
+
+    const FullEdge fe_cb = gnode_find_full_edge(g, C, B, /*way_idx=*/0);
+    const EdgeRoutingLabel3 cb =
+        EdgeRoutingLabel3::CreateGraphEdgeLabel(g, C, fe_cb.gedge(g), 0);
+    CHECK_NE_S(bc.UInt64Key(g, list), cb.UInt64Key(g, list));
+  }
+
+  {
+    CTRList list;
+    const GCluster cl = g.clusters.at(1);
+    CHECK_EQ_S(cl.border_in_edges.size(), 2);
+    CHECK_EQ_S(cl.border_out_edges.size(), 2);
+    for (uint32_t inp = 0; inp < cl.border_in_edges.size(); ++inp) {
+      for (uint32_t outp = 0; outp < cl.border_out_edges.size(); ++outp) {
+        const auto& ed_in = cl.border_in_edges.at(inp);
+        const auto& ed_out = cl.border_out_edges.at(outp);
+        EdgeRoutingLabel3 lbl = EdgeRoutingLabel3::CreateClusterEdgeLabel(
+            g, ed_in.g_edge_idx, /*offset=*/outp, /*bit=*/0);
+        CHECK_S(lbl.GetType() == EdgeRoutingLabel3::CLUSTER);
+        CHECK_S(lbl.IsClusterEdge());
+        CHECK_EQ_S(lbl.GetFromIdx(g, list),
+                   g.edges.at(ed_in.g_edge_idx).target_idx);
+        CHECK_EQ_S(lbl.GetInEdgeIdx(), ed_in.g_edge_idx);
+        CHECK_EQ_S(lbl.GetIncomingEdgeDescriptor(g).pos, ed_in.pos);
+        CHECK_EQ_S(lbl.GetOutgoingEdgeDescriptor(g).pos, ed_out.pos);
+        CHECK_EQ_S(lbl.GetClusterId(g), cl.cluster_id);
+        CHECK_EQ_S(lbl.GetOffset(), outp);
+        CHECK_EQ_S(lbl.GetBit(), 0);
+        CHECK_EQ_S(lbl.GetToIdx(g, list),
+                   g.edges.at(ed_out.g_edge_idx).target_idx);
+        // uint64_t key should be the same for the exit edge and for a normal
+        // graph edge.
+        const EdgeRoutingLabel3 graph_lbl =
+            EdgeRoutingLabel3::CreateGraphEdgeLabel(
+                g, ed_out.g_from_idx, g.edges.at(ed_out.g_edge_idx), 0);
+        CHECK_EQ_S(lbl.UInt64Key(g, list), graph_lbl.UInt64Key(g, list));
+      }
+    }
+  }
+
+  {
+    uint32_t ab_edge_idx = gnode_find_edge_idx(g, A, B, /*way_idx=*/0);
+    TurnRestriction tr;
+    // Turn restriction with edge ab in the leg 3.
+    tr.path.push_back({});
+    tr.path.push_back({});
+    tr.path.push_back({});
+    tr.path.push_back({.from_node_idx = A,
+                       .way_idx = 0,
+                       .to_node_idx = B,
+                       .edge_idx = ab_edge_idx});
+    // Store the turn restriction as position 1.
+    g.complex_turn_restrictions.push_back(TurnRestriction());
+    g.complex_turn_restrictions.push_back(tr);
+    // Create a CTR list with the active CTR at position 2.
+    CTRList list = {{}, {}, {{.ctr_idx = 1, .position = 3}}};
+    // Create label that points to the active CTR created above.
+    const EdgeRoutingLabel3 lbl =
+        EdgeRoutingLabel3::CreateCTREdgeLabel(g, 2, /*bit=*/1);
+
+    CHECK_S(lbl.GetType() == EdgeRoutingLabel3::COMPLEX_TURN_RESTRICTION);
+    CHECK_S(!lbl.IsClusterEdge());
+    CHECK_EQ_S(lbl.GetFromIdx(g, list), A);
+    CHECK_EQ_S(lbl.GetOffset(), 0);
+    CHECK_EQ_S(lbl.GetBit(), 1);
+    CHECK_EQ_S(lbl.GetToIdx(g, list), B);
+    CHECK_EQ_S(lbl.FromNode(g, list).node_id, 'A' + A);
+    CHECK_EQ_S(lbl.ToNode(g, list).node_id, 'A' + B);
+    CHECK_EQ_S(lbl.GetEdgeIdx(g, list), ab_edge_idx);
+    CHECK_EQ_S(lbl.GetEdge(g, list).target_idx, B);
+  }
 }
 
 void TestCTRDeDuper() {
@@ -1353,50 +1437,6 @@ void TestCountryBitset() {
   }
 }
 
-/*
- * This graph contains 4 nodes in three clusters 0:[a], 1:[b,c] and 2:[d].
- * Test cluster construction and routing for edge based routers.
- *
- *   [a] ----- [b] ----- [c] ----- [d]
- *         1         2         4
- */
-Graph CreateEdgeClusterGraph(bool both_dirs) {
-  enum : uint32_t { A = 0, B, C, D };  // Node names.
-  Graph g;
-  AddDefaultWSA(g);
-  AddWay(g, /*way_idx=*/0);
-
-  /*
-  AddCluster(g, 0, {.num_nodes = 1, .border_nodes = {A}});
-  AddCluster(g, 1, {.num_nodes = 2, .border_nodes = {B, C}});
-  AddCluster(g, 2, {.num_nodes = 2, .border_nodes = {D}});
-  */
-  AddCluster(g, 0, {});
-  AddCluster(g, 1, {});
-  AddCluster(g, 2, {});
-
-  AddNode(g, A, /*cluster_id=*/0);
-  AddNode(g, B, /*cluster_id=*/1);
-  AddNode(g, C, /*cluster_id=*/1);
-  AddNode(g, D, /*cluster_id=*/2);
-
-  std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 2000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 4000, GEdge::LABEL_FREE, both_dirs, &edges);
-  StoreEdges(edges, &g);
-
-  build_clusters::UpdateGraphClusterInformation(&g);
-  for (GCluster& cl : g.clusters) {
-    build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
-                                                VH_MOTORCAR, &cl);
-    build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
-                                                    VH_MOTORCAR, &cl);
-  }
-
-  return g;
-}
-
 void TestEdgeClusterRoute() {
   FUNC_TIMER();
   enum : uint32_t { A = 0, B, C, D };  // Node names.
@@ -1437,7 +1477,7 @@ int main(int argc, char* argv[]) {
     ABORT_S() << absl::StrFormat("usage: %s", argv[0]);
   }
 
-  TestGEdgeKey();
+  TestEdgeRoutingLabel3();
   TestRouteDeadEnds();
   TestRouteRestrictedSimple();
   TestRouteRestricted();

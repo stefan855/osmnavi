@@ -138,17 +138,19 @@ class alignas(2) EdgeRoutingLabel3 final {
     return EdgeRoutingLabel3(GRAPH, from_idx, offset, bit);
   }
 
+  // Create a cluster edge. The stored data allows retrieval of the incoming
+  // edge, the two connected border nodes and the outgoing edge.
+  //
   // 'g_in_edge_idx': index of incoming edge in graph.edges.
   // 'offset': Position of the outgoing edge in cluster->border_out_edges.
   //
-  // From 'g_in_edge_idx', the g_node_idx of the arrival border node and the
+  // From 'in_edge_idx', the node_idx of the arrival border node and the
   // cluster id are found.
-  //
   // From 'offset' (given the cluster id), the start node and edge offset of the
   // outgoing edge are found.
   static EdgeRoutingLabel3 CreateClusterEdgeLabel(const Graph& g,
                                                   uint32_t in_edge_idx,
-                                                  uint32_t offset, bool bit) {
+                                                  uint16_t offset, bool bit) {
     CHECK_EQ_S(bit, 0);
     CHECK_LT_S(offset, 1024);
     CHECK_S(g.nodes.at(g.edges.at(in_edge_idx).target_idx).cluster_id !=
@@ -156,12 +158,19 @@ class alignas(2) EdgeRoutingLabel3 final {
     return EdgeRoutingLabel3(CLUSTER, in_edge_idx, offset, bit);
   }
 
+  // Create a label that points to a specific position in a list of complex turn
+  // restrictions.
+  //
+  // * 'ctr_config_id': Position of ActiveCtr in the ctr list that is supplied
+  //    in calls.
+  // * 'bit': additional bit for router.
+  //
+  // Note that 'offset' is not needed for CTRs.
   static EdgeRoutingLabel3 CreateCTREdgeLabel(const Graph& g,
                                               uint32_t ctr_config_id,
-                                              uint32_t offset, bool bit) {
-    CHECK_LT_S(offset, 1024);
-    return EdgeRoutingLabel3(COMPLEX_TURN_RESTRICTION, ctr_config_id, offset,
-                             bit);
+                                              bool bit) {
+    return EdgeRoutingLabel3(COMPLEX_TURN_RESTRICTION, ctr_config_id,
+                             /*offset=*/0, bit);
   }
 
   // Convert the data to a *unique* 64 bit key that can be used for indexing and
@@ -170,7 +179,7 @@ class alignas(2) EdgeRoutingLabel3 final {
   // outgoing edge at the cluster. This reflects that we want to put edges
   // leaving a cluster path the same way as edges just leaving from a cluster
   // after not having entered the cluster.
-  uint64_t UInt64Key(const Graph& g, const CTRList& ctr_list) {
+  uint64_t UInt64Key(const Graph& g, const CTRList& ctr_list) const {
     if (type_ == GRAPH) {
       return (static_cast<uint64_t>(GetFromIdx(g, ctr_list)) << 31) +
              (static_cast<uint64_t>(GetFromIdx(g, ctr_list)) << 13) +
@@ -180,10 +189,18 @@ class alignas(2) EdgeRoutingLabel3 final {
       CHECK_S(!GetBit());
       // Output the same format as for GRAPH, using the data of the outgoing
       // edge.
+      const auto& ed = GetOutgoingEdgeDescriptor(g);
+      uint32_t offset = gnode_edge_offset(g, ed.g_from_idx, ed.g_edge_idx); 
+      return (static_cast<uint64_t>(ed.g_from_idx) << 31) +
+             (static_cast<uint64_t>(ed.g_from_idx) << 13) +
+             (static_cast<uint64_t>(offset) << 3) + (GetBit() << 2) +
+             GRAPH;
+#if 0
       return (static_cast<uint64_t>(FromNode(g, ctr_list).cluster_id) << 31) +
              (static_cast<uint64_t>(FromNode(g, ctr_list).cluster_id) << 17) +
              (static_cast<uint64_t>(GetOffset()) << 3) + (GetBit() << 2) +
              type_;
+#endif
     } else {
       return (static_cast<uint64_t>(GetCtrConfigId()) << 31) +
              (static_cast<uint64_t>(GetCtrConfigId()) << 19) +

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "algos/edge_key.h"
 #include "algos/routing_defs.h"
 #include "algos/routing_metric.h"
 #include "base/thread_pool.h"

@@ -177,6 +177,9 @@ constexpr std::uint32_t MAX_CLUSTER_ID = INVALID_CLUSTER_ID - 1;
 
 constexpr std::uint32_t NUM_EDGES_OUT_BITS = 5;
 constexpr std::uint32_t MAX_NUM_EDGES_OUT = (1 << NUM_EDGES_OUT_BITS) - 1;
+// Max number of edges of a node (forward edges and inverted edges together).
+constexpr std::uint32_t MAX_NUM_NODE_EDGES =
+    (2 * (1 << NUM_EDGES_OUT_BITS)) - 1;
 
 struct GNode {
   std::int64_t node_id : 40;
@@ -569,6 +572,29 @@ inline size_t gnode_edges_start(const Graph& g, uint32_t node_idx) {
 inline size_t gnode_edges_stop(const Graph& g, uint32_t node_idx) {
   return node_idx + 1 < g.nodes.size() ? gnode_edges_start(g, node_idx + 1)
                                        : g.edges.size();
+}
+
+// Compute the edge index given the edge.
+inline uint32_t gnode_edge_idx(const Graph& g, const GEdge& e) {
+  int64_t pos = static_cast<int64_t>(&e - g.edges.data());
+  CHECK_S(pos >= 0 && static_cast<size_t>(pos) <= g.edges.size());
+  return pos;
+}
+
+// Compute the edge offset given the start node and the edge index.
+inline uint32_t gnode_edge_offset(const Graph& g, uint32_t start_idx,
+                                  uint32_t edge_idx) {
+  uint32_t off = edge_idx - g.nodes.at(start_idx).edges_start_pos;
+  CHECK_LE_S(off, MAX_NUM_NODE_EDGES);
+  return off;
+}
+
+// Compute the edge offset given the start node and the edge.
+inline uint32_t gnode_edge_offset(const Graph& g, uint32_t start_idx,
+                                  const GEdge& e) {
+  uint32_t off = gnode_edge_idx(g, e) - g.nodes.at(start_idx).edges_start_pos;
+  CHECK_LT_S(off, MAX_NUM_NODE_EDGES);
+  return off;
 }
 
 inline uint32_t gnode_num_all_edges(const Graph& g, uint32_t node_idx) {

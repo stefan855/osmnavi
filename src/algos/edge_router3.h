@@ -364,8 +364,7 @@ class EdgeRouter3 {
     } else {
       uint32_t id = ctr_list_.size();
       ctr_list_.push_back(active_ctrs);
-      return EdgeRoutingLabel3::CreateCTREdgeLabel(g_, id, 0,
-                                                   next_in_target_area);
+      return EdgeRoutingLabel3::CreateCTREdgeLabel(g_, id, next_in_target_area);
     }
   }
 
@@ -400,7 +399,7 @@ class EdgeRouter3 {
           uint32_t id = ctr_list_.size();
           ctr_list_.push_back(active_ctrs);
           edge_label = EdgeRoutingLabel3::CreateCTREdgeLabel(
-              g_, id, 0, /*next_in_target_area=*/false);
+              g_, id, /*next_in_target_area=*/false);
         }
       }
 
