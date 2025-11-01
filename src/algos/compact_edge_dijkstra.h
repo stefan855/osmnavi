@@ -203,25 +203,6 @@ class SingleSourceEdgeDijkstra {
           continue;
         }
 
-#if 0
-        // Obsolete because turn restrictions are now handled via turn costs.
-        // Turn costs handle areas in a different way (u-turns are always 
-        // allowed), so the code here will check fail for these.
-        //
-        // We need the start node of the prev edge, which we can get at the
-        // prev-prev edge.
-        if (!prev_cg_edge.uturn_allowed && e.to_c_idx == qedge.from_node_idx) {
-          LOG_S(INFO) << absl::StrFormat(
-              "UTURN-ISSUE nodes:%s -> %s -> %s  cost:%d",
-              cg.DescribeCNodeIdx(qedge.from_node_idx),
-              cg.DescribeCNodeIdx(prev_cg_edge.to_c_idx),
-              cg.DescribeCNodeIdx(e.to_c_idx), (int)tcd.turn_costs.at(off));
-            CHECK_S(0);
-          }
-          continue;
-        }
-#endif
-
         // Create/Update the turn restriction edge key information for the
         // current edge.
         active_ctrs.clear();  // This is reused throughout the loop.

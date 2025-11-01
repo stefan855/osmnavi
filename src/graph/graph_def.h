@@ -251,6 +251,22 @@ struct GEdge {
     PRIO_HIGH = 2,
     PRIO_SIGNALS = 3,  // Traffic signal on the way to the crossing.
   };
+  enum TYPE : uint16_t {
+    // Edge between a dead end and the rest of the graph.
+    // Can not be part of a cluster.
+    TYPE_DEADEND_BRIDGE = 0,
+    // Edge inside a dead end. Can not be part of a cluster.
+    TYPE_DEADEND_INNER,
+    // Edge between border nodes of two different clusters.
+    TYPE_CLUSTER_BORDER,
+    // Edge between two nodes in the same cluster.
+    TYPE_CLUSTER_INNER,
+    // Edge where at least one has cluster_id == INVALID_CLUSTER_ID.
+    TYPE_CLUSTER_INVALID,
+    // Edge type is unknown. This can be set during construction of the graph,
+    // but is not allowed once the graph is fully constructed.
+    TYPE_UNKNOWN
+  };
 
   std::uint32_t target_idx;
   std::uint32_t way_idx;
@@ -260,12 +276,14 @@ struct GEdge {
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
   std::uint32_t unique_target : 1;
+
   // This edge connects two components in the undirected graph. Removing it
   // creates two non-connected subgraphs. The nodes in the smaller of the two
   // subgraphs are all marked 'dead end'. On the other side of the bridge, all
   // nodes are marked non 'dead-end', unless there is another bridge.
   // Note: Only bridges connect dead-end with non-dead-end nodes.
-  std::uint32_t bridge : 1;
+  // std::uint32_t bridge : 1;
+
   // Each node marked 'dead-end' has at least one edge that is marked
   // 'to_bridge' or 'bridge'. This helps to find the bridge that connects the
   // dead end to the graph. The edge marked 'to_bridge' is always one step
@@ -302,12 +320,14 @@ struct GEdge {
   // restricted-secondary road that is a highway.
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
   std::uint32_t car_label_strange : 1;
+
   // True if at 'target_idx' it is allowed to travel back to 'from' node of
   // this edge. There are two cases for this that are selected automatically. It
   // is always allowed to do a u-turn at an endpoint of a street. Additionally,
   // it is allowed to do a u-turn if the edge is non-restricted and one would
   // have to enter a restricted access area if not doing a u-turn.
   std::uint32_t car_uturn_allowed : 1;
+
   std::uint32_t complex_turn_restriction_trigger : 1;
 
   // Stop sign at the target node of the edge.
@@ -317,10 +337,18 @@ struct GEdge {
   // Priority of the road when arriving at the target node.
   ROAD_PRIORITY road_priority : 2;
 
+  // Type of the edge.
+  TYPE type : 3;
+
   // An edge that connects two border nodes of different clusters.
-  std::uint32_t cluster_border_edge : 1;
+  // std::uint32_t cluster_border_edge : 1;
 
   std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
+
+  bool is_deadend_bridge() const { return type == TYPE_DEADEND_BRIDGE; }
+  bool is_deadend_inner_edge() const { return type == TYPE_DEADEND_INNER; }
+  bool is_cluster_border_edge() const { return type == TYPE_CLUSTER_BORDER; }
+  bool is_cluster_inner_edge() const { return type == TYPE_CLUSTER_INNER; }
 };
 
 // Contains the list of border nodes and some metadata for a cluster.

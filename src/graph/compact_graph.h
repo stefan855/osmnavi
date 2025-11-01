@@ -25,7 +25,6 @@ class CompactGraph {
     uint32_t weight;
     uint32_t way_idx : WAY_IDX_BITS;  // 31 bits.
     uint32_t restricted_access : 1;
-    uint32_t uturn_allowed : 1;
   };
 
   // Edge type used for edges of the compact graph.
@@ -38,7 +37,6 @@ class CompactGraph {
     uint32_t restricted_access : 1;
     // If a u-turn (i.e. return from to_c_idx to the origin of this edge) is
     // allowed or not.
-    uint32_t uturn_allowed : 1;
     // '1' iff this edge a trigger for a simple turn restriction.
     uint32_t simple_tr_trigger : 1;
     // '1' iff this edge a trigger for a complex turn restriction.
@@ -354,18 +352,16 @@ class CompactGraph {
     uint32_t min_weight = std::numeric_limits<uint32_t>::max();
     uint32_t max_weight = 0;
     uint32_t restricted_access = 0;
-    uint32_t uturn = 0;
     for (const PartialEdge& e : edges_) {
       if (e.weight < min_weight) min_weight = e.weight;
       if (e.weight > max_weight) max_weight = e.weight;
       restricted_access += e.restricted_access;
-      uturn += e.uturn_allowed;
     }
     LOG_S(INFO) << absl::StrFormat(
-        "CompactGraph #nodes:%u #edges:%u restricted:%u uturn:%u "
+        "CompactGraph #nodes:%u #edges:%u restricted:%u "
         "#turncosts:%u "
         "mem:%u weight=[%u,%u]",
-        edges_start_.size() - 1, edges_.size(), restricted_access, uturn,
+        edges_start_.size() - 1, edges_.size(), restricted_access,
         turn_costs_.size(),
         edges_start_.size() * sizeof(uint32_t) +
             edges_.size() * sizeof(PartialEdge) + sizeof(CompactGraph),
@@ -425,7 +421,6 @@ class CompactGraph {
                         .weight = e.weight,
                         .way_idx = e.way_idx,
                         .restricted_access = e.restricted_access,
-                        .uturn_allowed = e.uturn_allowed,
                         .simple_tr_trigger = 0,
                         .complex_tr_trigger = 0});
       full_restricted += e.restricted_access;
@@ -655,8 +650,7 @@ inline void CollectEdgesForCompactGraph(
            .to_c_idx = other_c_idx,
            .weight = metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge),
            .way_idx = edge.way_idx,
-           .restricted_access = edge.car_label != GEdge::LABEL_FREE,
-           .uturn_allowed = edge.car_uturn_allowed});
+           .restricted_access = edge.car_label != GEdge::LABEL_FREE});
     }
 
     // Expand in inverse direction if necessary.

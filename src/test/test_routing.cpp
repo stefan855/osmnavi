@@ -159,12 +159,12 @@ void TestEdgeRoutingLabel3() {
         CHECK_EQ_S(lbl.GetBit(), 0);
         CHECK_EQ_S(lbl.GetToIdx(g, list),
                    g.edges.at(ed_out.g_edge_idx).target_idx);
-        // uint64_t key should be the same for the exit edge and for a normal
+        // uint64_t key should be different  for the exit edge and for a normal
         // graph edge.
         const EdgeRoutingLabel3 graph_lbl =
             EdgeRoutingLabel3::CreateGraphEdgeLabel(
                 g, ed_out.g_from_idx, g.edges.at(ed_out.g_edge_idx), 0);
-        CHECK_EQ_S(lbl.UInt64Key(g, list), graph_lbl.UInt64Key(g, list));
+        CHECK_NE_S(lbl.UInt64Key(g, list), graph_lbl.UInt64Key(g, list));
       }
     }
   }

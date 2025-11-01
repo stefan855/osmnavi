@@ -191,11 +191,12 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     const uint32_t to_idx = std::get<1>(e);
     g->nodes.at(from_idx).edges_start_pos += 1;    // Hack: use as counter.
     g->nodes.at(from_idx).num_forward_edges += 1;  // Hack: use as counter.
+    // TODO: edge initialisation does not set all attributes.
     g->edges.push_back({.target_idx = to_idx,
                         .way_idx = std::get<4>(e),
                         .distance_cm = std::get<2>(e),
                         .unique_target = 1,
-                        .bridge = 0,
+                        // .bridge = 0, // TODO: remove
                         .to_bridge = 0,
                         .contra_way = std::get<5>(e),
                         .cross_country = 0,
@@ -205,6 +206,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         .car_label_strange = 0,
                         .car_uturn_allowed = 0,
                         .complex_turn_restriction_trigger = 0,
+                        .type = GEdge::TYPE_UNKNOWN,
                         .turn_cost_idx = 0});
     // If this edge crosses clusters, then mark the nodes accordingly.
     if (g->nodes.at(from_idx).cluster_id != g->nodes.at(to_idx).cluster_id) {

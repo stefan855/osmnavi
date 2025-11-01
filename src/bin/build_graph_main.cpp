@@ -252,7 +252,7 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
         } else {
           color = "black";
         }
-        if (e.bridge) {
+        if (e.is_deadend_bridge()) {
           color = "red";
         } else if (n.dead_end && other.dead_end) {
           color = "green";
@@ -395,7 +395,7 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
     for (const GEdge& e : gnode_all_edges(g, node_pos)) {
       // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos)
       // { const GEdge& e = n0.edges[edge_pos];
-      if (e.bridge || !e.unique_target) continue;
+      if (e.is_deadend_bridge() || !e.unique_target) continue;
       const GNode& n1 = g.nodes.at(e.target_idx);
       // Ignore half of the edges and nodes that are not in a cluster.
       if (e.target_idx <= node_pos || n1.cluster_id == INVALID_CLUSTER_ID) {

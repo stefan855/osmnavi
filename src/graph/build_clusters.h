@@ -278,7 +278,7 @@ inline void UpdateGraphClusterInformation(Graph* g) {
       // By construction, any connection to an non-clustered node must be
       // through a bridge.
       // CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge != 0);
-      if (e.bridge) {
+      if (e.is_deadend_bridge()) {
         ;  // do nothing, ignore dead-ends.
       } else if (n.cluster_id == other.cluster_id) {
         // Count inner edges only once (instead of twice). Self-edges are not
@@ -286,12 +286,18 @@ inline void UpdateGraphClusterInformation(Graph* g) {
         if (n.node_id > other.node_id) {
           cluster.num_inner_edges++;
         }
+        CHECK_S(e.type == GEdge::TYPE_UNKNOWN ||
+                e.type == GEdge::TYPE_CLUSTER_INNER)
+            << e.type;
+        e.type = GEdge::TYPE_CLUSTER_INNER;
       } else {
         CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
         cluster.num_outer_edges++;
         n.cluster_border_node = 1;
         other.cluster_border_node = 1;
-        e.cluster_border_edge = 1;
+        CHECK_EQ_S(e.type, GEdge::TYPE_UNKNOWN);
+        e.type = GEdge::TYPE_CLUSTER_BORDER;
+        // e.cluster_border_edge = 1;
       }
     }
   }

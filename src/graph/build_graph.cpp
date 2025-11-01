@@ -27,7 +27,7 @@
 
 namespace build_graph {
 namespace {
-struct NodeCountry {
+struct ExtractedWayNode {
   int64_t id;
   uint16_t ncc;
 };
@@ -48,17 +48,19 @@ void ValidateGraph(const Graph& g) {
   CHECK_LT_S(g.edges.size(), 1ull << 32);
   CHECK_LE_S(g.clusters.size(), MAX_CLUSTER_ID);
 
-  // Check that we don't have duplicate edges (from, to, way_idx) between two
-  // nodes.
+  // Check that we don't have edges duplicating (from, to, way_idx).
+  // Check that nodes are sorted by increasing OSM node_id.
   for (uint32_t node_idx = 0; node_idx < g.nodes.size() - 1; ++node_idx) {
     const GNode& node = g.nodes.at(node_idx);
     if (node_idx > 0) {
-      // nodes are sorted by increasing OSM node_id.
+      // Nodes are sorted by increasing OSM node_id.
       CHECK_GT_S(node.node_id, g.nodes.at(node_idx - 1).node_id) << node_idx;
     }
-    for (uint32_t off1 = 0; off1 < node.num_forward_edges; ++off1) {
+    // No dup edges.
+    const uint32_t num_all_edges = gnode_num_all_edges(g, node_idx);
+    for (uint32_t off1 = 0; off1 < num_all_edges; ++off1) {
       const GEdge& e1 = g.edges.at(node.edges_start_pos + off1);
-      for (uint32_t off2 = off1 + 1; off2 < node.num_forward_edges; ++off2) {
+      for (uint32_t off2 = off1 + 1; off2 < num_all_edges; ++off2) {
         const GEdge& e2 = g.edges.at(node.edges_start_pos + off2);
         if (e1.target_idx == e2.target_idx && e1.way_idx == e2.way_idx) {
           LOG_S(INFO) << absl::StrFormat(
@@ -69,7 +71,7 @@ void ValidateGraph(const Graph& g) {
                 "edge %lld to %lld way_id:%lld", node.node_id,
                 GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx));
           }
-          // ABORT_S();
+          ABORT_S();
         }
       }
     }
@@ -259,46 +261,48 @@ std::string CreateWayTagSignature(const OSMTagHelper& tagh,
 }
 
 // Given a way, return a list of all way nodes with their countries.
-std::vector<NodeCountry> ExtractNodeCountries(const GraphMetaData& meta,
+std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
                                               const OSMPBF::Way& osm_way,
                                               bool* missing_nodes,
                                               uint32_t* dup_segments) {
   *missing_nodes = false;
-  std::vector<NodeCountry> node_countries;
+  std::vector<ExtractedWayNode> way_nodes;
   std::int64_t running_id = 0;
   for (int ref_idx = 0; ref_idx < osm_way.refs().size(); ++ref_idx) {
     running_id += osm_way.refs(ref_idx);
+    //
     // Check for repeated nodes/segments. If found, remove them.
-    if (node_countries.size() > 0 && node_countries.back().id == running_id) {
+    if (way_nodes.size() > 0 && way_nodes.back().id == running_id) {
       // Repeated node. This is an error that causes headaches, for instance
       // it create edges of length 0.
       (*dup_segments) += 1;
       continue;
     }
-    if (node_countries.size() > 1) {
-      for (uint32_t i = 0; i < node_countries.size() - 1; ++i) {
-        bool dup_segment = false;
-        if (node_countries.at(i).id == running_id) {
+
+    if (way_nodes.size() > 1) {
+      bool dup_segment = false;
+      for (uint32_t i = 0; i < way_nodes.size() - 1; ++i) {
+        if (way_nodes.at(i).id == running_id) {
           // The current node was seen before in the same way.
           // Check if adding running_id would create a duplicate segment.
           // The segment that is added is
-          //     node_countries.back().id ----> running_id.
-          if (node_countries.at(i + 1).id == node_countries.back().id) {
+          //     way_nodes.back().id ----> running_id.
+          if (way_nodes.at(i + 1).id == way_nodes.back().id) {
             dup_segment = true;
             break;
           }
-          if (i > 0 &&
-              node_countries.at(i - 1).id == node_countries.back().id) {
+          if (i > 0 && way_nodes.at(i - 1).id == way_nodes.back().id) {
             dup_segment = true;
             break;
           }
-        }
-        if (dup_segment) {
-          (*dup_segments) += 1;
-          continue;
         }
       }
+      if (dup_segment) {
+        (*dup_segments) += 1;
+        continue;
+      }
     }
+
     NodeBuilder::VNode node;
     if (!NodeBuilder::FindNode(*meta.node_table, running_id, &node)) {
       // Node is referenced by osm_way, but the node was not loaded.
@@ -310,34 +314,34 @@ std::vector<NodeCountry> ExtractNodeCountries(const GraphMetaData& meta,
       continue;
     }
     uint16_t ncc = meta.tiler->GetCountryNum(node.lon, node.lat);
-    node_countries.push_back({.id = running_id, .ncc = ncc});
+    way_nodes.push_back({.id = running_id, .ncc = ncc});
   }
   if (*missing_nodes) {
     LOG_S(INFO) << "Way " << osm_way.id() << " has missing node(s) -- country:"
-                << (node_countries.empty()
+                << (way_nodes.empty()
                         ? "<empty>"
-                        : CountryNumToString(node_countries.front().ncc));
+                        : CountryNumToString(way_nodes.front().ncc));
     return {};
   }
-  return node_countries;
+  return way_nodes;
 }
 
-// Extract the country of a way from "node_countries" and store it in
+// Extract the country of a way from "way_nodes" and store it in
 // way.ncc and way.uniform_country. Note: way.ncc contains the
 // country of the first way node and is always set (unless the first way node
 // has no country).
-void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
+void SetWayCountryCode(const std::vector<ExtractedWayNode>& way_nodes,
                        GWay* way) {
-  CHECK_GT_S(node_countries.size(), 1u);
-  way->ncc = node_countries.front().ncc;
+  CHECK_GT_S(way_nodes.size(), 1u);
+  way->ncc = way_nodes.front().ncc;
   way->uniform_country = 1;
-  for (size_t i = 1; i < node_countries.size(); ++i) {
-    if (node_countries.at(i).ncc != way->ncc) {
+  for (size_t i = 1; i < way_nodes.size(); ++i) {
+    if (way_nodes.at(i).ncc != way->ncc) {
       way->uniform_country = 0;
       /*
-      if (node_countries.at(i).ncc < way->ncc &&
-          node_countries.at(i).ncc != INVALID_NCC) {
-        way->ncc = node_countries.front().ncc;
+      if (way_nodes.at(i).ncc < way->ncc &&
+          way_nodes.at(i).ncc != INVALID_NCC) {
+        way->ncc = way_nodes.front().ncc;
       }
       */
       return;
@@ -352,11 +356,12 @@ void SetWayCountryCode(const std::vector<NodeCountry>& node_countries,
 // Also marks the nodes of edges connecting different countries as "needed".
 // This keeps edge distances short when we are not sure about speed limits,
 // access rules etc.
-void MarkSeenAndNeeded(GraphMetaData* meta, const std::vector<NodeCountry>& ncs,
+void MarkSeenAndNeeded(GraphMetaData* meta,
+                       const std::vector<ExtractedWayNode>& ncs,
                        const OSMPBF::Way& osm_way,
                        build_graph::BuildGraphStats* stats) {
   if (meta->opt.keep_all_nodes) {
-    for (const NodeCountry& nc : ncs) {
+    for (const ExtractedWayNode& nc : ncs) {
       meta->way_nodes_seen->SetBit(nc.id, true);
       meta->way_nodes_needed->SetBit(nc.id, true);
     }
@@ -371,7 +376,7 @@ void MarkSeenAndNeeded(GraphMetaData* meta, const std::vector<NodeCountry>& ncs,
     }
   }
 
-  for (const NodeCountry& nc : ncs) {
+  for (const ExtractedWayNode& nc : ncs) {
     if (meta->way_nodes_seen->GetBit(nc.id)) {
       // Node was seen >= 2 times, Mark as 'needed'.
       meta->way_nodes_needed->SetBit(nc.id, true);
@@ -389,7 +394,7 @@ void MarkSeenAndNeeded(GraphMetaData* meta, const std::vector<NodeCountry>& ncs,
 
   // Find loops in the way nodes and mark all nodes in the loop as needed.
   for (size_t i = 0; i < ncs.size() - 1; ++i) {
-    const NodeCountry& nc1 = ncs.at(i);
+    const ExtractedWayNode& nc1 = ncs.at(i);
     for (size_t j = i + 1; j < ncs.size(); ++j) {
       if (ncs.at(j).id == nc1.id) {
         // [i..j] is a loop.
@@ -548,10 +553,10 @@ void LogCountryConflict(const WayTaggedZones& rural, const GWay way) {
   }
 }
 
-inline void EncodeNodeIds(const std::vector<NodeCountry>& node_countries,
+inline void EncodeNodeIds(const std::vector<ExtractedWayNode>& way_nodes,
                           WriteBuff* node_ids_buff) {
   std::vector<uint64_t> node_ids;
-  for (const NodeCountry& nc : node_countries) {
+  for (const ExtractedWayNode& nc : way_nodes) {
     node_ids.push_back(nc.id);
   }
   EncodeUInt(node_ids.size(), node_ids_buff);
@@ -649,15 +654,15 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   bool missing_nodes = false;
   uint32_t dup_segments = 0;
-  const std::vector<NodeCountry> node_countries =
-      ExtractNodeCountries(*meta, osm_way, &missing_nodes, &dup_segments);
-  if (missing_nodes || node_countries.size() <= 1) {
+  const std::vector<ExtractedWayNode> way_nodes =
+      ExtractWayNodes(*meta, osm_way, &missing_nodes, &dup_segments);
+  if (missing_nodes || way_nodes.size() <= 1) {
     stats->num_ways_missing_nodes++;
     return;
   }
   // Sets way.ncc and way.uniform_country.
-  SetWayCountryCode(node_countries, &wc.way);
-  wc.way.closed_way = (node_countries.front().id == node_countries.back().id);
+  SetWayCountryCode(way_nodes, &wc.way);
+  wc.way.closed_way = (way_nodes.front().id == way_nodes.back().id);
   const WayTaggedZones rural = ExtractWayZones(tagh, wc.pti.tags());
   LogCountryConflict(rural, wc.way);
 
@@ -689,7 +694,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   if (!WSAVehicleAnyRoutable(wsa, meta->opt.vt)) return;
 
   WriteBuff node_ids_buff;
-  EncodeNodeIds(node_countries, &node_ids_buff);
+  EncodeNodeIds(way_nodes, &node_ids_buff);
   stats->num_ways_dup_segments += dup_segments;
 
   // Run modifications of global data behind a mutex.
@@ -708,7 +713,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
       wc.way.streetname[streetname.size()] = '\0';
     }
 
-    MarkSeenAndNeeded(meta, node_countries, osm_way, stats);
+    MarkSeenAndNeeded(meta, way_nodes, osm_way, stats);
 
     wc.way.wsa_id = deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
@@ -746,7 +751,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.way_idx = way_idx;
   e.distance_cm = distance_cm;
   e.unique_target = 0;
-  e.bridge = 0;
+  // e.bridge = 0;
   e.to_bridge = 0;
   e.contra_way = contra_way ? 1 : 0;
   e.cross_country = n.ncc != other.ncc;
@@ -759,7 +764,8 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.stop_sign = 0;
   e.traffic_signal = 0;
   e.road_priority = GEdge::PRIO_UNSET;
-  e.cluster_border_edge = 0;
+  e.type = GEdge::TYPE_UNKNOWN;
+  // e.cluster_border_edge = 0;
   e.turn_cost_idx = INVALID_TURN_COST_IDX;
 
   const GWay& way = g.ways.at(way_idx);
@@ -1145,65 +1151,6 @@ void MarkUniqueEdges(GraphMetaData* meta) {
   }
 }
 
-// Given a node and an outgoing edge 'out_edge', is it allowed to make a
-// u-turn at out_edge.target_idx and return to node_idx? The code checks
-// for situations where a vehicle would be trapped at out_edge.target_idx
-// with no way to continue the travel, which is true at the end of a street or
-// when facing a restricted access area.
-// TODO: handle vehicle types properly.
-#define DEBUG_IS_UTURN_ALLOWED_OLD 0
-inline bool IsUTurnAllowedEdgeOld(const Graph& g, uint32_t node_idx,
-                                  const GEdge& out_edge) {
-  // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
-  if (g.ways.at(out_edge.way_idx).highway_label <= HW_TRUNK_LINK) {
-#if DEBUG_IS_UTURN_ALLOWED_OLD
-    LOG_S(INFO) << absl::StrFormat("No u-turn 1 for %lld->%lld w:%lld",
-                                   GetGNodeIdSafe(g, node_idx),
-                                   GetGNodeIdSafe(g, out_edge.target_idx),
-                                   GetGWayIdSafe(g, out_edge.way_idx));
-#endif
-    return false;
-  }
-  uint32_t to_idx = out_edge.target_idx;
-  bool restr = (out_edge.car_label != GEdge::LABEL_FREE);
-  bool found_u_turn = false;
-  bool found_continuation = false;
-  bool found_free_continuation = false;
-
-  for (const GEdge& o : gnode_forward_edges(g, to_idx)) {
-    found_u_turn |= (o.target_idx == node_idx);
-    if (o.target_idx != node_idx && o.target_idx != to_idx) {
-      found_continuation = true;
-      found_free_continuation |= (o.car_label == GEdge::LABEL_FREE);
-    }
-  }
-
-  if (found_u_turn) {
-    if (!found_continuation) {
-#if DEBUG_IS_UTURN_ALLOWED_OLD
-      LOG_S(INFO) << absl::StrFormat(
-          "Allow 1 u-turn for %lld->%lld w:%lld", GetGNodeIdSafe(g, node_idx),
-          GetGNodeIdSafe(g, to_idx), GetGWayIdSafe(g, out_edge.way_idx));
-#endif
-      return true;
-    }
-    if (!restr && !found_free_continuation) {
-#if DEBUG_IS_UTURN_ALLOWED_OLD
-      LOG_S(INFO) << absl::StrFormat(
-          "Allow 2 u-turn for %lld->%lld w:%lld", GetGNodeIdSafe(g, node_idx),
-          GetGNodeIdSafe(g, to_idx), GetGWayIdSafe(g, out_edge.way_idx));
-#endif
-      return true;
-    }
-  }
-#if DEBUG_IS_UTURN_ALLOWED_OLD
-  LOG_S(INFO) << absl::StrFormat(
-      "No u-turn 2 for %lld->%lld w:%lld", GetGNodeIdSafe(g, node_idx),
-      GetGNodeIdSafe(g, to_idx), GetGWayIdSafe(g, out_edge.way_idx));
-#endif
-  return false;
-}
-
 void LoadTurnRestrictionsFromRelations(OsmPbfReader* reader,
                                        GraphMetaData* meta,
                                        BuildGraphStats* stats) {
@@ -1390,7 +1337,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       }
       num_inverted_edges += e.inverted;
       num_forward_edges += (e.inverted == 0);
-      stats->num_edges_bridge += e.bridge;
+      stats->num_edges_bridge += e.is_deadend_bridge();
 
       stats->num_edges_low_priority +=
           (!e.inverted && (e.road_priority == GEdge::PRIO_LOW));
@@ -1703,14 +1650,14 @@ void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
 }
 }  // namespace
 
-inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
-  FUNC_TIMER();
-  for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
-    for (GEdge& e : gnode_forward_edges(*g, from_idx)) {
-      e.car_uturn_allowed = IsUTurnAllowedEdgeOld(*g, from_idx, e);
-    }
-  }
-}
+// inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
+//   FUNC_TIMER();
+//   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
+//     for (GEdge& e : gnode_forward_edges(*g, from_idx)) {
+//       e.car_uturn_allowed = IsUTurnAllowedEdgeOld(*g, from_idx, e);
+//     }
+//   }
+// }
 
 void MarkCrossingNodes(GraphMetaData* meta) {
   FUNC_TIMER();
@@ -2050,7 +1997,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   FindLargeComponents(&meta.graph);
   meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
-  MarkUTurnAllowedEdges_Obsolete(&(meta.graph));
+  // MarkUTurnAllowedEdges_Obsolete(&(meta.graph));
 
   MarkCrossingNodes(&meta);
   LabelEdgesFromNodeTags(&meta);

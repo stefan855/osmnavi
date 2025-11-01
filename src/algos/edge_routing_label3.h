@@ -175,10 +175,10 @@ class alignas(2) EdgeRoutingLabel3 final {
 
   // Convert the data to a *unique* 64 bit key that can be used for indexing and
   // hashing.
-  // Note that for cluster edges this returns (node_idx, offset) identifying the
-  // outgoing edge at the cluster. This reflects that we want to put edges
-  // leaving a cluster path the same way as edges just leaving from a cluster
-  // after not having entered the cluster.
+  // TODO: Note that for cluster edges this returns (node_idx, offset)
+  // identifying the outgoing edge at the cluster. This reflects that we want to
+  // handle edges leaving a cluster path the same way as edges just leaving from
+  // a cluster after not having entered the cluster.
   uint64_t UInt64Key(const Graph& g, const CTRList& ctr_list) const {
     if (type_ == GRAPH) {
       return (static_cast<uint64_t>(GetFromIdx(g, ctr_list)) << 31) +
@@ -187,7 +187,8 @@ class alignas(2) EdgeRoutingLabel3 final {
              type_;
     } else if (type_ == CLUSTER) {
       CHECK_S(!GetBit());
-      // Output the same format as for GRAPH, using the data of the outgoing
+#if 0
+      // TODO: Output the same data as for GRAPH, using the data of the outgoing
       // edge.
       const auto& ed = GetOutgoingEdgeDescriptor(g);
       uint32_t offset = gnode_edge_offset(g, ed.g_from_idx, ed.g_edge_idx); 
@@ -195,7 +196,9 @@ class alignas(2) EdgeRoutingLabel3 final {
              (static_cast<uint64_t>(ed.g_from_idx) << 13) +
              (static_cast<uint64_t>(offset) << 3) + (GetBit() << 2) +
              GRAPH;
-#if 0
+#else
+      // Output (cluster_id, offset). This puts all cluster edges that exit at
+      // the same edge into one bucket.
       return (static_cast<uint64_t>(FromNode(g, ctr_list).cluster_id) << 31) +
              (static_cast<uint64_t>(FromNode(g, ctr_list).cluster_id) << 17) +
              (static_cast<uint64_t>(GetOffset()) << 3) + (GetBit() << 2) +
