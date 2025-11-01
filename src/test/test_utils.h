@@ -204,7 +204,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         .both_directions = 0,
                         .car_label = std::get<3>(e),
                         .car_label_strange = 0,
-                        .car_uturn_allowed = 0,
+                        // .car_uturn_allowed = 0,
                         .complex_turn_restriction_trigger = 0,
                         .type = GEdge::TYPE_UNKNOWN,
                         .turn_cost_idx = 0});
@@ -312,6 +312,7 @@ inline Graph CreateStandardTurnRestrictionGraph(bool both_dirs) {
   return g;
 }
 
+#if 0
 // Helper function to iterate over all allowed edges in a simple turn
 // restriction.
 inline std::vector<uint64_t> SimpleEdgeIndexes(
@@ -352,3 +353,4 @@ inline std::string SimpleTurnRestrictionDebugString(
       "from=%c via=%c to=[%s] %s=%lld", GetGNodeId(g, key.from_node_idx),
       GetGNodeId(g, key.to_node_idx), tmp.substr(1), data.id_name(), data.id);
 }
+#endif

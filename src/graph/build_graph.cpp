@@ -759,7 +759,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.both_directions = both_directions ? 1 : 0;
   e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
   e.car_label_strange = 0;
-  e.car_uturn_allowed = 0;
+  // e.car_uturn_allowed = 0;
   e.complex_turn_restriction_trigger = 0;
   e.stop_sign = 0;
   e.traffic_signal = 0;
@@ -888,7 +888,7 @@ void AllocateGNodes(GraphMetaData* meta) {
       n.num_forward_edges = 0;
       n.dead_end = 0;
       n.ncc = INVALID_NCC;
-      n.simple_turn_restriction_via_node = 0;
+      // n.simple_turn_restriction_via_node = 0;
       n.is_pedestrian_crossing = 0;
       n.lat = node->lat;
       n.lon = node->lon;
@@ -1181,10 +1181,12 @@ void LoadTurnRestrictionsFromRelations(OsmPbfReader* reader,
 
   // Store simple turn restrictions.
   SortTurnRestrictions(&(meta->simple_turn_restrictions));
+#if 0
   meta->graph.simple_turn_restriction_map = ComputeSimpleTurnRestrictionMap(
       meta->graph, meta->opt.verb_turn_restrictions,
       meta->simple_turn_restrictions);
   MarkSimpleViaNodes(&(meta->graph));
+#endif
 
   // Store complex turn restrictions.
   SortTurnRestrictions(&(meta->graph.complex_turn_restrictions));
@@ -1307,7 +1309,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       stats->num_nodes_in_small_component++;
     }
     stats->num_nodes_no_country += (n.ncc == INVALID_NCC ? 1 : 0);
-    stats->num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
+    // stats->num_nodes_simple_tr_via += n.simple_turn_restriction_via_node;
 
     {
       uint32_t unique_edges = gnode_num_unique_edges(g, node_idx);
@@ -1317,8 +1319,8 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       stats->num_nodes_unique_edges[idx]++;
     }
 
-    stats->num_edges_at_simple_tr_via +=
-        n.simple_turn_restriction_via_node ? n.num_forward_edges : 0;
+    // stats->num_edges_at_simple_tr_via +=
+    //     n.simple_turn_restriction_via_node ? n.num_forward_edges : 0;
 
     int64_t num_inverted_edges = 0;
     int64_t num_forward_edges = 0;
@@ -1451,8 +1453,10 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  meta.simple_turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num t-restr complex: %11lld",
                                  g.complex_turn_restrictions.size());
+#if 0
   LOG_S(INFO) << absl::StrFormat("Num t-restr comb/simple:%8lld",
                                  g.simple_turn_restriction_map.size());
+#endif
   LOG_S(INFO) << absl::StrFormat("Max t-restr via ways: %10llu",
                                  stats.max_turn_restriction_via_ways);
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
@@ -1993,7 +1997,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   // ======================================================
 
   LoadTurnRestrictionsFromRelations(&reader, &meta, &meta.Stats());
-  StoreNodeBarrierData_Obsolete(&meta.graph, &meta.Stats());
+  // StoreNodeBarrierData_Obsolete(&meta.graph, &meta.Stats());
   FindLargeComponents(&meta.graph);
   meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);

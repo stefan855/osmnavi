@@ -282,6 +282,7 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
   return success;
 }
 
+#if 0
 // Computes a bitset representing the allowed outgoing edges at the via node,
 // applying all turn restrictions in 'trs' at once.
 //
@@ -360,6 +361,7 @@ inline bool CreateSimpleTurnRestrictionData(
   }
   return found;
 }
+#endif
 
 }  // namespace
 
@@ -504,6 +506,7 @@ inline void SortTurnRestrictions(std::vector<TurnRestriction>* trs) {
 }
 #endif
 
+#if 0
 // Compute simple turn restrictions for the turn restrictions in 'trs'.
 // Note that trs needs to be sorted by SortTurnRestrictions() and must
 // contain simple restrictions only.
@@ -537,6 +540,7 @@ inline void MarkSimpleViaNodes(Graph* g) {
     g->nodes.at(key.to_node_idx).simple_turn_restriction_via_node = 1;
   }
 }
+#endif
 
 inline void MarkComplexTriggerEdges(Graph* g) {
   for (const auto& [key, pos] : g->complex_turn_restriction_map) {

@@ -212,7 +212,7 @@ struct GNode {
   std::uint16_t ncc : 10 = INVALID_NCC;
 
   // True iff the node is the via node in a simple turn restriction.
-  std::uint32_t simple_turn_restriction_via_node : 1;
+  // std::uint32_t simple_turn_restriction_via_node : 1;
 
   // True if there is a node tag entry with bit_crossing set.
   std::uint32_t is_pedestrian_crossing : 1;
@@ -326,7 +326,7 @@ struct GEdge {
   // is always allowed to do a u-turn at an endpoint of a street. Additionally,
   // it is allowed to do a u-turn if the edge is non-restricted and one would
   // have to enter a restricted access area if not doing a u-turn.
-  std::uint32_t car_uturn_allowed : 1;
+  // std::uint32_t car_uturn_allowed : 1;
 
   std::uint32_t complex_turn_restriction_trigger : 1;
 
@@ -440,7 +440,7 @@ struct Graph {
   std::vector<Component> large_components;
 
   // Turn restrictions. Both types are indexed by the first trigger edge.
-  SimpleTurnRestrictionMap simple_turn_restriction_map;
+  // SimpleTurnRestrictionMap simple_turn_restriction_map;
 
   std::vector<TurnRestriction> complex_turn_restrictions;
   // Map from trigger edge to the index in 'complex_turn_restrictions' above.

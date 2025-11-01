@@ -797,10 +797,12 @@ void TestRouteSimpleTurnRestriction() {
   TRResult res;
   ParseTurnRestriction(g, w.tagh, rel, Verbosity::Trace, &res);
 
+#if 0
   g.simple_turn_restriction_map =
       ComputeSimpleTurnRestrictionMap(g, Verbosity::Trace, res.trs);
   CHECK_EQ_S(g.simple_turn_restriction_map.size(), 1);
   MarkSimpleViaNodes(&g);
+#endif
   AddTurnCostsForTests(res.trs, VH_MOTORCAR, &g);
 
   {

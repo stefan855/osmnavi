@@ -29,6 +29,7 @@
 
 void PrintDebugInfoForNode(const Graph& g, int64_t node_id) {
   LOG_S(INFO) << "\n ******************** Data for node " << node_id;
+#if 0
   for (const auto& [key, data] : g.simple_turn_restriction_map) {
     if (GetGNodeIdSafe(g, key.from_node_idx) == node_id ||
         GetGNodeIdSafe(g, key.to_node_idx) == node_id) {
@@ -49,6 +50,7 @@ void PrintDebugInfoForNode(const Graph& g, int64_t node_id) {
       }
     }
   }
+#endif
 }
 
 void PrintStructSizes() {

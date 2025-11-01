@@ -269,6 +269,7 @@ NodeTags ParseOSMNodeTags(VEHICLE vt, const ParsedTagInfo& pti,
   return nt;
 }
 
+#if 0
 // Iterate through all nodes and check if it has a barrier which blocks traffic.
 // If it does, then add a simple turn restriction that forbids passing the
 // obstacle.
@@ -417,3 +418,4 @@ void StoreNodeBarrierData_Obsolete(Graph* g,
     }
   }
 }
+#endif

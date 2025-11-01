@@ -63,7 +63,7 @@ inline TGVec CreateInitalLouvainGraph(
 
   for (auto [gnode_pos, louvain_pos] : np_to_louvain_pos) {
     lg->AddNode(louvain_pos, gnode_pos);
-    const GNode& n = graph.nodes.at(gnode_pos);
+    // const GNode& n = graph.nodes.at(gnode_pos);
     // const bool n_has_node_tags = (graph.FindNodeTags(n.node_id) != nullptr);
 
     for (const GEdge& e : gnode_all_edges(graph, gnode_pos)) {
@@ -78,10 +78,17 @@ inline TGVec CreateInitalLouvainGraph(
         }
 
         // The code below needs to run for all, also non-unique edges.
-        if (e.car_label != GEdge::LABEL_FREE ||
-            n.simple_turn_restriction_via_node ||
-            other.simple_turn_restriction_via_node /* || n_has_node_tags ||
-            graph.FindNodeTags(other.node_id) != nullptr*/) {
+        if (e.car_label != GEdge::LABEL_FREE
+            // TODO: Simple turn restrictions might not be needed when using
+            // edge based routing also through clusters. If this is true, then
+            // the code below really isn't needed anymore, otherwise we need to
+            // inspect simple turn restrictions somehow and use them here. Also
+            // node barrier data used to produce "fake" turn restrictions!
+            //
+            // n.simple_turn_restriction_via_node ||
+            // other.simple_turn_restriction_via_node /* || n_has_node_tags ||
+            // graph.FindNodeTags(other.node_id) != nullptr*/
+        ) {
           precluster_common_nodes.AddBit(louvain_pos);
           precluster_common_nodes.AddBit(it->second);
         }
