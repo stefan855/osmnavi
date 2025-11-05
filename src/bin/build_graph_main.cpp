@@ -27,8 +27,19 @@
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
 
-void PrintDebugInfoForNode(const Graph& g, int64_t node_id) {
-  LOG_S(INFO) << "\n ******************** Data for node " << node_id;
+void PrintDebugInfoForNode(const build_graph::GraphMetaData& meta,
+                           int64_t node_id) {
+  const Graph& g = meta.graph;
+
+  LOG_S(INFO) << "******************** Data for node " << node_id;
+  size_t node_idx = g.FindNodeIndex(node_id);
+  if (node_idx >= g.nodes.size()) {
+    LOG_S(INFO) << "Not loaded!";
+    return;
+  }
+  // TODO: add information about outgoing edges, node tags, cluster, etc.
+  // const GNode& n = g.nodes.at(node_idx);
+
 #if 0
   for (const auto& [key, data] : g.simple_turn_restriction_map) {
     if (GetGNodeIdSafe(g, key.from_node_idx) == node_id ||
@@ -395,15 +406,16 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
     }
 
     for (const GEdge& e : gnode_all_edges(g, node_pos)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n0); ++edge_pos)
-      // { const GEdge& e = n0.edges[edge_pos];
-      if (e.is_deadend_bridge() || !e.unique_target) continue;
-      const GNode& n1 = g.nodes.at(e.target_idx);
-      // Ignore half of the edges and nodes that are not in a cluster.
-      if (e.target_idx <= node_pos || n1.cluster_id == INVALID_CLUSTER_ID) {
+      if (!e.unique_target || !e.is_cluster_edge()) {
         continue;
       }
 
+      // Ignore half of the edges (and self-edges).
+      if (e.target_idx <= node_pos) {
+        continue;
+      }
+
+      const GNode& n1 = g.nodes.at(e.target_idx);
       std::string_view color = "dpink";  // edges between clusters
       if (n0.cluster_id == n1.cluster_id) {
         // Edge within cluster.
@@ -627,7 +639,7 @@ int main(int argc, char* argv[]) {
 
   LOG_S(INFO) << "Finished.";
   if (argli.ArgIsSet("debug_node")) {
-    PrintDebugInfoForNode(meta.graph, argli.GetInt("debug_node"));
+    PrintDebugInfoForNode(meta, argli.GetInt("debug_node"));
   }
   return 0;
 }

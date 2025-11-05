@@ -1232,14 +1232,6 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   build_clusters::ExecuteLouvain(opt.n_threads, &meta->graph);
   build_clusters::UpdateGraphClusterInformation(&meta->graph);
 
-#if 0
-  if (opt.align_clusters_to_ncc && opt.merge_tiny_clusters) {
-    build_clusters::MergeTinyClusters(&(meta->graph));
-    build_clusters::UpdateGraphClusterInformation(opt.align_clusters_to_ncc,
-                                                  &meta->graph);
-  }
-#endif
-
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::PrintClusterInformation(meta->graph);
 
@@ -1251,6 +1243,23 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
     build_clusters::CheckShortestClusterPaths(meta->graph, meta->opt.n_threads);
   }
   build_clusters::AssignClusterColors(&(meta->graph));
+}
+
+void AssignInvalidClusterTypeToEdges(Graph* g) {
+  for (size_t node_idx = 0; node_idx < g->nodes.size(); ++node_idx) {
+    const GNode& n = g->nodes.at(node_idx);
+    for (GEdge& e : gnode_all_edges(*g, node_idx)) {
+      const GNode& other = g->nodes.at(e.target_idx);
+      if (e.type == GEdge::TYPE_UNKNOWN) {
+        // We haven't set the edge type yet. This must be an edge outside valid
+        // clusters by construction, so check-fail if it something else.
+        CHECK_S(n.cluster_id == INVALID_CLUSTER_ID ||
+                other.cluster_id == INVALID_CLUSTER_ID)
+            << n.node_id << "->" << other.node_id;
+        e.type = GEdge::TYPE_CLUSTER_INVALID;
+      }
+    }
+  }
 }
 
 void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
@@ -2008,6 +2017,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   ComputeAllTurnCosts(&meta);
 
   ClusterGraph(meta.opt, &meta);
+  AssignInvalidClusterTypeToEdges(&meta.graph);
 
   // Add up all the per thread stats.
   meta.global_stats = CollectThreadStats(*meta.thread_stats);

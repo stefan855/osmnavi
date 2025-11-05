@@ -73,22 +73,6 @@ struct TurnRestriction {
   }
 };
 
-#if 0
-struct SimpleTurnRestrictionData {
-  // 32 bits that select the allowed outgoing edges at the via node.
-  uint32_t allowed_edge_bits = 0;
-  // Set bit if this comes from a relation (i.e. a turn restriction) or from a
-  // node (i.e. a node with a barrier).
-  uint32_t from_relation : 1 = 0;
-  uint32_t from_node : 1 = 0;
-  // An OSM relation id (if from_relation==1) or a node id.
-  int64_t id = 0;
-
-  // Name of the data in the 'id' attribute.
-  std::string_view id_name() const { return from_relation ? "rel" : "node"; }
-};
-#endif
-
 // Make sure there are no filler bytes, because we hash the whole thing.
 static_assert(sizeof(TurnRestriction::TREdge) == 4 * sizeof(std::uint32_t));
 
@@ -107,6 +91,19 @@ struct hash<TurnRestriction::TREdge> {
 }  // namespace std
 
 #if 0
+struct SimpleTurnRestrictionData {
+  // 32 bits that select the allowed outgoing edges at the via node.
+  uint32_t allowed_edge_bits = 0;
+  // Set bit if this comes from a relation (i.e. a turn restriction) or from a
+  // node (i.e. a node with a barrier).
+  uint32_t from_relation : 1 = 0;
+  uint32_t from_node : 1 = 0;
+  // An OSM relation id (if from_relation==1) or a node id.
+  int64_t id = 0;
+
+  // Name of the data in the 'id' attribute.
+  std::string_view id_name() const { return from_relation ? "rel" : "node"; }
+};
 using SimpleTurnRestrictionMap =
     absl::flat_hash_map<TurnRestriction::TREdge, SimpleTurnRestrictionData>;
 #endif
