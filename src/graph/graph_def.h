@@ -23,6 +23,7 @@
 // restriction forbids the turn, a barrier disallows passing the target node, a
 // u-turn is not allowed or something else.
 struct TurnCostData {
+  constexpr TurnCostData() : turn_costs(0, 0) {}
   constexpr TurnCostData(uint32_t size, uint8_t dflt)
       : turn_costs(size, dflt) {}
 
@@ -134,9 +135,11 @@ struct hash<WaySharedAttrs> {
 };
 }  // namespace std
 
+constexpr std::uint32_t GWAY_ID_BITS = 40;
+constexpr std::uint32_t NUM_HIGHWAY_LABEL_BITS = 5;
 struct GWay {
-  std::int64_t id : 40;
-  HIGHWAY_LABEL highway_label : 5 = HW_MAX;
+  std::int64_t id : GWAY_ID_BITS;
+  HIGHWAY_LABEL highway_label : NUM_HIGHWAY_LABEL_BITS = HW_MAX;
 
   // 'uniform_country' is 0 if more than one country_num exists for the nodes in
   // the way, 1 if all the nodes belong to the same country.
@@ -155,7 +158,7 @@ struct GWay {
   //
   // Country of the first node in the way.
   // If uniform_country==1, then this value is the country of all the nodes.
-  std::uint16_t ncc : 10 = INVALID_NCC;
+  std::uint16_t ncc : NUM_CC_BITS = INVALID_NCC;
 
   // position of the WaySharedAttrs data in vector g.way_shared_attrs.
   std::uint32_t wsa_id = INFU32;
@@ -181,21 +184,23 @@ constexpr std::uint32_t MAX_NUM_EDGES_OUT = (1 << NUM_EDGES_OUT_BITS) - 1;
 constexpr std::uint32_t MAX_NUM_NODE_EDGES =
     (2 * (1 << NUM_EDGES_OUT_BITS)) - 1;
 
+constexpr std::uint32_t GNODE_ID_BITS = 40;
+constexpr std::uint32_t GNODE_EDGE_START_BITS = 36;
 struct GNode {
-  std::int64_t node_id : 40;
+  std::int64_t node_id : GNODE_ID_BITS;
   // 1 iff the node is in a large component of the graph.
   std::uint32_t large_component : 1;
   // Cluster id number. It is expected (and checked during construction)
   // that there are less than 2^22 clusters in the planet graph.
   std::uint32_t cluster_id : NUM_CLUSTER_BITS = INVALID_CLUSTER_ID;
   // 1 iff the node connects to different clusters.
-  std::uint32_t cluster_border_node : 1 = 0;
+  std::uint32_t cluster_border_node : 1;
   // Position of the first edge of this node in g.edges. The last edge is given
   // by the start position of the next node in g.nodes, or by the length of
   // g.edges if this is the last node in g.nodes.
   // For easy access, check out helper functions gnode_edges_stop(),
   // gnode_all_edges(), gnode_forward_edges() and gnode_inverted_edges() below.
-  std::int64_t edges_start_pos : 36;
+  std::uint64_t edges_start_pos : GNODE_EDGE_START_BITS;
   // Number of forward edges of this node. These are allocated in
   // [edges_start_pos, edges_start_pos + num_forward_edges). All other edges are
   // "inverted", e.g. point to another node that has an forward edge to the
@@ -209,13 +214,13 @@ struct GNode {
   // the dead end.
   std::uint32_t dead_end : 1;
   // Country associated with lat/lon.
-  std::uint16_t ncc : 10 = INVALID_NCC;
+  std::uint16_t ncc : NUM_CC_BITS = INVALID_NCC;
 
   // True if there is a node tag entry with bit_crossing set.
   std::uint32_t is_pedestrian_crossing : 1;
 
-  std::int32_t lat = 0;
-  std::int32_t lon = 0;
+  std::int32_t lat;
+  std::int32_t lon;
 };
 
 // TODO: 32 bits are needed to represent all distances on earth, but for edges
@@ -228,6 +233,10 @@ constexpr std::uint32_t MAX_EDGE_DISTANCE_CM =
 constexpr uint32_t MAX_TURN_COST_IDX_BITS = 18;
 constexpr uint32_t MAX_TURN_COST_IDX = (1ull << MAX_TURN_COST_IDX_BITS) - 1;
 constexpr uint32_t INVALID_TURN_COST_IDX = MAX_TURN_COST_IDX;
+
+constexpr uint32_t NUM_GEDGE_RESTRICTION_BITS = 3;
+constexpr uint32_t NUM_GEDGE_ROAD_PRIORITY_BITS = 3;
+constexpr uint32_t NUM_GEDGE_TYPE_BITS = 3;
 
 struct GEdge {
   enum RESTRICTION : uint8_t {
@@ -242,12 +251,14 @@ struct GEdge {
     // road network.
     LABEL_TEMPORARY,
   };
+
   enum ROAD_PRIORITY : uint8_t {
     PRIO_UNSET = 0,
     PRIO_LOW = 1,
     PRIO_HIGH = 2,
     PRIO_SIGNALS = 3,  // Traffic signal on the way to the crossing.
   };
+
   enum TYPE : uint16_t {
     // A bridge edge connects two components in the undirected graph. Removing
     // it creates two non-connected subgraphs. The nodes in the smaller of the
@@ -274,6 +285,8 @@ struct GEdge {
   std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
   std::uint32_t distance_cm;
+  std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
+
   // True iff this is the first time 'target_idx' has this value in the list
   // of edges of the node.
   // Can be used to selected edges for the undirected graph.
@@ -310,7 +323,7 @@ struct GEdge {
   // node. Inverted edges always have false as value.
   std::uint32_t both_directions : 1;
   // TODO: If the edge is restricted in access (DESTINATION etc). For cars only.
-  RESTRICTION car_label : 3;
+  RESTRICTION car_label : NUM_GEDGE_RESTRICTION_BITS;
   // If there was some issue when setting the car label, such as a
   // restricted-secondary road that is a highway.
   // If this is set, then car_label is LABEL_RESTRICTED_SECONDARY.
@@ -323,12 +336,10 @@ struct GEdge {
   // Traffic sign/light at the target node of the edge.
   std::uint32_t traffic_signal : 1;
   // Priority of the road when arriving at the target node.
-  ROAD_PRIORITY road_priority : 2;
+  ROAD_PRIORITY road_priority : NUM_GEDGE_ROAD_PRIORITY_BITS;
 
   // Type of the edge.
-  TYPE type : 3;
-
-  std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
+  TYPE type : NUM_GEDGE_TYPE_BITS;
 
   bool is_deadend_bridge() const { return type == TYPE_DEADEND_BRIDGE; }
   bool is_deadend_inner_edge() const { return type == TYPE_DEADEND_INNER; }

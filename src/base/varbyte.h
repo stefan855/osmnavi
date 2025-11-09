@@ -89,6 +89,14 @@ inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
   while (ptr[cnt++] & 128) {
     (*v) = (*v) | (((std::uint64_t)(ptr[cnt] & 127)) << (7 * cnt));
   }
+  CHECK_LE_S(cnt, max_varint_bytes);
+  return cnt;
+}
+
+inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint32_t* v) {
+  uint64_t utmp;
+  std::uint32_t cnt = DecodeUInt(ptr, &utmp);
+  (*v) = utmp;
   return cnt;
 }
 
@@ -121,6 +129,42 @@ inline std::uint32_t DecodeString(const std::uint8_t* ptr,
   return bytes + value_size;
 }
 
+// Encode a vector of T. If T is itself a vector, then recursively encodes this
+// vector too. The base type has to be of type uint*_t.
+template <typename T>
+inline uint32_t EncodeVector(const std::vector<T>& v, WriteBuff* buff) {
+  uint32_t cnt = EncodeUInt(v.size(), buff);
+  for (const auto& el : v) {
+    if constexpr (std::same_as<T, uint8_t> || std::same_as<T, uint16_t> ||
+                  std::same_as<T, uint32_t> || std::same_as<T, uint64_t>) {
+      cnt += EncodeUInt(el, buff);
+    } else {
+      EncodeVector(el, buff);
+      // static_assert(false, "unsupported type");
+    }
+  }
+  return cnt;
+}
+
+// Decode a vector that was encoded with EncodeVector().
+template <typename T>
+inline uint32_t DecodeVector(const std::uint8_t* ptr, std::vector<T>* v) {
+  uint64_t num;
+  uint32_t cnt = DecodeUInt(ptr, &num);;
+  for (size_t i = 0; i < num; ++i) {
+    if constexpr (std::same_as<T, uint8_t> || std::same_as<T, uint16_t> ||
+                  std::same_as<T, uint32_t> || std::same_as<T, uint64_t>) {
+      uint64_t el;
+      cnt += DecodeUInt(ptr + cnt, &el);
+      v->push_back(el);
+    } else {
+      v->emplace_back();
+      cnt += DecodeVector(ptr + cnt, &v->back());
+    }
+  }
+  return cnt;
+}
+
 namespace {
 constexpr std::uint32_t max_way_node_hist = 8;
 #define HIST_DEFAULT                                           \
@@ -145,10 +189,9 @@ void FindClosestHist(const std::uint64_t* hist, const std::uint64_t value,
 }  // namespace
 
 // Encode way nodes, using a compression window to take advantage of similar
-// but non-consecutive values. The maximal theoretical space needed is 10 + 11 *
-// node_ids.size() bytes.
-// Note: The number of nodes is not encoded, this has to be done separately if
-// needed.
+// but non-consecutive values. The maximal theoretical space needed is 10 + 11
+// * node_ids.size() bytes. Note: The number of nodes is not encoded, this has
+// to be done separately if needed.
 inline std::uint32_t EncodeNodeIds(const std::vector<uint64_t>& nodes,
                                    WriteBuff* buff) {
   CHECK_S(!nodes.empty());

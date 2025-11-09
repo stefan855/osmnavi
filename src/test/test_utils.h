@@ -195,6 +195,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     g->edges.push_back({.target_idx = to_idx,
                         .way_idx = std::get<4>(e),
                         .distance_cm = std::get<2>(e),
+                        .turn_cost_idx = 0,
                         .unique_target = 1,
                         // .bridge = 0, // TODO: remove
                         .to_bridge = 0,
@@ -206,8 +207,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         .car_label_strange = 0,
                         // .car_uturn_allowed = 0,
                         .complex_turn_restriction_trigger = 0,
-                        .type = GEdge::TYPE_UNKNOWN,
-                        .turn_cost_idx = 0});
+                        .type = GEdge::TYPE_UNKNOWN});
     // If this edge crosses clusters, then mark the nodes accordingly.
     if (g->nodes.at(from_idx).cluster_id != g->nodes.at(to_idx).cluster_id) {
       g->nodes.at(from_idx).cluster_border_node = 1;

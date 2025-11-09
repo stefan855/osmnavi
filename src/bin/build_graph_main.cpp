@@ -24,6 +24,7 @@
 #include "geometry/closest_node.h"
 #include "graph/build_graph.h"
 #include "graph/graph_def.h"
+#include "graph/graph_serialize.h"
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
 
@@ -641,5 +642,9 @@ int main(int argc, char* argv[]) {
   if (argli.ArgIsSet("debug_node")) {
     PrintDebugInfoForNode(meta, argli.GetInt("debug_node"));
   }
+
+  WriteSerializedGraph(g, "/tmp/graph.ser");
+  Graph g2 = ReadSerializedGraph("/tmp/graph.ser");
+
   return 0;
 }

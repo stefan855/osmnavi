@@ -750,8 +750,8 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.target_idx = other_idx;
   e.way_idx = way_idx;
   e.distance_cm = distance_cm;
+  e.turn_cost_idx = INVALID_TURN_COST_IDX;
   e.unique_target = 0;
-  // e.bridge = 0;
   e.to_bridge = 0;
   e.contra_way = contra_way ? 1 : 0;
   e.cross_country = n.ncc != other.ncc;
@@ -759,14 +759,11 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.both_directions = both_directions ? 1 : 0;
   e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
   e.car_label_strange = 0;
-  // e.car_uturn_allowed = 0;
   e.complex_turn_restriction_trigger = 0;
   e.stop_sign = 0;
   e.traffic_signal = 0;
   e.road_priority = GEdge::PRIO_UNSET;
   e.type = GEdge::TYPE_UNKNOWN;
-  // e.cluster_border_edge = 0;
-  e.turn_cost_idx = INVALID_TURN_COST_IDX;
 
   const GWay& way = g.ways.at(way_idx);
   if ((way.priority_road_forward && !contra_way) ||
