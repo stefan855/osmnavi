@@ -610,7 +610,7 @@ inline void PrintClusterInformation(const Graph& g) {
       "  Sum nodes:%.0f sum border:%.0f sum in-edges:%.0f sum out-edges:%.0f",
       sum_nodes, sum_border_nodes, sum_in, sum_out);
   LOG_S(INFO) << absl::StrFormat(
-      "  Avg nodes:%.1f avg border:%.1f avg in-edges:%.1f avg out-edges:%.1f",
+      "  Avg nodes:%.1f avg border:%.1f avg innner-edges:%.1f avg outer-edges:%.1f",
       sum_nodes / stats.size(), sum_border_nodes / stats.size(),
       sum_in / stats.size(), sum_out / stats.size());
   LOG_S(INFO) << absl::StrFormat(

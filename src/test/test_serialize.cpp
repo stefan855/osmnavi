@@ -8,87 +8,17 @@
 #include "base/argli.h"
 #include "base/country_code.h"
 #include "base/util.h"
+#include "test/equal_checks.h"
 #include "graph/graph_def.h"
 #include "graph/graph_serialize.h"
 
-// Check fail if n1 and n2 are different in any of the attributes.
-#define CHECK_NODES_EQUAL(n1, n2)                             \
-  CHECK_EQ_S(n1.node_id, n2.node_id);                         \
-  CHECK_EQ_S(n1.cluster_id, n2.cluster_id);                   \
-  CHECK_EQ_S(n1.edges_start_pos, n2.edges_start_pos);         \
-  CHECK_EQ_S(n1.num_forward_edges, n2.num_forward_edges);     \
-  CHECK_EQ_S(n1.ncc, n2.ncc);                                 \
-  CHECK_EQ_S(n1.lat, n2.lat);                                 \
-  CHECK_EQ_S(n1.lon, n2.lon);                                 \
-  CHECK_EQ_S(n1.large_component, n2.large_component);         \
-  CHECK_EQ_S(n1.cluster_border_node, n2.cluster_border_node); \
-  CHECK_EQ_S(n1.dead_end, n2.dead_end);                       \
-  CHECK_EQ_S(n1.is_pedestrian_crossing, n2.is_pedestrian_crossing);
-
-// Check fail if e1 and e1 are different in any of the attributes.
-#define CHECK_EDGES_EQUAL(e1, e2)                         \
-  CHECK_EQ_S(e1.target_idx, e2.target_idx);               \
-  CHECK_EQ_S(e1.way_idx, e2.way_idx);                     \
-  CHECK_EQ_S(e1.distance_cm, e2.distance_cm);             \
-  CHECK_EQ_S(e1.turn_cost_idx, e2.turn_cost_idx);         \
-  CHECK_EQ_S(e1.unique_target, e2.unique_target);         \
-  CHECK_EQ_S(e1.to_bridge, e2.to_bridge);                 \
-  CHECK_EQ_S(e1.contra_way, e2.contra_way);               \
-  CHECK_EQ_S(e1.cross_country, e2.cross_country);         \
-  CHECK_EQ_S(e1.inverted, e2.inverted);                   \
-  CHECK_EQ_S(e1.both_directions, e2.both_directions);     \
-  CHECK_EQ_S(e1.car_label, e2.car_label);                 \
-  CHECK_EQ_S(e1.car_label_strange, e2.car_label_strange); \
-  CHECK_EQ_S(e1.complex_turn_restriction_trigger,         \
-             e2.complex_turn_restriction_trigger);        \
-  CHECK_EQ_S(e1.stop_sign, e2.stop_sign);                 \
-  CHECK_EQ_S(e1.traffic_signal, e2.traffic_signal);       \
-  CHECK_EQ_S(e1.road_priority, e2.road_priority);         \
-  CHECK_EQ_S(e1.type, e2.type);
-
-#define CHECK_WAYS_EQUAL(w1, w2)                                    \
-  CHECK_EQ_S(w1.id, w2.id);                                         \
-  CHECK_EQ_S(w1.highway_label, w2.highway_label);                   \
-  CHECK_EQ_S(w1.uniform_country, w2.uniform_country);               \
-  CHECK_EQ_S(w1.closed_way, w2.closed_way);                         \
-  CHECK_EQ_S(w1.area, w2.area);                                     \
-  CHECK_EQ_S(w1.roundabout, w2.roundabout);                         \
-  CHECK_EQ_S(w1.has_ref, w2.has_ref);                               \
-  CHECK_EQ_S(w1.priority_road_forward, w2.priority_road_forward);   \
-  CHECK_EQ_S(w1.priority_road_backward, w2.priority_road_backward); \
-  CHECK_EQ_S(w1.more_than_two_lanes, w2.more_than_two_lanes);       \
-  CHECK_EQ_S(w1.ncc, w2.ncc);                                       \
-  CHECK_EQ_S(w1.wsa_id, w2.wsa_id);                                 \
-  // TODO: streetname, node_ids
-
-inline bool operator==(const GCluster::EdgeDescriptor& a,
-                       const GCluster::EdgeDescriptor& b) {
-  return memcmp(&a, &b, sizeof(GCluster::EdgeDescriptor)) == 0;
-}
-
-#define CHECK_CLUSTERS_EQUAL(c1, c2)                    \
-  CHECK_EQ_S(c1.cluster_id, c2.cluster_id);             \
-  CHECK_EQ_S(c1.num_nodes, c2.num_nodes);               \
-  CHECK_EQ_S(c1.num_border_nodes, c2.num_border_nodes); \
-  CHECK_EQ_S(c1.num_inner_edges, c2.num_inner_edges);   \
-  CHECK_EQ_S(c1.num_outer_edges, c2.num_outer_edges);   \
-  CHECK_S(c1.border_nodes == c2.border_nodes);          \
-  CHECK_S(c1.border_in_edges == c2.border_in_edges);    \
-  CHECK_S(c1.border_out_edges == c2.border_out_edges);  \
-  CHECK_S(c1.distances == c2.distances);                \
-  CHECK_S(c1.edge_distances == c2.edge_distances);
-
-#define CHECK_TURN_COST_DATA_EQUAL(tcd1, tcd2) \
-  CHECK_S(tcd1.turn_costs == tcd2.turn_costs);
-
-GNode RandomGNode(uint64_t seed, uint8_t fill = 0) {
+GNode RandomGNode(uint64_t seed) {
   std::mt19937 myrand(seed);
   std::uniform_int_distribution<uint64_t> dist(
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GNode n;
-  memset((void*)&n, fill, sizeof(GNode));
+  GNode n = {0};
 
   // TODO: handle sign?
   n.node_id = dist(myrand) % (1llu << GNODE_ID_BITS);
@@ -106,14 +36,13 @@ GNode RandomGNode(uint64_t seed, uint8_t fill = 0) {
   return n;
 }
 
-GEdge RandomGEdge(uint64_t seed, uint8_t fill = 0) {
+GEdge RandomGEdge(uint64_t seed) {
   std::mt19937 myrand(seed);
   std::uniform_int_distribution<uint64_t> dist(
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GEdge e;
-  memset((void*)&e, fill, sizeof(GEdge));
+  GEdge e = {0};
 
   e.target_idx = (uint32_t)(dist(myrand) % (1llu << 32));
   e.way_idx = (uint32_t)(dist(myrand) % (1llu << 32));
@@ -138,14 +67,13 @@ GEdge RandomGEdge(uint64_t seed, uint8_t fill = 0) {
   return e;
 }
 
-GWay RandomWay(uint64_t seed, uint8_t fill = 0) {
+GWay RandomWay(uint64_t seed) {
   std::mt19937 myrand(seed);
   std::uniform_int_distribution<uint64_t> dist(
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GWay w;
-  memset((void*)&w, fill, sizeof(GWay));
+  GWay w = {0};
 
   // handle sign?
   w.id = dist(myrand) % (1llu << GWAY_ID_BITS);
@@ -160,10 +88,10 @@ GWay RandomWay(uint64_t seed, uint8_t fill = 0) {
   w.priority_road_backward = dist(myrand) % 2;
   w.more_than_two_lanes = dist(myrand) % 2;
   w.ncc = dist(myrand) % (1llu << NUM_CC_BITS);
-  w.wsa_id = dist(myrand) % (1llu << 32);
+  w.wsa_id = (uint32_t)dist(myrand);
+  w.streetname_idx = (uint32_t)dist(myrand);
   // TODO:
-  w.streetname = nullptr;
-  w.node_ids = nullptr;
+  // w.node_ids_buff = nullptr;
 
   return w;
 }
@@ -197,11 +125,11 @@ GCluster RandomGCluster(uint64_t seed) {
 
   GCluster cl = {0};
 
-  cl.cluster_id = dist(myrand) % 32;
-  cl.num_nodes = dist(myrand) % 32;
-  cl.num_border_nodes = dist(myrand) % 32;
-  cl.num_inner_edges = dist(myrand) % 32;
-  cl.num_outer_edges = dist(myrand) % 32;
+  cl.cluster_id = (uint32_t)dist(myrand);
+  cl.num_nodes = (uint32_t)dist(myrand);
+  cl.num_border_nodes = (uint32_t)dist(myrand);
+  cl.num_inner_edges = (uint32_t)dist(myrand);
+  cl.num_outer_edges = (uint32_t)dist(myrand);
 
   cl.border_nodes = RandomVec<uint32_t>(dist(myrand) % 17);
 
@@ -219,7 +147,8 @@ GCluster RandomGCluster(uint64_t seed) {
   }
 
   for (size_t i = 0; i < cl.border_in_edges.size(); ++i) {
-    cl.edge_distances.push_back(RandomVec<uint32_t>(cl.border_out_edges.size()));
+    cl.edge_distances.push_back(
+        RandomVec<uint32_t>(cl.border_out_edges.size()));
   }
 
   return cl;
@@ -236,18 +165,67 @@ TurnCostData RandomTurnCostData(uint64_t seed) {
   return tcd;
 }
 
-#if 0
-inline bool operator==(const GNode& n1, const GNode& n2) {
-  return n1.node_id == n2.node_id && n1.cluster_id == n2.cluster_id &&
-         n1.edges_start_pos == n2.edges_start_pos &&
-         n1.num_forward_edges == n2.num_forward_edges && n1.ncc == n2.ncc &&
-         n1.lat == n2.lat && n1.lon == n2.lon &&
-         n1.large_component == n2.large_component &&
-         n1.cluster_border_node == n2.cluster_border_node &&
-         n1.dead_end == n2.dead_end &&
-         n1.is_pedestrian_crossing == n2.is_pedestrian_crossing;
+WaySharedAttrs RandomWaySharedAttrs(uint64_t seed) {
+  std::mt19937 myrand(seed);
+  std::uniform_int_distribution<uint64_t> dist(
+      std::numeric_limits<uint64_t>::min(),
+      std::numeric_limits<uint64_t>::max());
+
+  WaySharedAttrs wsa = {0};
+  for (RoutingAttrs& ra : wsa.ra) {
+    ra.dir = dist(myrand) % (1llu << 1);
+    ra.access = static_cast<ACCESS>(dist(myrand) % (1llu << 4));
+    ra.maxspeed = dist(myrand) % (1llu << 10);
+    ra.lit = dist(myrand) % (1llu << 1);
+    ra.toll = dist(myrand) % (1llu << 1);
+    ra.surface = static_cast<SURFACE>(dist(myrand) % (1llu << 6));
+    ra.tracktype = static_cast<TRACKTYPE>(dist(myrand) % (1llu << 3));
+    ra.smoothness = static_cast<SMOOTHNESS>(dist(myrand) % (1llu << 4));
+    ra.left_side = dist(myrand) % (1llu << 1);
+    ra.right_side = dist(myrand) % (1llu << 1);
+    ra.width_dm = dist(myrand) % (1llu << 8);
+  }
+  return wsa;
 }
-#endif
+
+TurnRestriction RandomTurnRestriction(uint64_t seed) {
+  std::mt19937 myrand(seed);
+  std::uniform_int_distribution<uint64_t> dist(
+      std::numeric_limits<uint64_t>::min(),
+      std::numeric_limits<uint64_t>::max());
+
+  TurnRestriction tr = {0};
+  tr.relation_id = dist(myrand);
+  tr.from_way_id = dist(myrand);
+  tr.via_ids = RandomVec<int64_t>(dist(myrand) % 5);
+  tr.to_way_id = dist(myrand);
+  tr.via_is_node = (dist(myrand) % 2) != 0;
+  tr.forbidden = (dist(myrand) % 2) != 0;
+  tr.direction = static_cast<TurnDirection>(
+      dist(myrand) % static_cast<uint64_t>(TurnDirection::Max));
+
+  uint64_t v_size = dist(myrand) % 5;
+  for (size_t i = 0; i < v_size; ++i) {
+    tr.path.push_back({.from_node_idx = (uint32_t)dist(myrand),
+                       .way_idx = (uint32_t)dist(myrand),
+                       .to_node_idx = (uint32_t)dist(myrand),
+                       .edge_idx = (uint32_t)dist(myrand)});
+  }
+
+  return tr;
+}
+
+Graph::Component RandomComponent(uint64_t seed) {
+  std::mt19937 myrand(seed);
+  std::uniform_int_distribution<uint64_t> dist(
+      std::numeric_limits<uint64_t>::min(),
+      std::numeric_limits<uint64_t>::max());
+
+  Graph::Component c = {0};
+  c.start_node = dist(myrand);
+  c.size = dist(myrand);
+  return c;
+}
 
 void TestGNode() {
   FUNC_TIMER();
@@ -255,12 +233,6 @@ void TestGNode() {
   std::vector<GNode> nodes;
   for (uint32_t i = 0; i < 100; ++i) {
     nodes.push_back(RandomGNode(i));
-
-    // Compare the just created node with a node that has a different pre-fill
-    // character. This will find errors such as when we forget to set an
-    // attribute here.
-    GNode rn2 = RandomGNode(i, /*fill=*/255);
-    CHECK_NODES_EQUAL(nodes.at(i), rn2);
   }
 
   WriteBuff wb;
@@ -288,9 +260,6 @@ void TestGEdge() {
   for (uint32_t i = 0; i < 100; ++i) {
     GEdge rn1 = RandomGEdge(i);
     EncodeGEdge(rn1, &wb);
-
-    GEdge rn2 = RandomGEdge(i, /*fill=*/255);
-    CHECK_EDGES_EQUAL(rn1, rn2);
   }
 
   uint8_t* ptr = wb.base_ptr();
@@ -309,12 +278,6 @@ void TestGWay() {
   std::vector<GWay> ways;
   for (uint32_t i = 0; i < 100; ++i) {
     ways.push_back(RandomWay(i));
-
-    // Compare the just created node with a node that has a different pre-fill
-    // character. This will find errors such as when we forget to set an
-    // attribute here.
-    GWay rw2 = RandomWay(i, /*fill=*/255);
-    CHECK_WAYS_EQUAL(ways.at(i), rw2);
   }
 
   WriteBuff wb;
@@ -365,10 +328,67 @@ void TestTurnCostData() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 100; ++i) {
-    TurnCostData dec(0,0);
+    TurnCostData dec(0, 0);
     ptr += DecodeTurnCostData(ptr, &dec);
     const TurnCostData re = RandomTurnCostData(i);
     CHECK_TURN_COST_DATA_EQUAL(re, dec);
+  }
+  CHECK_EQ_S(ptr, wb.base_ptr() + wb.used());
+}
+
+void TestWaySharedAttrs() {
+  FUNC_TIMER();
+
+  WriteBuff wb;
+  for (uint32_t i = 0; i < 100; ++i) {
+    const WaySharedAttrs cl = RandomWaySharedAttrs(i);
+    EncodeWaySharedAttrs(cl, &wb);
+  }
+
+  uint8_t* ptr = wb.base_ptr();
+  for (uint32_t i = 0; i < 100; ++i) {
+    WaySharedAttrs dec = {0};
+    ptr += DecodeWaySharedAttrs(ptr, &dec);
+    const WaySharedAttrs re = RandomWaySharedAttrs(i);
+    CHECK_WAY_SHARED_ATTRS_EQUAL(re, dec);
+  }
+  CHECK_EQ_S(ptr, wb.base_ptr() + wb.used());
+}
+
+void TestTurnRestrictions() {
+  FUNC_TIMER();
+
+  WriteBuff wb;
+  for (uint32_t i = 0; i < 1; ++i) {
+    const TurnRestriction cl = RandomTurnRestriction(i);
+    EncodeTurnRestriction(cl, &wb);
+  }
+
+  uint8_t* ptr = wb.base_ptr();
+  for (uint32_t i = 0; i < 1; ++i) {
+    TurnRestriction dec = {0};
+    ptr += DecodeTurnRestriction(ptr, &dec);
+    const TurnRestriction re = RandomTurnRestriction(i);
+    CHECK_TURN_RESTRICTION_EQUAL(re, dec);
+  }
+  CHECK_EQ_S(ptr, wb.base_ptr() + wb.used());
+}
+
+void TestComponents() {
+  FUNC_TIMER();
+
+  WriteBuff wb;
+  for (uint32_t i = 0; i < 1; ++i) {
+    const Graph::Component cl = RandomComponent(i);
+    EncodeComponent(cl, &wb);
+  }
+
+  uint8_t* ptr = wb.base_ptr();
+  for (uint32_t i = 0; i < 1; ++i) {
+    Graph::Component dec = {0};
+    ptr += DecodeComponent(ptr, &dec);
+    const Graph::Component re = RandomComponent(i);
+    CHECK_COMPONENT_EQUAL(re, dec);
   }
   CHECK_EQ_S(ptr, wb.base_ptr() + wb.used());
 }
@@ -390,6 +410,9 @@ int main(int argc, char* argv[]) {
   TestGWay();
   TestGCluster();
   TestTurnCostData();
+  TestWaySharedAttrs();
+  TestTurnRestrictions();
+  TestComponents();
 
   // TestRead();
 

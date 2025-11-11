@@ -185,7 +185,7 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       tr->path.push_back({.from_node_idx = v.at(v.size() - 2),
                           .way_idx = p.way_idx,
                           .to_node_idx = v.at(v.size() - 1)});
-      tr->path_start_node_idx = v.at(v.size() - 2);
+      // tr->path_start_node_idx = v.at(v.size() - 2);
     }
 
     if (!tr->via_is_node) {

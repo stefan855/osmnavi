@@ -94,6 +94,7 @@ struct BuildGraphStats {
   int64_t num_ways_diff_maxspeed = 0;
   int64_t num_ways_has_country = 0;
   int64_t num_ways_has_streetname = 0;
+  int64_t num_ways_streetname_bytes = 0;
   int64_t num_ways_oneway_car = 0;
   // Count ways with restricted access in one direction and free access in the
   // other direction.
@@ -175,12 +176,12 @@ struct BuildGraphStats {
     num_ways_diff_maxspeed += other.num_ways_diff_maxspeed;
     num_ways_has_country += other.num_ways_has_country;
     num_ways_has_streetname += other.num_ways_has_streetname;
+    num_ways_streetname_bytes += other.num_ways_streetname_bytes;
     num_ways_oneway_car += other.num_ways_oneway_car;
     num_ways_mixed_restricted_car += other.num_ways_mixed_restricted_car;
 
     num_cross_country_edges += other.num_cross_country_edges;
     num_cross_country_restricted += other.num_cross_country_restricted;
-
 
     num_cluster_border_nodes += other.num_cluster_border_nodes;
     num_cluster_inside_nodes += other.num_cluster_inside_nodes;
@@ -359,7 +360,9 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
 //                            const OSMPBF::Way& osm_way, GWay* way);
 
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                      std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
+                      std::mutex& mut,
+                      DeDuperWithIds<WaySharedAttrs>* wsa_deduper,
+                      DeDuperWithIds<std::string>* streetname_deduper,
                       GraphMetaData* meta, BuildGraphStats* stats);
 
 }  // namespace build_graph

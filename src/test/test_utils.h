@@ -79,7 +79,7 @@ inline void AddWay(Graph& g, uint32_t way_idx,
                    std::vector<uint32_t> node_indexes = {}) {
   CHECK_EQ_S(way_idx, g.ways.size());
   CHECK_LT_S(wsa_id, g.way_shared_attrs.size());
-  uint8_t* node_ids_buff = nullptr;
+  uint8_t* node_ids_arr = nullptr;
   if (!node_indexes.empty()) {
     std::vector<uint64_t> node_ids;
     for (uint32_t idx : node_indexes) {
@@ -88,16 +88,17 @@ inline void AddWay(Graph& g, uint32_t way_idx,
     WriteBuff buff;
     EncodeUInt(node_ids.size(), &buff);
     EncodeNodeIds(node_ids, &buff);
-    node_ids_buff = g.unaligned_pool_.AllocBytes(buff.used());
-    memcpy(node_ids_buff, buff.base_ptr(), buff.used());
+    node_ids_arr = g.unaligned_pool_.AllocBytes(buff.used());
+    memcpy(node_ids_arr, buff.base_ptr(), buff.used());
   }
 
+  CHECK_EQ_S(g.way_node_ids.size(), g.ways.size());
+  g.way_node_ids.push_back(node_ids_arr);
   g.ways.push_back({.id = way_idx * 1000,
                     .highway_label = highway_label,
                     .uniform_country = 1,
                     .ncc = NCC_CH,
-                    .wsa_id = wsa_id,
-                    .node_ids = node_ids_buff});
+                    .wsa_id = wsa_id});
 }
 
 inline void AddNode(Graph& g, uint32_t idx, uint32_t cluster_id = 0) {

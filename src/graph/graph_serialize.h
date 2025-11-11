@@ -237,8 +237,7 @@ inline void EncodeGWay(const GWay& prev, const GWay& w, WriteBuff* buff) {
   std::uint8_t more_than_two_lanes : 1 = 0;
   std::uint16_t ncc : NUM_CC_BITS = INVALID_NCC;
   std::uint32_t wsa_id = INFU32;
-  char* streetname = nullptr;
-  uint8_t* node_ids = nullptr;
+  std::uint32_t streetname_idx;
   */
   EncodeInt(w.id - prev.id, buff);
   uint64_t bitset = 0;
@@ -254,7 +253,7 @@ inline void EncodeGWay(const GWay& prev, const GWay& w, WriteBuff* buff) {
   bitset = (bitset << NUM_CC_BITS) + w.ncc;
   EncodeUInt(bitset, buff);
   EncodeUInt(w.wsa_id, buff);
-  EncodeString(w.streetname != nullptr ? w.streetname : "", buff);
+  EncodeUInt(w.streetname_idx, buff);
 }
 
 inline uint32_t DecodeGWay(const GWay& prev, const std::uint8_t* ptr, GWay* w) {
@@ -276,10 +275,7 @@ inline uint32_t DecodeGWay(const GWay& prev, const std::uint8_t* ptr, GWay* w) {
   DECODE_BITS(bitset, NUM_HIGHWAY_LABEL_BITS, w->highway_label);
 
   DECODE_UINT(cnt, ptr, w->wsa_id);
-
-  std::string_view str;
-  cnt += DecodeString(ptr + cnt, &str);
-  // TODO
+  DECODE_UINT(cnt, ptr, w->streetname_idx);
 
   return cnt;
 }
@@ -378,6 +374,123 @@ inline uint32_t DecodeTurnCostData(const std::uint8_t* ptr, TurnCostData* tcd) {
   return DecodeVector(ptr, &tcd->turn_costs);
 }
 
+inline void EncodeWaySharedAttrs(const WaySharedAttrs& wsa, WriteBuff* buff) {
+  /*
+    RoutingAttrs ra[RA_MAX];
+  */
+  for (const RoutingAttrs& ra : wsa.ra) {
+    uint64_t bitset = 0;
+    bitset = (bitset << 1) + ra.dir;
+    bitset = (bitset << 4) + ra.access;
+    bitset = (bitset << 10) + ra.maxspeed;
+    bitset = (bitset << 1) + ra.lit;
+    bitset = (bitset << 1) + ra.toll;
+    bitset = (bitset << 6) + ra.surface;
+    bitset = (bitset << 3) + ra.tracktype;
+    bitset = (bitset << 4) + ra.smoothness;
+    bitset = (bitset << 1) + ra.left_side;
+    bitset = (bitset << 1) + ra.right_side;
+    bitset = (bitset << 8) + ra.width_dm;
+    EncodeUInt(bitset, buff);
+  }
+}
+
+inline uint32_t DecodeWaySharedAttrs(const std::uint8_t* ptr,
+                                     WaySharedAttrs* wsa) {
+  uint32_t cnt = 0;
+  for (RoutingAttrs& ra : wsa->ra) {
+    uint64_t bitset;
+    cnt += DecodeUInt(ptr + cnt, &bitset);
+    DECODE_BITS(bitset, 8, ra.width_dm);
+    DECODE_BITS(bitset, 1, ra.right_side);
+    DECODE_BITS(bitset, 1, ra.left_side);
+    DECODE_BITS(bitset, 4, ra.smoothness);
+    DECODE_BITS(bitset, 3, ra.tracktype);
+    DECODE_BITS(bitset, 6, ra.surface);
+    DECODE_BITS(bitset, 1, ra.toll);
+    DECODE_BITS(bitset, 1, ra.lit);
+    DECODE_BITS(bitset, 10, ra.maxspeed);
+    DECODE_BITS(bitset, 4, ra.access);
+    DECODE_BITS(bitset, 1, ra.dir);
+  }
+  return cnt;
+}
+
+inline void EncodeTurnRestriction(const TurnRestriction& tr, WriteBuff* buff) {
+  /*
+  std::int64_t relation_id = -1;
+  std::int64_t from_way_id = -1;
+  std::vector<std::int64_t> via_ids;
+  std::int64_t to_way_id = -1;
+  bool via_is_node : 1 = 0;  // via is a node (true) or way(s) (false).
+  bool forbidden : 1 = 0;
+  TurnDirection direction : 3 = TurnDirection::LeftTurn;
+  struct TREdge {
+    std::uint32_t from_node_idx;
+    std::uint32_t way_idx;
+    std::uint32_t to_node_idx;
+    std::uint32_t edge_idx;
+  };
+  std::vector<TREdge> path;
+  */
+  EncodeInt(tr.relation_id, buff);
+  EncodeInt(tr.from_way_id, buff);
+  EncodeVector(tr.via_ids, buff);
+  EncodeInt(tr.to_way_id, buff);
+  uint64_t bitset = 0;
+  bitset = (bitset << 1) + (tr.via_is_node ? 1 : 0);
+  bitset = (bitset << 1) + (tr.forbidden ? 1 : 0);
+  bitset = (bitset << 3) + static_cast<uint64_t>(tr.direction);
+  EncodeUInt(bitset, buff);
+  EncodeUInt(tr.path.size(), buff);
+  for (const TurnRestriction::TREdge& e : tr.path) {
+    EncodeUInt(e.from_node_idx, buff);
+    EncodeUInt(e.way_idx, buff);
+    EncodeUInt(e.to_node_idx, buff);
+    EncodeUInt(e.edge_idx, buff);
+  }
+}
+
+inline uint32_t DecodeTurnRestriction(const std::uint8_t* ptr,
+                                      TurnRestriction* tr) {
+  uint32_t cnt = 0;
+  cnt += DecodeInt(ptr + cnt, &tr->relation_id);
+  cnt += DecodeInt(ptr + cnt, &tr->from_way_id);
+  cnt += DecodeVector(ptr + cnt, &tr->via_ids);
+  cnt += DecodeInt(ptr + cnt, &tr->to_way_id);
+  uint64_t bitset = 0;
+  cnt += DecodeUInt(ptr + cnt, &bitset);
+  DECODE_BITS(bitset, 3, tr->direction);
+  DECODE_BITS(bitset, 1, tr->forbidden);
+  DECODE_BITS(bitset, 1, tr->via_is_node);
+  uint64_t v_size = 0;
+  cnt += DecodeUInt(ptr + cnt, &v_size);
+  tr->path.resize(v_size);
+  for (size_t i = 0; i < v_size; ++i) {
+    cnt += DecodeUInt(ptr + cnt, &tr->path.at(i).from_node_idx);
+    cnt += DecodeUInt(ptr + cnt, &tr->path.at(i).way_idx);
+    cnt += DecodeUInt(ptr + cnt, &tr->path.at(i).to_node_idx);
+    cnt += DecodeUInt(ptr + cnt, &tr->path.at(i).edge_idx);
+  }
+  return cnt;
+}
+
+inline void EncodeComponent(const Graph::Component& c, WriteBuff* buff) {
+  /*
+    uint32_t start_node;
+    uint32_t size;
+  */
+  EncodeUInt(c.start_node, buff);
+  EncodeUInt(c.size, buff);
+}
+
+inline uint32_t DecodeComponent(const std::uint8_t* ptr, Graph::Component* c) {
+  uint32_t cnt = 0;
+  cnt += DecodeUInt(ptr + cnt, &c->start_node);
+  cnt += DecodeUInt(ptr + cnt, &c->size);
+  return cnt;
+}
+
 constexpr uint64_t NumElementsPerBlock = 500'000;
 
 void FileReadToBuf(const std::string& filename, std::ifstream* file,
@@ -399,9 +512,10 @@ struct FileMeta {
     TYPE_WAY,
     TYPE_CLUSTER,
     TYPE_TURN_COST_DATA,
-    TYPE_COMPLEX_TURN_RESTRICTION,
     TYPE_WAY_SHARED_ATTRS,
+    TYPE_COMPLEX_TURN_RESTRICTION,
     TYPE_COMPONENTS,
+    TYPE_STREETNAMES,
     TYPE_MAX
   };
 
@@ -435,6 +549,18 @@ struct FileMeta {
     size += (g.nodes.size() / NumElementsPerBlock + 1) * 5 * max_varint_bytes;
     size += (g.edges.size() / NumElementsPerBlock + 1) * 5 * max_varint_bytes;
     size += (g.ways.size() / NumElementsPerBlock + 1) * 5 * max_varint_bytes;
+    size +=
+        (g.clusters.size() / NumElementsPerBlock + 1) * 5 * max_varint_bytes;
+    size +=
+        (g.turn_costs.size() / NumElementsPerBlock + 1) * 5 * max_varint_bytes;
+    size += (g.way_shared_attrs.size() / NumElementsPerBlock + 1) * 5 *
+            max_varint_bytes;
+    size += (g.complex_turn_restrictions.size() / NumElementsPerBlock + 1) * 5 *
+            max_varint_bytes;
+    size += (g.large_components.size() / NumElementsPerBlock + 1) * 5 *
+            max_varint_bytes;
+    size += (g.streetnames.size() / NumElementsPerBlock + 1) * 5 *
+            max_varint_bytes;
     return size;
   }
 
@@ -481,6 +607,7 @@ struct FileMeta {
     file->seekg(0);
     uint64_t pos = 0;
 
+    LOG_S(INFO) << "Magic header size:" << SER_GRAPH_FILE_HEADER_SIZE;
     std::vector<uint8_t> buf(SER_GRAPH_FILE_HEADER_SIZE);
     FileReadToBuf(filename, file, SER_GRAPH_FILE_HEADER_SIZE, &buf);
     {
@@ -495,14 +622,14 @@ struct FileMeta {
       pos += DecodeUInt(buf.data() + pos, &tmp);
       if (tmp != SER_GRAPH_VERSION_NUM) {
         ABORT_S() << absl::StrFormat(
-            "Wrong version number (%llu instead of %llu) in file %s", filename,
-            tmp, SER_GRAPH_VERSION_NUM);
+            "Wrong version (%llu instead of %llu) in file %s", filename, tmp,
+            SER_GRAPH_VERSION_NUM);
       }
     }
 
     uint64_t file_meta_size_upper_bound;
     pos += DecodeUInt(buf.data() + pos, &file_meta_size_upper_bound);
-    LOG_S(INFO) << "Meta size:" << file_meta_size_upper_bound;
+    LOG_S(INFO) << "File meta size:" << file_meta_size_upper_bound;
 
     pos = 0;
     FileReadToBuf(filename, file, file_meta_size_upper_bound, &buf);
@@ -550,7 +677,7 @@ struct FileMeta {
 };
 
 // Serialize all records of one type to the serialized graph file.
-template <class RecType, FileMeta::TYPE type>
+template <typename RecType, FileMeta::TYPE type>
 uint64_t WriteBlocks(std::ofstream* file, uint64_t fsize, FileMeta* meta,
                      const std::vector<RecType>& records) {
   FileMeta::EntityHeader ehead = {.type = type,
@@ -578,6 +705,14 @@ uint64_t WriteBlocks(std::ofstream* file, uint64_t fsize, FileMeta* meta,
         EncodeGCluster(rec, &wb);
       } else if constexpr (std::same_as<RecType, TurnCostData>) {
         EncodeTurnCostData(rec, &wb);
+      } else if constexpr (std::same_as<RecType, WaySharedAttrs>) {
+        EncodeWaySharedAttrs(rec, &wb);
+      } else if constexpr (std::same_as<RecType, TurnRestriction>) {
+        EncodeTurnRestriction(rec, &wb);
+      } else if constexpr (std::same_as<RecType, Graph::Component>) {
+        EncodeComponent(rec, &wb);
+      } else if constexpr (std::same_as<RecType, std::string>) {
+        EncodeString(rec, &wb);
       } else {
         static_assert(false, "unsupported type");
       }
@@ -625,6 +760,14 @@ void WriteSerializedGraph(const Graph& g, const std::string& filename) {
                                                        g.clusters);
   fpos = WriteBlocks<TurnCostData, FileMeta::TYPE_TURN_COST_DATA>(
       &file, fpos, &meta, g.turn_costs);
+  fpos = WriteBlocks<WaySharedAttrs, FileMeta::TYPE_WAY_SHARED_ATTRS>(
+      &file, fpos, &meta, g.way_shared_attrs);
+  fpos = WriteBlocks<TurnRestriction, FileMeta::TYPE_COMPLEX_TURN_RESTRICTION>(
+      &file, fpos, &meta, g.complex_turn_restrictions);
+  fpos = WriteBlocks<Graph::Component, FileMeta::TYPE_COMPONENTS>(
+      &file, fpos, &meta, g.large_components);
+  fpos = WriteBlocks<std::string, FileMeta::TYPE_STREETNAMES>(
+      &file, fpos, &meta, g.streetnames);
 
   meta.SerializeFileHeader(file_meta_size_upper_bound, &file);
   file.close();
@@ -661,6 +804,18 @@ void ReadBlocks(const FileMeta& meta, const FileMeta::EntityHeader& eh,
         pos += DecodeGCluster(buf.data() + pos, &g->clusters.at(k));
       } else if constexpr (std::same_as<RecType, TurnCostData>) {
         pos += DecodeTurnCostData(buf.data() + pos, &g->turn_costs.at(k));
+      } else if constexpr (std::same_as<RecType, WaySharedAttrs>) {
+        pos +=
+            DecodeWaySharedAttrs(buf.data() + pos, &g->way_shared_attrs.at(k));
+      } else if constexpr (std::same_as<RecType, TurnRestriction>) {
+        pos += DecodeTurnRestriction(buf.data() + pos,
+                                     &g->complex_turn_restrictions.at(k));
+      } else if constexpr (std::same_as<RecType, Graph::Component>) {
+        pos += DecodeComponent(buf.data() + pos, &g->large_components.at(k));
+      } else if constexpr (std::same_as<RecType, std::string>) {
+        std::string_view sv;
+        pos += DecodeString(buf.data() + pos, &sv);
+        g->streetnames.at(k) = sv;
       } else {
         static_assert(false, "unsupported type");
       }
@@ -704,10 +859,36 @@ Graph ReadSerializedGraph(const std::string& filename) {
                        &file, &g);
 
   g.turn_costs.resize(
-      meta.entities.at(FileMeta::TYPE_TURN_COST_DATA).rec_count, {0, 0});
+      meta.entities.at(FileMeta::TYPE_TURN_COST_DATA).rec_count);
   ReadBlocks<TurnCostData>(meta,
                            meta.entities.at(FileMeta::TYPE_TURN_COST_DATA),
                            filename, &file, &g);
+
+  g.way_shared_attrs.resize(
+      meta.entities.at(FileMeta::TYPE_WAY_SHARED_ATTRS).rec_count);
+  ReadBlocks<WaySharedAttrs>(meta,
+                             meta.entities.at(FileMeta::TYPE_WAY_SHARED_ATTRS),
+                             filename, &file, &g);
+
+  g.complex_turn_restrictions.resize(
+      meta.entities.at(FileMeta::TYPE_COMPLEX_TURN_RESTRICTION).rec_count);
+  ReadBlocks<TurnRestriction>(
+      meta, meta.entities.at(FileMeta::TYPE_COMPLEX_TURN_RESTRICTION), filename,
+      &file, &g);
+
+  g.large_components.resize(
+      meta.entities.at(FileMeta::TYPE_COMPONENTS).rec_count);
+  ReadBlocks<Graph::Component>(
+      meta, meta.entities.at(FileMeta::TYPE_COMPONENTS), filename, &file, &g);
+
+  g.streetnames.resize(
+      meta.entities.at(FileMeta::TYPE_STREETNAMES).rec_count);
+  ReadBlocks<std::string>(
+      meta, meta.entities.at(FileMeta::TYPE_STREETNAMES), filename, &file, &g);
+
+  // Post processing.
+  g.complex_turn_restriction_map =
+      ComputeTurnRestrictionMapToFirst(g.complex_turn_restrictions);
 
   file.close();
   return g;

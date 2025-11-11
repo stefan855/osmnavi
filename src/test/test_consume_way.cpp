@@ -167,12 +167,15 @@ void TestWay1() {
   build_graph::GraphMetaData meta = CreateMeta();
   StoreNodes(num_nodes, meta.node_table.get());
   DeDuperWithIds<WaySharedAttrs> deduper;
+  DeDuperWithIds<std::string> streetname_deduper;
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
   std::mutex mut;
 
-  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta, &meta.Stats());
+  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &streetname_deduper,
+                   &meta, &meta.Stats());
   CHECK_EQ_S(meta.graph.ways.size(), 1);
   CHECK_EQ_S(deduper.num_added(), 1);
+  CHECK_EQ_S(streetname_deduper.num_added(), 1);
 }
 
 void TestWay2() {
@@ -191,7 +194,7 @@ void TestWay2() {
 <tag k="lanes:backward" v="1"/>
 <tag k="lanes:forward" v="1"/>
 <tag k="maxspeed" v="20"/>
-# <tag k="name" v="Rheinbrückenstraße"/>
+<tag k="name" v="Rheinbrückenstraße"/>
 # <tag k="placement:backward" v="middle_of:1"/>
 # <tag k="surface" v="asphalt"/>
 # <tag k="width:lanes:backward" v="2|4"/>
@@ -202,15 +205,19 @@ void TestWay2() {
   meta.opt.vt = VH_MOTORCAR;
   StoreNodes(num_nodes, meta.node_table.get());
   DeDuperWithIds<WaySharedAttrs> deduper;
+  DeDuperWithIds<std::string> streetname_deduper;
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
   std::mutex mut;
 
-  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &meta, &meta.Stats());
+  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &streetname_deduper,
+                   &meta, &meta.Stats());
   CHECK_EQ_S(meta.graph.ways.size(), 1);
   CHECK_EQ_S(deduper.num_added(), 1);
   const WaySharedAttrs& wsa = deduper.GetObj(0);
   CHECK_S(WSAAnyRoutable(wsa, DIR_FORWARD));
   CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD));
+  CHECK_EQ_S(streetname_deduper.num_added(), 1);
+  CHECK_EQ_S(streetname_deduper.GetObj(0), "Rheinbrückenstraße");
 }
 
 int main(int argc, char* argv[]) {

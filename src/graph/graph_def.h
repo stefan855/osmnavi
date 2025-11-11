@@ -166,12 +166,13 @@ struct GWay {
   // TODO: encode streetname and node_ids into the same buffer, such that we
   // need only one pointer here.
 
+  std::uint32_t streetname_idx = 0;
   // 0-terminated street name. The memory is
   // allocated in graph.unaligned_pool_.
-  char* streetname = nullptr;
+  // char* streetname = nullptr;
   // Varbyte encoded node ids of the way. The memory is allocated in
   // graph.unaligned_pool_.
-  uint8_t* node_ids = nullptr;
+  // uint8_t* node_ids_buff = nullptr;
 };
 
 constexpr std::uint32_t NUM_CLUSTER_BITS = 22;
@@ -432,6 +433,7 @@ struct Graph {
 
   std::vector<NodeTags> node_tags_sorted;
   std::vector<WaySharedAttrs> way_shared_attrs;
+  std::vector<std::string> streetnames;
   std::vector<TurnCostData> turn_costs;
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
@@ -447,6 +449,12 @@ struct Graph {
 
   // SimpleMemPool aligned_pool_;
   SimpleMemPool unaligned_pool_;
+  // For each way_idx, this stores all the node ids that make up the way, in
+  // compressed format. The memory is allocated by unaligned_pool_.
+  // See GetGWayNodeIds() on how to use it.
+  // Note: this is used during construction only and not stored in the
+  // serialized graph.
+  std::vector<const uint8_t*> way_node_ids;
 
   std::size_t FindWayIndex(std::int64_t way_id) const {
     auto it = std::lower_bound(
@@ -481,6 +489,7 @@ struct Graph {
   // Find the stored node attribute for a given node_id. Returns the found
   // record or nullptr if it doesn't exist.
   const NodeTags* FindNodeTags(int64_t node_id) const {
+    // CHECK_S(!node_tags_sorted.empty());
     auto it =
         std::lower_bound(node_tags_sorted.begin(), node_tags_sorted.end(),
                          node_id, [](const NodeTags& s, std::int64_t value) {
@@ -493,19 +502,23 @@ struct Graph {
     }
   }
 
-  static std::vector<uint64_t> GetGWayNodeIds(const GWay& way) {
+  std::vector<uint64_t> GetGWayNodeIds(const GWay& way) const {
     // Decode node_ids.
     std::uint64_t num_nodes;
-    CHECK_S(way.node_ids != nullptr);
-    std::uint8_t* ptr = way.node_ids;
+    size_t way_idx = &way - &(ways.front());
+    CHECK_LT_S(way_idx, way_node_ids.size());
+    const std::uint8_t* ptr = way_node_ids.at(way_idx);
+    CHECK_S(ptr != nullptr);
     ptr += DecodeUInt(ptr, &num_nodes);
     std::vector<uint64_t> ids;
     ptr += DecodeNodeIds(ptr, num_nodes, &ids);
+    CHECK_S(!ids.empty());
     return ids;
   }
 
-  // Given a way with the original node id list, return the list of node indexes
-  // (in graph.nodes) of all graph nodes.
+  // Given a way with the original node id list, return the list of the way
+  // nodes that are actually present in the graph.
+  //
   // Note that this ignores nodes that don't exist or that are not relevant for
   // routing, according to the graph_node_ids bitset.
   std::vector<uint32_t> GetGWayNodeIndexes(const HugeBitset& graph_node_ids,

@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <map>
 #include <mutex>
+#include <ranges>
 
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
@@ -618,7 +620,9 @@ std::pair<bool, bool> GetPriorityRoadSetting(
 // add a record to graph.ways. Also updates 'seen nodes' and 'needed nodes'
 // bitsets.
 void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                      std::mutex& mut, DeDuperWithIds<WaySharedAttrs>* deduper,
+                      std::mutex& mut,
+                      DeDuperWithIds<WaySharedAttrs>* wsa_deduper,
+                      DeDuperWithIds<std::string>* streetname_deduper,
                       GraphMetaData* meta, BuildGraphStats* stats) {
   if (osm_way.refs().size() <= 1) {
     LOG_S(INFO) << absl::StrFormat("Ignore way %lld of length %lld",
@@ -693,18 +697,21 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
   if (!WSAVehicleAnyRoutable(wsa, meta->opt.vt)) return;
 
-  WriteBuff node_ids_buff;
-  EncodeNodeIds(way_nodes, &node_ids_buff);
+  WriteBuff node_ids_wb;
+  EncodeNodeIds(way_nodes, &node_ids_wb);
   stats->num_ways_dup_segments += dup_segments;
 
   // Run modifications of global data behind a mutex.
   {
     std::unique_lock<std::mutex> l(mut);
-    wc.way.node_ids =
-        meta->graph.unaligned_pool_.AllocBytes(node_ids_buff.used());
-    memcpy(wc.way.node_ids, node_ids_buff.base_ptr(), node_ids_buff.used());
+    uint8_t* node_ids_buff =
+        meta->graph.unaligned_pool_.AllocBytes(node_ids_wb.used());
+    memcpy(node_ids_buff, node_ids_wb.base_ptr(), node_ids_wb.used());
+    meta->graph.way_node_ids.push_back(node_ids_buff);
 
     std::string_view streetname = tagh.GetValue(wc.osm_way, "name");
+    wc.way.streetname_idx = streetname_deduper->Add(std::string(streetname));
+    /*
     if (!streetname.empty()) {
       // allocate a 0-terminated char*.
       wc.way.streetname =
@@ -712,11 +719,13 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
       memcpy(wc.way.streetname, streetname.data(), streetname.size());
       wc.way.streetname[streetname.size()] = '\0';
     }
+    */
 
     MarkSeenAndNeeded(meta, way_nodes, osm_way, stats);
 
-    wc.way.wsa_id = deduper->Add(wsa);
+    wc.way.wsa_id = wsa_deduper->Add(wsa);
     meta->graph.ways.push_back(wc.way);
+    CHECK_EQ_S(meta->graph.ways.size(), meta->graph.way_node_ids.size());
   }
 }
 
@@ -833,31 +842,67 @@ void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
 void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
   FUNC_TIMER();
 
-  DeDuperWithIds<WaySharedAttrs> deduper;
-  reader->ReadWays([&deduper, meta](const OSMTagHelper& tagh,
-                                    const OSMPBF::Way& way, int thread_idx,
-                                    std::mutex& mut) {
-    ConsumeWayWorker(tagh, way, mut, &deduper, meta, &meta->Stats(thread_idx));
+  DeDuperWithIds<WaySharedAttrs> wsa_deduper;
+  DeDuperWithIds<std::string> streetname_deduper;
+  reader->ReadWays([&wsa_deduper, &streetname_deduper, meta](
+                       const OSMTagHelper& tagh, const OSMPBF::Way& way,
+                       int thread_idx, std::mutex& mut) {
+    ConsumeWayWorker(tagh, way, mut, &wsa_deduper, &streetname_deduper, meta,
+                     &meta->Stats(thread_idx));
   });
 
-  // Sort and build the vector with shared way attributes.
-  deduper.SortByPopularity();
-  meta->graph.way_shared_attrs = deduper.GetObjVector();
-  const std::vector<uint32_t> mapping = deduper.GetSortMapping();
-  for (GWay& w : meta->graph.ways) {
-    w.wsa_id = mapping.at(w.wsa_id);
+  {
+    // Sort and build the vector with shared way attributes.
+    wsa_deduper.SortByPopularity();
+    meta->graph.way_shared_attrs = wsa_deduper.GetObjVector();
+    const std::vector<uint32_t> mapping = wsa_deduper.GetSortMapping();
+    for (GWay& w : meta->graph.ways) {
+      w.wsa_id = mapping.at(w.wsa_id);
+    }
+    LOG_S(INFO) << absl::StrFormat(
+        "Shared way attributes de-duping %u -> %u (%.2f%%)",
+        wsa_deduper.num_added(), wsa_deduper.num_unique(),
+        (100.0 * wsa_deduper.num_unique()) /
+            std::max(1u, wsa_deduper.num_added()));
   }
-  LOG_S(INFO) << absl::StrFormat(
-      "Shared way attributes de-duping %u -> %u (%.2f%%)", deduper.num_added(),
-      deduper.num_unique(),
-      (100.0 * deduper.num_unique()) / std::max(1u, deduper.num_added()));
+
+  {
+    // Sort and build the vector with shared streetnames.
+    streetname_deduper.SortByPopularity();
+    meta->graph.streetnames = streetname_deduper.GetObjVector();
+    const std::vector<uint32_t> mapping = streetname_deduper.GetSortMapping();
+    for (GWay& w : meta->graph.ways) {
+      w.streetname_idx = mapping.at(w.streetname_idx);
+    }
+    uint64_t bytes = 0;
+    for (const std::string& s : meta->graph.streetnames) {
+      bytes += s.size() + 1;
+    }
+    LOG_S(INFO) << absl::StrFormat(
+        "Streetnames de-duping %u -> %u (%.2f%%) avg bytes:%10.2f",
+        streetname_deduper.num_added(), streetname_deduper.num_unique(),
+        (100.0 * streetname_deduper.num_unique()) /
+            std::max(1u, streetname_deduper.num_added()),
+        (double)bytes / streetname_deduper.num_added());
+  }
 }
 
 void SortGWays(GraphMetaData* meta) {
   FUNC_TIMER();
+  // We have two way related vectors with the same size. They have to be sorted
+  // together. Use zip views for this, a new C++23 feature.
+  CHECK_EQ_S(meta->graph.ways.size(), meta->graph.way_node_ids.size());
+  auto zip =
+      std::ranges::views::zip(meta->graph.ways, meta->graph.way_node_ids);
+  std::ranges::sort(zip, [](const auto& a, const auto& b) {
+    return std::get<0>(a).id < std::get<0>(b).id;
+  });
+
+#if 0
   // Sort by ascending way_id.
   std::sort(meta->graph.ways.begin(), meta->graph.ways.end(),
             [](const GWay& a, const GWay& b) { return a.id < b.id; });
+#endif
 }
 
 void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
@@ -980,7 +1025,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
     dist_sums.clear();
     // Decode node_ids.
     std::uint64_t num_nodes;
-    std::uint8_t* ptr = way.node_ids;
+    const std::uint8_t* ptr = graph.way_node_ids.at(way_idx);
+    CHECK_S(ptr != nullptr);
     ptr += DecodeUInt(ptr, &num_nodes);
     ptr += DecodeNodeIds(ptr, num_nodes, &ids);
 
@@ -1288,7 +1334,9 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       stats->num_ways_no_maxspeed += 1;
     }
     stats->num_ways_has_country += w.uniform_country;
-    stats->num_ways_has_streetname += w.streetname == nullptr ? 0 : 1;
+    stats->num_ways_has_streetname += w.streetname_idx > 0 ? 0 : 1;
+    // stats->num_ways_streetname_bytes +=
+    //     w.streetname == nullptr ? 0 : strlen(w.streetname) + 1;
     stats->num_ways_oneway_car +=
         (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
     if ((FreeAccess(wsa.ra[0].access) && RestrictedAccess(wsa.ra[1].access)) ||
@@ -1501,6 +1549,9 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  g.ways.size() - stats.num_ways_has_country);
   LOG_S(INFO) << absl::StrFormat("  Has streetname:   %12lld",
                                  stats.num_ways_has_streetname);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Avg streetname bytes:%9.2f",
+      (double)stats.num_ways_streetname_bytes / stats.num_ways_has_streetname);
   LOG_S(INFO) << absl::StrFormat("  Oneway for cars:  %12lld",
                                  stats.num_ways_oneway_car);
   LOG_S(INFO) << absl::StrFormat("  Mixed restr cars: %12lld",

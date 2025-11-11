@@ -11,13 +11,14 @@
 
 #include "absl/container/flat_hash_map.h"
 
-enum class TurnDirection : std::uint8_t {
+enum class TurnDirection : std::uint16_t {
   LeftTurn = 0,
   RightTurn = 1,
   StraightOn = 2,
   UTurn = 3,
   NoEntry = 4,
   NoExit = 5,
+  Max
 };
 
 enum class TRStatus : std::uint8_t { EMPTY = 0, ALLOWED = 1, FORBIDDEN = 2 };
@@ -30,8 +31,8 @@ struct TurnRestriction {
   std::int64_t from_way_id = -1;
   std::vector<std::int64_t> via_ids;
   std::int64_t to_way_id = -1;
-  bool via_is_node : 1 = 0;  // via is a node (true) or way(s) (false).
-  bool forbidden : 1 = 0;
+  bool via_is_node = 0;  // via is a node (true) or way(s) (false).
+  bool forbidden = 0;
   TurnDirection direction : 3 = TurnDirection::LeftTurn;
 
   // A list of (from_node,to_node,way) entries that describe the path of the
@@ -61,7 +62,10 @@ struct TurnRestriction {
       return to_node_idx < b.to_node_idx;
     }
   };
-  uint32_t path_start_node_idx;  // The start node of the first edge in 'path'.
+
+  // // The start node of the first edge in 'path'.
+  // uint32_t path_start_node_idx;
+
   std::vector<TREdge> path;
 
   // Get the key for the edge that triggers the start of the turn restriction.

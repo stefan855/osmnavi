@@ -15,9 +15,9 @@
 #include "base/thread_pool.h"
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
-#include "gd.h"
 #include "geometry/closest_node.h"
 #include "graph/build_graph.h"
+#include "graph/graph_serialize.h"
 
 namespace {
 
@@ -152,10 +152,9 @@ std::string GetEdgeName(const Graph& g, const CTRList& ctr_list,
     return "cluster edge";
   }
   const GWay& way = g.ways.at(ve.key.GetEdge(g, ctr_list).way_idx);
-  return absl::StrFormat("%s (w:%lld %lld->%lld)",
-                         way.streetname == nullptr ? "<null>" : way.streetname,
-                         way.id, ve.key.FromNode(g, ctr_list).node_id,
-                         ve.key.ToNode(g, ctr_list).node_id);
+  return absl::StrFormat(
+      "<%s> (w:%lld %lld->%lld)", g.streetnames.at(way.streetname_idx), way.id,
+      ve.key.FromNode(g, ctr_list).node_id, ve.key.ToNode(g, ctr_list).node_id);
 }
 
 double Round1(double val) { return std::round(val * 10.0) / 10.0; }
@@ -323,40 +322,50 @@ nlohmann::json ComputeRoute(const Graph& g,
 
   return RouteToJson(g, n1.dist, n2.dist, router, res);
 }
+
+Graph ReadGraph(const std::string filename, int n_threads) {
+  if (filename.ends_with(".ser")) {
+    // TODO: use multiple threads.
+    return ReadSerializedGraph(filename);
+  } else if (filename.ends_with(".pbf")) {
+    build_graph::BuildGraphOptions opt;
+    opt.pbf = filename;
+    opt.n_threads = n_threads;
+    // Read Road Network.
+    build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
+    // Release memory.
+    meta.graph.node_tags_sorted.clear();
+    meta.graph.way_node_ids.clear();
+    return meta.graph;
+  } else {
+    ABORT_S() << "Only file types .ser or .pbf supported";
+  }
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
 
-  build_graph::BuildGraphOptions opt;
   const Argli argli(argc, argv,
                     {
-                        {.name = "pbf",
+                        {.name = "inputfile",
                          .type = "string",
                          .positional = true,
                          .required = true,
-                         .desc = "Input OSM pbf file (such as planet file)."},
+                         .desc = "Input <graph>.ser or OSM <name>.pbf file "
+                                 "(such as planet file)."},
                         {.name = "n_threads",
                          .type = "int",
-                         .dflt = absl::StrCat(opt.n_threads),
+                         .dflt = "12",
                          .desc = "Number of threads to use"},
-
                     });
 
-  opt.pbf = argli.GetString("pbf");
-  opt.n_threads = argli.GetInt("n_threads");
+  const std::string filename = argli.GetString("inputfile");
+  const int n_threads = argli.GetInt("n_threads");
 
-  // Read Road Network.
-  build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
-  // Release memory.
-  meta.tiler.reset();
-  meta.per_country_config.reset();
-  meta.node_table.reset();
-  meta.way_nodes_seen.reset();
-  meta.way_nodes_needed.reset();
-  meta.graph.node_tags_sorted.clear();
+  const Graph g = ReadGraph(filename, n_threads);
 
-  const Graph& g = meta.graph;
   std::vector<uint32_t> sorted_node_indexes = SortNodeIndexesByLon(g);
   // Remove all nodes that aren't in a large component.
   sorted_node_indexes.erase(

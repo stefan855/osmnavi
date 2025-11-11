@@ -119,7 +119,7 @@ class IdChain {
 
   static void GetFrontAndBackNodeIdx(const Graph& g, const GWay& w,
                                      uint32_t* front_idx, uint32_t* back_idx) {
-    std::vector<uint64_t> ids = Graph::GetGWayNodeIds(w);
+    std::vector<uint64_t> ids = g.GetGWayNodeIds(w);
     CHECK_GE_S(ids.size(), 2);
     *front_idx = g.FindNodeIndex(ids.front());
     *back_idx = g.FindNodeIndex(ids.back());

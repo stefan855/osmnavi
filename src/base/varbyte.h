@@ -83,6 +83,7 @@ inline std::uint32_t EncodeUInt(std::uint64_t v, WriteBuff* buff) {
   return cnt;
 }
 
+#if 1
 inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
   int cnt = 0;
   *v = ptr[cnt] & 127;
@@ -92,6 +93,51 @@ inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
   CHECK_LE_S(cnt, max_varint_bytes);
   return cnt;
 }
+#else
+inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
+  *v = ptr[0] & 127;
+  if ((ptr[0] & 128) == 0) {
+    return 1;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[1] & 127)) << 7);
+  if ((ptr[1] & 128) == 0) {
+    return 2;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[2] & 127)) << 14);
+  if ((ptr[2] & 128) == 0) {
+    return 3;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[3] & 127)) << 21);
+  if ((ptr[3] & 128) == 0) {
+    return 4;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[4] & 127)) << 28);
+  if ((ptr[4] & 128) == 0) {
+    return 5;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[5] & 127)) << 35);
+  if ((ptr[5] & 128) == 0) {
+    return 6;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[6] & 127)) << 42);
+  if ((ptr[6] & 128) == 0) {
+    return 7;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[7] & 127)) << 49);
+  if ((ptr[7] & 128) == 0) {
+    return 8;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[8] & 127)) << 56);
+  if ((ptr[8] & 128) == 0) {
+    return 9;
+  }
+  (*v) = (*v) | (((std::uint64_t)(ptr[9] & 127)) << 63);
+  if ((ptr[9] & 128) == 0) {
+    return 10;
+  }
+  ABORT_S() << "corrupted varint input data";
+}
+#endif
 
 inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint32_t* v) {
   uint64_t utmp;
@@ -135,9 +181,12 @@ template <typename T>
 inline uint32_t EncodeVector(const std::vector<T>& v, WriteBuff* buff) {
   uint32_t cnt = EncodeUInt(v.size(), buff);
   for (const auto& el : v) {
-    if constexpr (std::same_as<T, uint8_t> || std::same_as<T, uint16_t> ||
-                  std::same_as<T, uint32_t> || std::same_as<T, uint64_t>) {
-      cnt += EncodeUInt(el, buff);
+    if constexpr (std::is_integral_v<T>) {
+      if constexpr (std::is_signed_v<T>) {
+        cnt += EncodeInt(el, buff);
+      } else {
+        cnt += EncodeUInt(el, buff);
+      }
     } else {
       EncodeVector(el, buff);
       // static_assert(false, "unsupported type");
@@ -150,13 +199,19 @@ inline uint32_t EncodeVector(const std::vector<T>& v, WriteBuff* buff) {
 template <typename T>
 inline uint32_t DecodeVector(const std::uint8_t* ptr, std::vector<T>* v) {
   uint64_t num;
-  uint32_t cnt = DecodeUInt(ptr, &num);;
+  uint32_t cnt = DecodeUInt(ptr, &num);
+  ;
   for (size_t i = 0; i < num; ++i) {
-    if constexpr (std::same_as<T, uint8_t> || std::same_as<T, uint16_t> ||
-                  std::same_as<T, uint32_t> || std::same_as<T, uint64_t>) {
-      uint64_t el;
-      cnt += DecodeUInt(ptr + cnt, &el);
-      v->push_back(el);
+    if constexpr (std::is_integral_v<T>) {
+      if constexpr (std::is_signed_v<T>) {
+        int64_t el;
+        cnt += DecodeInt(ptr + cnt, &el);
+        v->push_back(el);
+      } else {
+        uint64_t el;
+        cnt += DecodeUInt(ptr + cnt, &el);
+        v->push_back(el);
+      }
     } else {
       v->emplace_back();
       cnt += DecodeVector(ptr + cnt, &v->back());

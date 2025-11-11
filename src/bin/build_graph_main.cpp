@@ -27,6 +27,7 @@
 #include "graph/graph_serialize.h"
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
+#include "test/equal_checks.h"
 
 void PrintDebugInfoForNode(const build_graph::GraphMetaData& meta,
                            int64_t node_id) {
@@ -241,13 +242,6 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
       if (!RoutableForward(g, w, vt) && !RoutableBackward(g, w, vt)) {
         continue;
       }
-      /*
-      if (n.node_id == other.node_id) {
-        LOG_S(INFO) << absl::StrFormat("Node %lld length %fm way %lld name
-      %s", n.node_id, e.distance_cm / 100.0, w.id, w.streetname != nullptr ?
-      w.streetname : "n/a");
-      }
-      */
       if (RoutableForward(g, w, vt) && RoutableBackward(g, w, vt) &&
           n.lat > other.lat) {
         // Edges that have both directions will show up twice when iterating,
@@ -453,6 +447,58 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
   LOG_S(INFO) << absl::StrFormat("Written %d lines to %s", count, filename);
 }
 
+void CheckGraphsEqual(const Graph& g1, const Graph& g2) {
+  FUNC_TIMER();
+
+  CHECK_EQ_S(g1.nodes.size(), g2.nodes.size());
+  for (size_t i = 0; i < g1.nodes.size(); ++i) {
+    CHECK_NODES_EQUAL(g1.nodes.at(i), g2.nodes.at(i));
+  }
+
+  CHECK_EQ_S(g1.edges.size(), g2.edges.size());
+  for (size_t i = 0; i < g1.edges.size(); ++i) {
+    CHECK_EDGES_EQUAL(g1.edges.at(i), g2.edges.at(i));
+  }
+
+  CHECK_EQ_S(g1.ways.size(), g2.ways.size());
+  for (size_t i = 0; i < g1.ways.size(); ++i) {
+    CHECK_WAYS_EQUAL(g1.ways.at(i), g2.ways.at(i));
+  }
+
+  CHECK_EQ_S(g1.clusters.size(), g2.clusters.size());
+  for (size_t i = 0; i < g1.clusters.size(); ++i) {
+    CHECK_CLUSTERS_EQUAL(g1.clusters.at(i), g2.clusters.at(i));
+  }
+
+  CHECK_EQ_S(g1.turn_costs.size(), g2.turn_costs.size());
+  for (size_t i = 0; i < g1.turn_costs.size(); ++i) {
+    CHECK_TURN_COST_DATA_EQUAL(g1.turn_costs.at(i), g2.turn_costs.at(i));
+  }
+
+  CHECK_EQ_S(g1.way_shared_attrs.size(), g2.way_shared_attrs.size());
+  for (size_t i = 0; i < g1.way_shared_attrs.size(); ++i) {
+    CHECK_WAY_SHARED_ATTRS_EQUAL(g1.way_shared_attrs.at(i),
+                                 g2.way_shared_attrs.at(i));
+  }
+
+  CHECK_EQ_S(g1.complex_turn_restrictions.size(),
+             g2.complex_turn_restrictions.size());
+  for (size_t i = 0; i < g1.complex_turn_restrictions.size(); ++i) {
+    CHECK_TURN_RESTRICTION_EQUAL(g1.complex_turn_restrictions.at(i),
+                                 g2.complex_turn_restrictions.at(i));
+  }
+
+  CHECK_EQ_S(g1.large_components.size(), g2.large_components.size());
+  for (size_t i = 0; i < g1.large_components.size(); ++i) {
+    CHECK_COMPONENT_EQUAL(g1.large_components.at(i), g2.large_components.at(i));
+  }
+
+  CHECK_EQ_S(g1.streetnames.size(), g2.streetnames.size());
+  for (size_t i = 0; i < g1.streetnames.size(); ++i) {
+    CHECK_EQ_S(g1.streetnames.at(i), g2.streetnames.at(i));
+  }
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   FUNC_TIMER();
@@ -645,6 +691,7 @@ int main(int argc, char* argv[]) {
 
   WriteSerializedGraph(g, "/tmp/graph.ser");
   Graph g2 = ReadSerializedGraph("/tmp/graph.ser");
+  CheckGraphsEqual(g, g2);
 
   return 0;
 }
