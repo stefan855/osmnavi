@@ -56,15 +56,16 @@ inline void InitLogging(int argc, char* argv[]) {
 // This can be used to compare two double with some tolerance:
 //   if (RelativeDifference(d1, d2) << 0.000001) ...
 // Idea from https://c-faq.com/fp/fpequal.html.
-double RelativeDifference(double a, double b) {
+inline double RelativeDifference(double a, double b) {
   double abs_a = std::abs(a);
   double abs_b = std::abs(b);
   double capacity = std::max(abs_a, abs_b);
   return capacity == 0.0 ? 0.0 : std::abs(a - b) / capacity;
 }
 
-#define CHECK_DOUBLE_EQ_S(a, b, tolerance) \
-  CHECK_S(RelativeDifference(a, b) < tolerance) << absl::StrFormat("a=%.19f and b=%.19f are different", a, b);
+#define CHECK_DOUBLE_EQ_S(a, b, tolerance)      \
+  CHECK_S(RelativeDifference(a, b) < tolerance) \
+      << absl::StrFormat("a=%.19f and b=%.19f are different", a, b);
 
 // Object that measures time execution time of a function and prints information
 // about start, end and elapsed time.
@@ -197,9 +198,8 @@ auto FindInMapOrFailInternal(const Map& container,
                              std::string filename, int line) -> const
     typename Map::mapped_type& {
   auto it = container.find(key);
-  CHECK_S(it != container.end())
-      << "can't find element for key <" << key << "> file:" << filename << ":"
-      << line;
+  CHECK_S(it != container.end()) << "can't find element for key <" << key
+                                 << "> file:" << filename << ":" << line;
   return it->second;
 }
 

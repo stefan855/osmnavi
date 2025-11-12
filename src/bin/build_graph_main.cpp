@@ -604,9 +604,6 @@ int main(int argc, char* argv[]) {
       WriteGraphToCSV(g, VH_MOTORCAR, "/tmp/graph_motorcar.csv");
     });
 
-    pool.AddWork([&g](int thread_idx) {
-      WriteGraphToCSV(g, VH_BICYCLE, "/tmp/graph_bicycle.csv");
-    });
     pool.AddWork(
         [&g](int thread_idx) { WriteLouvainGraph(g, "/tmp/louvain.csv"); });
     pool.AddWork([&meta](int thread_idx) {

@@ -116,7 +116,6 @@ void TestLouvainTriangleGrpah() {
     LOG_S(INFO) << "Computed Delta " << computed_delta;
     // CHECK_EQ_S(expected_delta, computed_delta);
     CHECK_DOUBLE_EQ_S(expected_delta, computed_delta, 0.000000001);
-
   }
 
   // Test quality change when adding node 1 (second triangle) to first triangle.
