@@ -52,6 +52,20 @@ inline void InitLogging(int argc, char* argv[]) {
   loguru::init(argc, argv);
 }
 
+// Compute the relative difference of two double variables.
+// This can be used to compare two double with some tolerance:
+//   if (RelativeDifference(d1, d2) << 0.000001) ...
+// Idea from https://c-faq.com/fp/fpequal.html.
+double RelativeDifference(double a, double b) {
+  double abs_a = std::abs(a);
+  double abs_b = std::abs(b);
+  double capacity = std::max(abs_a, abs_b);
+  return capacity == 0.0 ? 0.0 : std::abs(a - b) / capacity;
+}
+
+#define CHECK_DOUBLE_EQ_S(a, b, tolerance) \
+  CHECK_S(RelativeDifference(a, b) < tolerance) << absl::StrFormat("a=%.19f and b=%.19f are different", a, b);
+
 // Object that measures time execution time of a function and prints information
 // about start, end and elapsed time.
 // Just put the macro FUNC_TIME() on the first line of you function.
