@@ -186,18 +186,15 @@ inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
   GNode& from = g.nodes.at(from_idx);
   if (from.dead_end) return;
   for (GEdge& e : gnode_all_edges(g, from_idx)) {
-    // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(from); ++edge_pos)
-    // { GEdge& e = from.edges[edge_pos];
     if (e.target_idx == to_idx) {
-      // e.bridge = 1;  // TODO: remove
-      CHECK_EQ_S((int)e.type, (int)GEdge::TYPE_UNKNOWN);
-      e.type = GEdge::TYPE_DEADEND_BRIDGE;
+      e.bridge = 1;
     }
   }
 }
 
 // Mark the nodes in the subtree below 'start_node_idx' as 'dead-end' and make
-// sure for dead-end each node there is at least one edge marked 'to_bridge'.
+// sure that for each dead-end node there is at least one edge marked
+// 'to_bridge'.
 //
 // Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
 // Requires that bridge edges at 'start_node_idx' are already marked.
@@ -218,15 +215,9 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
     uint32_t node_pos = nodes.at(pos++);
     // GNode& n = g.nodes.at(node_pos);
     for (GEdge& e : gnode_all_edges(g, node_pos)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { GEdge& e = n.edges[edge_pos];
-      
-      // if (e.bridge || !e.unique_target) continue;
-      if (e.is_deadend_bridge()) continue;
-      CHECK_EQ_S((int)e.type, (int)GEdge::TYPE_UNKNOWN);
-      e.type = GEdge::TYPE_DEADEND_INNER;
+      if (e.bridge) continue;
+      e.dead_end = 1;
       if (!e.unique_target) continue;
-
       GNode& other = g.nodes.at(e.target_idx);
       if (!other.dead_end) {
         other.dead_end = 1;
@@ -235,8 +226,6 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
         // Mark to_bridge edges on the other node.
         bool has_to_bridge = false;
         for (GEdge& e : gnode_all_edges(g, e.target_idx)) {
-          // for (size_t o_pos = 0; o_pos < gnode_total_edges(other); ++o_pos) {
-          // GEdge& e = other.edges[o_pos];
           if (e.target_idx == node_pos) {
             e.to_bridge = true;
             has_to_bridge = true;
@@ -270,7 +259,7 @@ inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
       if (e.to_bridge) {
         pos = e.target_idx;
         break;
-      } else if (e.is_deadend_bridge()) {
+      } else if (e.bridge) {
         // Found the bridge.
         if (node1_idx != nullptr) *node1_idx = pos;
         if (node2_idx != nullptr) *node2_idx = e.target_idx;

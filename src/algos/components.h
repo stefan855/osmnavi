@@ -10,13 +10,13 @@
 // Find large components in undirected graph.
 class ComponentAnalyzer {
  public:
-  ComponentAnalyzer(const Graph& g) : g_(g) {}
+  static constexpr uint32_t kLargeComponentMinSize = 2000;
+
+  ComponentAnalyzer(const Graph& g) : g_(g), label_(g.nodes.size(), INFU32) {}
 
   std::vector<Graph::Component> FindLargeComponents() {
     FUNC_TIMER();
     label_.resize(g_.nodes.size(), INFU32);
-    std::map<uint32_t, uint32_t> comp_size_to_count;
-    std::map<uint32_t, uint32_t> comp_size_to_start_node;
     std::vector<Graph::Component> comps;
 
     uint32_t num_components = 0;
@@ -26,8 +26,6 @@ class ComponentAnalyzer {
         uint32_t size = LabelComponent(n);
         CHECK_GT_S(size, 0);
         comps.push_back({.start_node = n, .size = size});
-        comp_size_to_count[size] += 1;
-        comp_size_to_start_node[size] = n;
       }
     }
 
@@ -36,19 +34,28 @@ class ComponentAnalyzer {
               [](const Graph::Component& a, const Graph::Component& b) {
                 return a.size > b.size;
               });
+
+    LOG_S(INFO) << absl::StrFormat(
+        "%llu components, large  components (>= %u nodes) are kept",
+        comps.size(), kLargeComponentMinSize);
+    size_t pos = 0;
+    size_t cum_comp_size = 0;
+    for (const auto& comp : comps) {
+      cum_comp_size += comp.size;
+      LOG_S(INFO) << absl::StrFormat(
+          "Component %5llu start:%lld size:%u (%.2f%% of %u, cum:%.2f%%)",
+          pos++, GetGNodeIdSafe(g_, comp.start_node), comp.size,
+          (100.0 * comp.size) / g_.nodes.size(), g_.nodes.size(),
+          (100.0 * cum_comp_size) / g_.nodes.size());
+    }
+
     for (size_t pos = 1; pos < comps.size(); ++pos) {
-      if (comps.at(pos).size < Graph::kLargeComponentMinSize) {
+      if (comps.at(pos).size < kLargeComponentMinSize) {
         comps.erase(comps.begin() + pos, comps.end());
         break;
       }
     }
 
-    for (const auto& comp : comps) {
-      LOG_S(INFO) << absl::StrFormat(
-          "Keep component start:%lld size:%u (%.2f%% of %u)",
-          GetGNodeIdSafe(g_, comp.start_node), comp.size,
-          (100.0 * comp.size) / g_.nodes.size(), g_.nodes.size());
-    }
     return comps;
   }
 
@@ -99,15 +106,10 @@ class ComponentAnalyzer {
       const uint32_t node_idx = queue.back();
       queue.pop_back();
       count++;
-      // const GNode& n = g_.nodes.at(node_idx);
       for (const GEdge& e : gnode_all_edges(g_, node_idx)) {
-        // for (uint32_t pos = 0; pos < gnode_total_edges(n); ++pos) {
-        const uint32_t other_idx = e.target_idx;
-        // const uint32_t other_idx = n.edges[pos].target_idx;
-        if (e.unique_target && label_.at(other_idx) == INFU32) {
-          // if (n.edges[pos].unique_target && label_.at(other_idx) == INFU32) {
-          queue.push_back(other_idx);
-          label_.at(other_idx) = start_idx;
+        if (e.unique_target && label_.at(e.target_idx) == INFU32) {
+          queue.push_back(e.target_idx);
+          label_.at(e.target_idx) = start_idx;
         }
       }
     }
@@ -115,5 +117,7 @@ class ComponentAnalyzer {
   }
 
   const Graph& g_;
+  // Same size as g.nodes. All nodes of a component have the same label, which
+  // is the lowest node index of any node in the component.
   std::vector<std::uint32_t> label_;
 };

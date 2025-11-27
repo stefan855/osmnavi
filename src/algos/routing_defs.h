@@ -99,7 +99,7 @@ inline bool RoutingRejectEdge(const Graph& g, const RoutingOptions& opt,
                               std::uint32_t from_node_idx, const GEdge& edge,
                               const WaySharedAttrs& wsa,
                               DIRECTION edge_direction) {
-  if (edge.is_deadend_bridge() && opt.avoid_dead_end && !from_node.dead_end &&
+  if (edge.bridge && opt.avoid_dead_end && !from_node.dead_end &&
       from_node_idx != opt.allow_bridge_node_idx) {
     // Node is in the non-dead-end side of the bridge, so ignore edge and
     // do not enter the dead end.

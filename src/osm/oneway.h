@@ -59,8 +59,11 @@ inline DIRECTION ExtractOnewayValue(std::string_view oneway_val) {
     return DIR_BACKWARD;
   } else if (oneway_val == "no") {
     return DIR_BOTH;
+  } else if (oneway_val == "alternating") {
+    return DIR_ALTERNATING;
+  } else if (oneway_val == "reversible") {
+    return DIR_REVERSIBLE;
   }
-  // For instance "reversible" or "alternating", which are not handled.
   return DIR_MAX;
 }
 
@@ -128,7 +131,7 @@ inline DIRECTION BicycleRoadDirection(const OSMTagHelper& tagh,
       }
     }
   }
-  if (dir != DIR_BOTH && HasCyclewayOppositeTag(tagh, ptags)) {
+  if (!IsDirBoth(dir) && HasCyclewayOppositeTag(tagh, ptags)) {
     if (dir == DIR_MAX) {
       return DIR_BACKWARD;
     }

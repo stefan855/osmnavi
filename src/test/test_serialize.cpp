@@ -62,8 +62,9 @@ GEdge RandomGEdge(uint64_t seed) {
   e.traffic_signal = dist(myrand) % 2;
   e.road_priority = static_cast<GEdge::ROAD_PRIORITY>(
       dist(myrand) % (1llu << NUM_GEDGE_ROAD_PRIORITY_BITS));
-  e.type =
-      static_cast<GEdge::TYPE>(dist(myrand) % (1llu << NUM_GEDGE_TYPE_BITS));
+  e.bridge = dist(myrand) % 2;
+  e.cluster_border_edge = dist(myrand) % 2;
+  e.dead_end = dist(myrand) % 2;
   return e;
 }
 

@@ -168,13 +168,15 @@ void MainLouvainLoop(TGVec* gvec) {
   }
 }
 
-// Store the cluster information in Graph g.
-void AddClustersAndClusterIds(
+// Fill g->clusters and assign cluster ids to nodes.
+void AddClustersAndAssignClusterIds(
     const std::vector<std::unique_ptr<louvain::LouvainGraph>>& gvec, Graph* g) {
   FUNC_TIMER();
   const louvain::LouvainGraph& lg = *gvec.front();
 
   // Add new clusters to clusters vector.
+  CHECK_S(g->clusters.empty());
+  // 'offset' was needed when clusters were done by country in increments.
   const size_t offset = g->clusters.size();
   const size_t num_new = gvec.back()->clusters.size();
 
@@ -200,7 +202,6 @@ void AddClustersAndClusterIds(
 
 }  // namespace
 
-// Experimental.
 inline void ExecuteLouvain(int n_threads, Graph* graph) {
   FUNC_TIMER();
 
@@ -242,30 +243,67 @@ inline void ExecuteLouvain(int n_threads, Graph* graph) {
   TGVec gvec = CreateInitalLouvainGraph(*graph, np_to_louvain_pos);
   np_to_louvain_pos.clear();
   MainLouvainLoop(&gvec);
-  AddClustersAndClusterIds(gvec, graph);
-
-#if 0
-  // For each country, launch a worker that builds the louvain graph.
-  ThreadPool pool;
-  for (size_t ncc = 0; ncc < node_maps.size(); ++ncc) {
-    GNodeToLouvainIdx* np_to_louvain_pos = node_maps.at(ncc);
-    if (np_to_louvain_pos == nullptr) {
-      continue;
-    }
-    node_maps.at(ncc) = nullptr;
-    pool.AddWork([ncc, graph, np_to_louvain_pos](int thread_idx) {
-      TGVec gvec = CreateInitalLouvainGraph(*graph, *np_to_louvain_pos, ncc);
-      delete np_to_louvain_pos;
-      MainLouvainLoop(&gvec);
-      AddClustersAndClusterIds(ncc, gvec, graph);
-    });
-  }
-  pool.Start(n_threads);
-  pool.WaitAllFinished();
-#endif
+  // Create clusters and store cluster_id for each node.
+  AddClustersAndAssignClusterIds(gvec, graph);
 }
 
-inline void UpdateGraphClusterInformation(Graph* g) {
+// Assign cluster_id to the nodes in the subtree below 'start_node_idx'.
+//
+// Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
+inline uint32_t AssignClusterIdsInDeadEnd(Graph* g, uint32_t start_node_idx,
+                                          uint32_t cluster_id) {
+  GNode& start = g->nodes.at(start_node_idx);
+  CHECK_S(start.dead_end);
+  CHECK_EQ_S(start.cluster_id, INVALID_CLUSTER_ID);
+  start.cluster_id = cluster_id;
+  std::vector<uint32_t> nodes({start_node_idx});
+  uint32_t num_nodes = 1;
+  size_t pos = 0;
+  while (pos < nodes.size()) {
+    uint32_t node_pos = nodes.at(pos++);
+    for (GEdge& e : gnode_all_edges(*g, node_pos)) {
+      if (e.bridge) {
+        continue;
+      }
+      CHECK_S(e.dead_end) << GetGNodeIdSafe(*g, node_pos) << "->"
+                          << GetGNodeIdSafe(*g, e.target_idx);
+      GNode& target = g->nodes.at(e.target_idx);
+      if (!e.unique_target || target.cluster_id == cluster_id) {
+        continue;
+      }
+      CHECK_S(target.dead_end);
+      CHECK_EQ_S(target.cluster_id, INVALID_CLUSTER_ID);
+      target.cluster_id = cluster_id;
+      num_nodes++;
+      nodes.push_back(e.target_idx);
+    }
+  }
+  return num_nodes;
+}
+
+inline void AssignClusterIdsInAllDeadEnds(Graph* g) {
+  FUNC_TIMER();
+  for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
+    GNode& n = g->nodes.at(node_pos);
+    for (GEdge& e : gnode_all_edges(*g, node_pos)) {
+      if (!e.bridge) continue;
+      const GNode& target = g->nodes.at(e.target_idx);
+      if (n.dead_end) {  // 'n' on dead end side of bridge.
+        if (target.cluster_id != INVALID_CLUSTER_ID &&
+            n.cluster_id == INVALID_CLUSTER_ID) {
+          AssignClusterIdsInDeadEnd(g, node_pos, target.cluster_id);
+        }
+      } else if (target.dead_end) {  // 'target' on dead end side of bridge.
+        if (target.cluster_id == INVALID_CLUSTER_ID &&
+            n.cluster_id != INVALID_CLUSTER_ID) {
+          AssignClusterIdsInDeadEnd(g, e.target_idx, n.cluster_id);
+        }
+      }
+    }
+  }
+}
+
+inline void UpdateEdgesAndBorderNodes(Graph* g) {
   FUNC_TIMER();
   // Mark cross-cluster edges and count edge types.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
@@ -278,45 +316,45 @@ inline void UpdateGraphClusterInformation(Graph* g) {
     cluster.num_nodes++;
 
     for (GEdge& e : gnode_all_edges(*g, node_pos)) {
-      // for (size_t edge_pos = 0; edge_pos < gnode_total_edges(n); ++edge_pos)
-      // { GEdge& e = n.edges[edge_pos];
       GNode& other = g->nodes.at(e.target_idx);
 
       // By construction, any connection to an non-clustered node must be
       // through a bridge.
-      // CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge != 0);
-      if (e.is_deadend_bridge()) {
+      // CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge !=
+      // 0);
+      if (e.bridge) {
+        // Assign cluster id to all edges in dead end.
         ;  // do nothing, ignore dead-ends.
       } else if (n.cluster_id == other.cluster_id) {
-        // Count inner edges only once (instead of twice). Self-edges are not
-        // counted.
+        // Count inner edges only once (instead of twice). Self-edges are
+        // not counted.
         if (n.node_id > other.node_id) {
           cluster.num_inner_edges++;
         }
-        CHECK_S(e.type == GEdge::TYPE_UNKNOWN ||
-                e.type == GEdge::TYPE_CLUSTER_INNER)
-            << e.type;
-        e.type = GEdge::TYPE_CLUSTER_INNER;
+        // CHECK_S(e.type == GEdge::TYPE_UNKNOWN ||
+        //         e.type == GEdge::TYPE_CLUSTER_INNER)
+        //     << e.type;
+        // e.type = GEdge::TYPE_CLUSTER_INNER;
       } else {
         CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
         cluster.num_outer_edges++;
         n.cluster_border_node = 1;
         other.cluster_border_node = 1;
-        CHECK_EQ_S(e.type, GEdge::TYPE_UNKNOWN);
-        e.type = GEdge::TYPE_CLUSTER_BORDER;
-        // e.cluster_border_edge = 1;
+        // CHECK_EQ_S(e.type, GEdge::TYPE_UNKNOWN);
+        // e.type = GEdge::TYPE_CLUSTER_BORDER;
+        e.cluster_border_edge = 1;
       }
     }
   }
 
-  // Store and count border nodes in a *separate* loop. This avoids issues when
-  // there are parallel edges.
+  // Store and count border nodes in a *separate* loop. This avoids issues
+  // when there are parallel edges.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
     GNode& n = g->nodes.at(node_pos);
     if (!n.cluster_border_node) {
       continue;
     }
-    // CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
+    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
     if (n.cluster_id != INVALID_CLUSTER_ID) {
       GCluster& cluster = g->clusters.at(n.cluster_id);
       cluster.num_border_nodes++;
@@ -331,12 +369,15 @@ inline void UpdateGraphClusterInformation(Graph* g) {
     CHECK_S(std::is_sorted(cluster.border_nodes.begin(),
                            cluster.border_nodes.end()))
         << cluster.cluster_id;
-    // std::sort(cluster.border_nodes.begin(), cluster.border_nodes.end());
+    // std::sort(cluster.border_nodes.begin(),
+    // cluster.border_nodes.end());
   }
+
+  AssignClusterIdsInAllDeadEnds(g);
 }
 
-// Compute all shortest paths between border nodes in a cluster. The results
-// are stored in 'cluster.distances'.
+// Compute all shortest paths between border nodes in a cluster. The
+// results are stored in 'cluster.distances'.
 inline void ComputeShortestClusterPaths(const Graph& g,
                                         const RoutingMetric& metric, VEHICLE vt,
                                         GCluster* cluster) {
@@ -389,8 +430,8 @@ void SortBorderEdges(std::vector<GCluster::EdgeDescriptor>* edges) {
   }
 }
 
-// This finds and adds information about border incoming/outgoing edges, i.e.
-// edges that connect 'cluster' with another cluster at border edges.
+// This finds and adds information about border incoming/outgoing edges,
+// i.e. edges that connect 'cluster' with another cluster at border edges.
 void AddBorderEdgeInformation(
     const Graph& g, const CompactGraph& cg,
     const absl::flat_hash_map<uint32_t, uint32_t>& gnode_to_compact,
@@ -406,7 +447,8 @@ void AddBorderEdgeInformation(
     const GNode& gn = g.nodes.at(gn_idx);
     CHECK_EQ_S(gn.cluster_id, cluster->cluster_id) << gn.node_id;
 
-    // Iterate over edges arriving from another cluster to this border node.
+    // Iterate over edges arriving from another cluster to this border
+    // node.
     for (const FullEdge& gfe : gnode_incoming_edges(g, gn_idx)) {
       CHECK_EQ_S(gfe.target_idx(g), gn_idx);
       uint32_t g_from_idx = gfe.start_idx();
@@ -430,7 +472,8 @@ void AddBorderEdgeInformation(
       }
     }
 
-    // Iterate over edges leaving from this border node to another cluster.
+    // Iterate over edges leaving from this border node to another
+    // cluster.
     for (uint32_t ge_idx = gn.edges_start_pos;
          ge_idx < gn.edges_start_pos + gn.num_forward_edges; ++ge_idx) {
       const GEdge& ge = g.edges.at(ge_idx);
@@ -462,8 +505,8 @@ void AddBorderEdgeInformation(
 }
 }  // namespace
 
-// Compute all shortest paths between border edges in a cluster. The results
-// are stored in 'cluster.edge_distances'.
+// Compute all shortest paths between border edges in a cluster. The
+// results are stored in 'cluster.edge_distances'.
 inline void ComputeShortestClusterEdgePaths(const Graph& g,
                                             const RoutingMetric& metric,
                                             VEHICLE vt, GCluster* cluster) {
@@ -607,10 +650,12 @@ inline void PrintClusterInformation(const Graph& g) {
       "Total border distance entries:%u, %.3f per node in graph", table_size,
       (table_size + 0.0) / g.nodes.size());
   LOG_S(INFO) << absl::StrFormat(
-      "  Sum nodes:%.0f sum border:%.0f sum in-edges:%.0f sum out-edges:%.0f",
+      "  Sum nodes:%.0f sum border:%.0f sum in-edges:%.0f sum "
+      "out-edges:%.0f",
       sum_nodes, sum_border_nodes, sum_in, sum_out);
   LOG_S(INFO) << absl::StrFormat(
-      "  Avg nodes:%.1f avg border:%.1f avg innner-edges:%.1f avg outer-edges:%.1f",
+      "  Avg nodes:%.1f avg border:%.1f avg innner-edges:%.1f avg "
+      "outer-edges:%.1f",
       sum_nodes / stats.size(), sum_border_nodes / stats.size(),
       sum_in / stats.size(), sum_out / stats.size());
   LOG_S(INFO) << absl::StrFormat(
@@ -624,15 +669,17 @@ inline void PrintClusterInformation(const Graph& g) {
   uint64_t total_edges = replacement_edges + (uint64_t)sum_out / 2;
   uint64_t total_nodes = (uint64_t)sum_border_nodes;
   LOG_S(INFO) << absl::StrFormat(
-      "  Cluster-Graph: added edges:%llu total edges:%llu (%.1f%%)  total "
+      "  Cluster-Graph: added edges:%llu total edges:%llu (%.1f%%)  "
+      "total "
       "nodes:%llu (%.1f%%)",
       replacement_edges, total_edges,
       (100.0 * total_edges) / ((sum_in + sum_out) / 2), total_nodes,
       (100.0 * total_nodes) / sum_nodes);
 }
 
-// Go through clusters by increasing cluster id and assign each cluster the
-// lowest color number that hasn't been used by a connected, previous cluster.
+// Go through clusters by increasing cluster id and assign each cluster
+// the lowest color number that hasn't been used by a connected, previous
+// cluster.
 void AssignClusterColors(Graph* g) {
   uint32_t max_color_no = 0;
   std::srand(1);  // Get always the same pseudo-random numbers.
@@ -645,7 +692,8 @@ void AssignClusterColors(Graph* g) {
     for (uint32_t n_idx : cluster->border_nodes) {
       for (const GEdge& e : gnode_all_edges(*g, n_idx)) {
         uint32_t other_cluster_id = g->nodes.at(e.target_idx).cluster_id;
-        // Make sure we don't collide with clusters before the current cluster.
+        // Make sure we don't collide with clusters before the current
+        // cluster.
         if (other_cluster_id != INVALID_CLUSTER_ID &&
             other_cluster_id < cluster_id) {
           uint32_t other_color_no = g->clusters.at(other_cluster_id).color_no;
@@ -668,7 +716,8 @@ void AssignClusterColors(Graph* g) {
       }
     }
 
-    // LOG_S(INFO) << absl::StrFormat("Assign cluster %u color %u", cluster_id,
+    // LOG_S(INFO) << absl::StrFormat("Assign cluster %u color %u",
+    // cluster_id,
     //                                free_color_no);
     cluster->color_no = free_color_no;
     max_color_no = std::max(max_color_no, free_color_no);

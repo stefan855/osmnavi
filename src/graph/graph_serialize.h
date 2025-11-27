@@ -22,15 +22,18 @@
 #define SER_GRAPH_VERSION_NUM 1ull
 #define SER_GRAPH_FILE_HEADER_SIZE (3 * max_varint_bytes)
 
-// A mask that has the least significant 'bitnum' bits set to 1 and everything
-// else set to 0.
-#define BIT_MASK(bitnum) ((1llu << bitnum) - 1)
+#define DECODE_INT(cnt, ptr, dest)           \
+  {                                          \
+    int64_t tmp;                             \
+    cnt += DecodeInt(ptr + cnt, &tmp);       \
+    dest = static_cast<decltype(dest)>(tmp); \
+  }
 
-#define DECODE_UINT(cnt, ptr, dest)      \
-  {                                      \
-    uint64_t utmp;                       \
-    cnt += DecodeUInt(ptr + cnt, &utmp); \
-    dest = utmp;                         \
+#define DECODE_UINT(cnt, ptr, dest)           \
+  {                                           \
+    uint64_t utmp;                            \
+    cnt += DecodeUInt(ptr + cnt, &utmp);      \
+    dest = static_cast<decltype(dest)>(utmp); \
   }
 
 #define DECODE_INT_DIFF(cnt, ptr, prev, dest) \
@@ -79,35 +82,23 @@ inline void EncodeGNode(const GNode& base, const GNode& n, WriteBuff* buff) {
 inline uint32_t DecodeGNode(const GNode& base, const std::uint8_t* ptr,
                             GNode* n) {
   uint32_t cnt = 0;
-  int64_t tmp;
-  uint64_t utmp;
 
-  cnt += DecodeInt(ptr + cnt, &tmp);
-  n->node_id = base.node_id + tmp;
+  DECODE_INT_DIFF(cnt, ptr, base.node_id, n->node_id);
+  DECODE_UINT(cnt, ptr, n->cluster_id);
+  DECODE_INT_DIFF(cnt, ptr, base.edges_start_pos, n->edges_start_pos);
+  DECODE_UINT(cnt, ptr, n->num_forward_edges);
+  DECODE_UINT(cnt, ptr, n->ncc);
+  DECODE_INT(cnt, ptr, n->lat);
+  DECODE_INT(cnt, ptr, n->lon);
 
-  cnt += DecodeUInt(ptr + cnt, &utmp);
-  n->cluster_id = utmp;
-
-  cnt += DecodeInt(ptr + cnt, &tmp);
-  n->edges_start_pos = base.edges_start_pos + tmp;
-
-  cnt += DecodeUInt(ptr + cnt, &utmp);
-  n->num_forward_edges = utmp;
-
-  cnt += DecodeUInt(ptr + cnt, &utmp);
-  n->ncc = utmp;
-
-  cnt += DecodeInt(ptr + cnt, &tmp);
-  n->lat = tmp;
-
-  cnt += DecodeInt(ptr + cnt, &tmp);
-  n->lon = tmp;
-
-  cnt += DecodeUInt(ptr + cnt, &utmp);
-  n->large_component = (utmp & (1 << 3)) > 0;
-  n->cluster_border_node = (utmp & (1 << 2)) > 0;
-  n->dead_end = (utmp & (1 << 1)) > 0;
-  n->is_pedestrian_crossing = (utmp & (1 << 0)) > 0;
+  {
+    uint64_t bitset;
+    cnt += DecodeUInt(ptr + cnt, &bitset);
+    n->large_component = (bitset & (1 << 3)) > 0;
+    n->cluster_border_node = (bitset & (1 << 2)) > 0;
+    n->dead_end = (bitset & (1 << 1)) > 0;
+    n->is_pedestrian_crossing = (bitset & (1 << 0)) > 0;
+  }
 
   return cnt;
 }
@@ -137,7 +128,9 @@ inline void EncodeGEdge(const GEdge& e, WriteBuff* buff) {
   std::uint32_t stop_sign : 1;
   std::uint32_t traffic_signal : 1;
   ROAD_PRIORITY road_priority : NUM_GEDGE_ROAD_PRIORITY_BITS;
-  TYPE type : NUM_GEDGE_TYPE_BITS;
+  std::uint32_t bridge : 1;
+  std::uint32_t cluster_border_edge : 1;
+  std::uint32_t dead_end : 1;
   */
   uint64_t bits = 0;
   bits = (bits << 1) + e.unique_target;
@@ -152,72 +145,39 @@ inline void EncodeGEdge(const GEdge& e, WriteBuff* buff) {
   bits = (bits << 1) + e.stop_sign;
   bits = (bits << 1) + e.traffic_signal;
   bits = (bits << NUM_GEDGE_ROAD_PRIORITY_BITS) + e.road_priority;
-  bits = (bits << NUM_GEDGE_TYPE_BITS) + e.type;
+  bits = (bits << 1) + e.bridge;
+  bits = (bits << 1) + e.cluster_border_edge;
+  bits = (bits << 1) + e.dead_end;
+
+  // bits = (bits << NUM_GEDGE_TYPE_BITS) + e.type;
   EncodeUInt(bits, buff);
 }
 
 inline uint32_t DecodeGEdge(const std::uint8_t* ptr, GEdge* e) {
   uint32_t cnt = 0;
 
+  DECODE_UINT(cnt, ptr, e->target_idx);
+  DECODE_UINT(cnt, ptr, e->way_idx);
+  DECODE_UINT(cnt, ptr, e->distance_cm);
+  DECODE_UINT(cnt, ptr, e->turn_cost_idx);
   {
-    uint64_t utmp;
-    cnt += DecodeUInt(ptr + cnt, &utmp);
-    e->target_idx = utmp;
-
-    cnt += DecodeUInt(ptr + cnt, &utmp);
-    e->way_idx = utmp;
-
-    cnt += DecodeUInt(ptr + cnt, &utmp);
-    e->distance_cm = utmp;
-
-    cnt += DecodeUInt(ptr + cnt, &utmp);
-    e->turn_cost_idx = utmp;
-  }
-
-  {
-    uint64_t bits;
-    cnt += DecodeUInt(ptr + cnt, &bits);
-
-    e->type = static_cast<GEdge::TYPE>(bits & BIT_MASK(NUM_GEDGE_TYPE_BITS));
-    bits = bits >> NUM_GEDGE_TYPE_BITS;
-
-    e->road_priority = static_cast<GEdge::ROAD_PRIORITY>(
-        bits & BIT_MASK(NUM_GEDGE_ROAD_PRIORITY_BITS));
-    bits = bits >> NUM_GEDGE_ROAD_PRIORITY_BITS;
-
-    e->traffic_signal = bits & 1;
-    bits = bits >> 1;
-
-    e->stop_sign = bits & 1;
-    bits = bits >> 1;
-
-    e->complex_turn_restriction_trigger = bits & 1;
-    bits = bits >> 1;
-
-    e->car_label_strange = bits & 1;
-    bits = bits >> 1;
-
-    e->car_label = static_cast<GEdge::RESTRICTION>(
-        bits & BIT_MASK(NUM_GEDGE_RESTRICTION_BITS));
-    bits = bits >> NUM_GEDGE_RESTRICTION_BITS;
-
-    e->both_directions = bits & 1;
-    bits = bits >> 1;
-
-    e->inverted = bits & 1;
-    bits = bits >> 1;
-
-    e->cross_country = bits & 1;
-    bits = bits >> 1;
-
-    e->contra_way = bits & 1;
-    bits = bits >> 1;
-
-    e->to_bridge = bits & 1;
-    bits = bits >> 1;
-
-    e->unique_target = bits & 1;
-    bits = bits >> 1;
+    uint64_t bitset;
+    cnt += DecodeUInt(ptr + cnt, &bitset);
+    DECODE_BITS(bitset, 1, e->dead_end);
+    DECODE_BITS(bitset, 1, e->cluster_border_edge);
+    DECODE_BITS(bitset, 1, e->bridge);
+    DECODE_BITS(bitset, NUM_GEDGE_ROAD_PRIORITY_BITS, e->road_priority);
+    DECODE_BITS(bitset, 1, e->traffic_signal);
+    DECODE_BITS(bitset, 1, e->stop_sign);
+    DECODE_BITS(bitset, 1, e->complex_turn_restriction_trigger);
+    DECODE_BITS(bitset, 1, e->car_label_strange);
+    DECODE_BITS(bitset, NUM_GEDGE_RESTRICTION_BITS, e->car_label);
+    DECODE_BITS(bitset, 1, e->both_directions);
+    DECODE_BITS(bitset, 1, e->inverted);
+    DECODE_BITS(bitset, 1, e->cross_country);
+    DECODE_BITS(bitset, 1, e->contra_way);
+    DECODE_BITS(bitset, 1, e->to_bridge);
+    DECODE_BITS(bitset, 1, e->unique_target);
   }
 
   return cnt;
@@ -559,8 +519,8 @@ struct FileMeta {
             max_varint_bytes;
     size += (g.large_components.size() / NumElementsPerBlock + 1) * 5 *
             max_varint_bytes;
-    size += (g.streetnames.size() / NumElementsPerBlock + 1) * 5 *
-            max_varint_bytes;
+    size +=
+        (g.streetnames.size() / NumElementsPerBlock + 1) * 5 * max_varint_bytes;
     return size;
   }
 
@@ -881,10 +841,9 @@ Graph ReadSerializedGraph(const std::string& filename) {
   ReadBlocks<Graph::Component>(
       meta, meta.entities.at(FileMeta::TYPE_COMPONENTS), filename, &file, &g);
 
-  g.streetnames.resize(
-      meta.entities.at(FileMeta::TYPE_STREETNAMES).rec_count);
-  ReadBlocks<std::string>(
-      meta, meta.entities.at(FileMeta::TYPE_STREETNAMES), filename, &file, &g);
+  g.streetnames.resize(meta.entities.at(FileMeta::TYPE_STREETNAMES).rec_count);
+  ReadBlocks<std::string>(meta, meta.entities.at(FileMeta::TYPE_STREETNAMES),
+                          filename, &file, &g);
 
   // Post processing.
   g.complex_turn_restriction_map =

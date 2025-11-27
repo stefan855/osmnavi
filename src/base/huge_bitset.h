@@ -125,15 +125,11 @@ class HugeBitset {
 
  private:
   void make_available(std::uint64_t bit) {
-    // std::cout << "make available bit " << bit << std::endl;
-    assert(bit <
-           max_bit_no_);  // Fail if bit >= 32b, this is probably an error.
+    assert(bit < max_bit_no_);  // This is probably an error.
     while (bit >= allocated_bits_) {
       blocks_.push_back(
           static_cast<std::uint64_t*>(std::calloc(1, block_size_)));
       allocated_bits_ += bits_per_block_;
-      // std::cout << "alloc block " << blocks_.size() - 1
-      //           << " available bits:" << allocated_bits_ << std::endl;
     }
   }
 

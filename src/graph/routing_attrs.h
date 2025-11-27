@@ -112,7 +112,9 @@ enum DIRECTION : uint8_t {
   DIR_FORWARD = 0,
   DIR_BACKWARD = 1,
   DIR_BOTH = 2,
-  DIR_MAX = 3,
+  DIR_ALTERNATING = 3,
+  DIR_REVERSIBLE = 4,
+  DIR_MAX = 5,
 };
 
 namespace {
@@ -121,6 +123,8 @@ std::vector<std::string_view> DirectionStringVector() {
   v[(size_t)DIR_FORWARD] = "forward";
   v[(size_t)DIR_BACKWARD] = "backward";
   v[(size_t)DIR_BOTH] = "both";
+  v[(size_t)DIR_ALTERNATING] = "alternating";
+  v[(size_t)DIR_REVERSIBLE] = "reversible";
   return v;
 }
 }  // namespace
@@ -143,12 +147,17 @@ inline DIRECTION DirectionToEnum(std::string_view dir_str) {
   return DIR_MAX;
 }
 
+
+inline bool IsDirBoth(DIRECTION dir) {
+  return dir >= DIR_BOTH && dir < DIR_MAX;
+}
+
 inline bool IsDirForward(DIRECTION dir) {
-  return dir == DIR_FORWARD || dir == DIR_BOTH;
+  return dir == DIR_FORWARD || IsDirBoth(dir);
 }
 
 inline bool IsDirBackward(DIRECTION dir) {
-  return dir == DIR_BACKWARD || dir == DIR_BOTH;
+  return dir == DIR_BACKWARD || IsDirBoth(dir);
 }
 
 enum VEHICLE : uint8_t {

@@ -260,7 +260,7 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
         } else {
           color = "black";
         }
-        if (e.is_deadend_bridge()) {
+        if (e.bridge) {
           color = "red";
         } else if (n.dead_end && other.dead_end) {
           color = "green";
@@ -401,9 +401,7 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
     }
 
     for (const GEdge& e : gnode_all_edges(g, node_pos)) {
-      if (!e.unique_target || !e.is_cluster_edge()) {
-        continue;
-      }
+      if (e.bridge || !e.unique_target) continue;
 
       // Ignore half of the edges (and self-edges).
       if (e.target_idx <= node_pos) {

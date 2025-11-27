@@ -540,7 +540,7 @@ class EdgeRouter3 {
     // Check if we can and should travel through a cluster after 'prev'.
     // If previous edge is a cross border edge and the edge doesn't end at
     // target cluster then expand cluster links.
-    if (ctx.opt.hybrid.on && prev_ge.is_cluster_border_edge() &&
+    if (ctx.opt.hybrid.on && prev_ge.cluster_border_edge &&
         expansion_node.cluster_id != ctx.opt.hybrid.target_cluster_id) {
       if (verbosity_ >= 3) {
         LOG_S(INFO) << "EXPA* node:" << expansion_node.node_id

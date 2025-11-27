@@ -208,7 +208,9 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         .car_label_strange = 0,
                         // .car_uturn_allowed = 0,
                         .complex_turn_restriction_trigger = 0,
-                        .type = GEdge::TYPE_UNKNOWN});
+                        .bridge = 0,
+                        .cluster_border_edge = 0,
+                        .dead_end = 0});
     // If this edge crosses clusters, then mark the nodes accordingly.
     if (g->nodes.at(from_idx).cluster_id != g->nodes.at(to_idx).cluster_id) {
       g->nodes.at(from_idx).cluster_border_node = 1;

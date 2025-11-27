@@ -3,7 +3,7 @@
 #include <type_traits>
 #include <vector>
 
-// #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "base/constants.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
@@ -28,8 +28,6 @@ struct TurnCostData {
       : turn_costs(size, dflt) {}
 
   std::vector<uint8_t> turn_costs;
-  // TODO: Use a more memory-efficient data structure than a vector.
-  // SmallVector<uint8_t, 7> turn_costs;
 
   bool operator==(const TurnCostData& other) const {
     return turn_costs == other.turn_costs;
@@ -41,7 +39,7 @@ struct TurnCostData {
 struct NodeTags {
   int64_t node_id : 40 = 0;
 
-  DIRECTION direction : 2 = DIR_MAX;
+  DIRECTION direction : 3 = DIR_MAX;
 
   // Nodes with highway=crossing.
   std::uint32_t bit_crossing : 1 = 0;
@@ -192,7 +190,7 @@ struct GNode {
   // 1 iff the node is in a large component of the graph.
   std::uint32_t large_component : 1;
   // Cluster id number. It is expected (and checked during construction)
-  // that there are less than 2^22 clusters in the planet graph.
+  // that there are less than MAX_CLUSTER_ID clusters in all graphs.
   std::uint32_t cluster_id : NUM_CLUSTER_BITS = INVALID_CLUSTER_ID;
   // 1 iff the node connects to different clusters.
   std::uint32_t cluster_border_node : 1;
@@ -231,13 +229,13 @@ constexpr std::uint32_t MAX_EDGE_DISTANCE_CM_BITS = 32;
 // roughly 1342 km.
 constexpr std::uint32_t MAX_EDGE_DISTANCE_CM =
     (1ull << MAX_EDGE_DISTANCE_CM_BITS) - 1;
-constexpr uint32_t MAX_TURN_COST_IDX_BITS = 18;
+constexpr uint32_t MAX_TURN_COST_IDX_BITS = 16;
 constexpr uint32_t MAX_TURN_COST_IDX = (1ull << MAX_TURN_COST_IDX_BITS) - 1;
 constexpr uint32_t INVALID_TURN_COST_IDX = MAX_TURN_COST_IDX;
 
 constexpr uint32_t NUM_GEDGE_RESTRICTION_BITS = 3;
 constexpr uint32_t NUM_GEDGE_ROAD_PRIORITY_BITS = 3;
-constexpr uint32_t NUM_GEDGE_TYPE_BITS = 3;
+// constexpr uint32_t NUM_GEDGE_TYPE_BITS = 3;
 
 struct GEdge {
   enum RESTRICTION : uint8_t {
@@ -260,6 +258,7 @@ struct GEdge {
     PRIO_SIGNALS = 3,  // Traffic signal on the way to the crossing.
   };
 
+#if 0
   enum TYPE : uint16_t {
     // A bridge edge connects two components in the undirected graph. Removing
     // it creates two non-connected subgraphs. The nodes in the smaller of the
@@ -281,6 +280,7 @@ struct GEdge {
     // but is not allowed once the graph is fully constructed.
     TYPE_UNKNOWN
   };
+#endif
 
   std::uint32_t target_idx;
   std::uint32_t way_idx;
@@ -339,9 +339,21 @@ struct GEdge {
   // Priority of the road when arriving at the target node.
   ROAD_PRIORITY road_priority : NUM_GEDGE_ROAD_PRIORITY_BITS;
 
+  // This edge connects two components in the undirected graph. Removing it
+  // creates two non-connected subgraphs. The nodes in the smaller of the two
+  // subgraphs are all marked 'dead end'. On the other side of the bridge, all
+  // nodes are marked non 'dead-end', unless there is another bridge.
+  // Note: Only bridges connect dead-end with non-dead-end nodes.
+  std::uint32_t bridge : 1;
+  // An edge that connects two border nodes of different clusters.
+  std::uint32_t cluster_border_edge : 1;
+  // 1 iff the edge is in a dead end (excluding the bride), 0 for all other
+  // edges.
+  std::uint32_t dead_end : 1;
+
+#if 0
   // Type of the edge.
   TYPE type : NUM_GEDGE_TYPE_BITS;
-
   bool is_deadend_bridge() const { return type == TYPE_DEADEND_BRIDGE; }
   bool is_deadend_inner_edge() const { return type == TYPE_DEADEND_INNER; }
   bool is_cluster_border_edge() const { return type == TYPE_CLUSTER_BORDER; }
@@ -350,6 +362,7 @@ struct GEdge {
   bool is_cluster_edge() const {
     return type == TYPE_CLUSTER_BORDER || type == TYPE_CLUSTER_INNER;
   }
+#endif
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -429,8 +442,6 @@ struct Graph {
     uint32_t size;
   };
 
-  static constexpr uint32_t kLargeComponentMinSize = 20000;
-
   std::vector<NodeTags> node_tags_sorted;
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<std::string> streetnames;
@@ -455,6 +466,9 @@ struct Graph {
   // Note: this is used during construction only and not stored in the
   // serialized graph.
   std::vector<const uint8_t*> way_node_ids;
+  // Set of osm way ids that have oneway set to "reversible". Entering such a
+  // way cost a significant cost.
+  absl::flat_hash_set<int64_t> way_ids_with_oneway_reversible;
 
   std::size_t FindWayIndex(std::int64_t way_id) const {
     auto it = std::lower_bound(
@@ -601,6 +615,24 @@ inline int64_t GetGWayIdSafe(const Graph& g, uint32_t way_idx) {
     return g.ways.at(way_idx).id;
   }
   return -1;
+}
+
+inline std::string debug_str(const GNode& n) {
+  return absl::StrFormat("\nNode %lld ci:%u cbn:%u nfe:%u de:%u ncc:%u ipc:%u",
+                         n.node_id, n.cluster_id, n.cluster_border_node,
+                         n.num_forward_edges, n.dead_end, n.ncc,
+                         n.is_pedestrian_crossing);
+}
+
+inline std::string debug_str(const Graph& g, const GEdge& e) {
+  return absl::StrFormat(
+      "\nEdge to %lld w:%lld di:%u ut:%u tb:%u cw:%u cc:%u iv:%u bd:%u cl:%u "
+      "ctrt:%u ss:%u ts:%u rp:%u br:%u cbe:%u de:%u",
+      GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx),
+      e.distance_cm, e.unique_target, e.to_bridge, e.contra_way,
+      e.cross_country, e.inverted, e.both_directions, e.car_label,
+      e.complex_turn_restriction_trigger, e.stop_sign, e.traffic_signal,
+      e.road_priority, e.bridge, e.cluster_border_edge, e.dead_end);
 }
 
 inline size_t gnode_edges_start(const Graph& g, uint32_t node_idx) {

@@ -242,10 +242,10 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
 
   if (node_tags != nullptr && node_tags->bit_turning_circle) {
 #if DEBUG_UTURN_ALLOWED
-      LOG_S(INFO) << absl::StrFormat("TT1 Allowed UTurn %lld -> %lld -> %lld",
-                                     GetGNodeIdSafe(g, n3p.node0_idx),
-                                     GetGNodeIdSafe(g, n3p.node1_idx),
-                                     GetGNodeIdSafe(g, n3p.node2_idx));
+    LOG_S(INFO) << absl::StrFormat("TT1 Allowed UTurn %lld -> %lld -> %lld",
+                                   GetGNodeIdSafe(g, n3p.node0_idx),
+                                   GetGNodeIdSafe(g, n3p.node1_idx),
+                                   GetGNodeIdSafe(g, n3p.node2_idx));
 #endif
     return true;
   }
@@ -267,10 +267,10 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   // Special case: Way is an area and both edges are on this way.
   if (way0.area && edge0.way_idx == n3p.edge1(g).way_idx) {
 #if DEBUG_UTURN_ALLOWED
-      LOG_S(INFO) << absl::StrFormat("TT2 Allowed UTurn %lld -> %lld -> %lld",
-                                     GetGNodeIdSafe(g, n3p.node0_idx),
-                                     GetGNodeIdSafe(g, n3p.node1_idx),
-                                     GetGNodeIdSafe(g, n3p.node2_idx));
+    LOG_S(INFO) << absl::StrFormat("TT2 Allowed UTurn %lld -> %lld -> %lld",
+                                   GetGNodeIdSafe(g, n3p.node0_idx),
+                                   GetGNodeIdSafe(g, n3p.node1_idx),
+                                   GetGNodeIdSafe(g, n3p.node2_idx));
 #endif
     return true;
   }
@@ -279,10 +279,10 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   if (VehicleBlockedAtNode(node_tags) &&
       edge0.way_idx == n3p.edge1(g).way_idx) {
 #if DEBUG_UTURN_ALLOWED
-      LOG_S(INFO) << absl::StrFormat("TT3 Allowed UTurn %lld -> %lld -> %lld",
-                                     GetGNodeIdSafe(g, n3p.node0_idx),
-                                     GetGNodeIdSafe(g, n3p.node1_idx),
-                                     GetGNodeIdSafe(g, n3p.node2_idx));
+    LOG_S(INFO) << absl::StrFormat("TT3 Allowed UTurn %lld -> %lld -> %lld",
+                                   GetGNodeIdSafe(g, n3p.node0_idx),
+                                   GetGNodeIdSafe(g, n3p.node1_idx),
+                                   GetGNodeIdSafe(g, n3p.node2_idx));
 #endif
     return true;
   }
@@ -300,10 +300,10 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   // Vehicle can't continue except for returning.
   if (!found_continuation) {
 #if DEBUG_UTURN_ALLOWED
-      LOG_S(INFO) << absl::StrFormat("TT4 Allowed UTurn %lld -> %lld -> %lld",
-                                     GetGNodeIdSafe(g, n3p.node0_idx),
-                                     GetGNodeIdSafe(g, n3p.node1_idx),
-                                     GetGNodeIdSafe(g, n3p.node2_idx));
+    LOG_S(INFO) << absl::StrFormat("TT4 Allowed UTurn %lld -> %lld -> %lld",
+                                   GetGNodeIdSafe(g, n3p.node0_idx),
+                                   GetGNodeIdSafe(g, n3p.node1_idx),
+                                   GetGNodeIdSafe(g, n3p.node2_idx));
 #endif
     return true;
   }
@@ -311,10 +311,10 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   // are only restricted edges to continue on.
   if (edge0.car_label == GEdge::LABEL_FREE && !found_free_continuation) {
 #if DEBUG_UTURN_ALLOWED
-      LOG_S(INFO) << absl::StrFormat("TT5 Allowed UTurn %lld -> %lld -> %lld",
-                                     GetGNodeIdSafe(g, n3p.node0_idx),
-                                     GetGNodeIdSafe(g, n3p.node1_idx),
-                                     GetGNodeIdSafe(g, n3p.node2_idx));
+    LOG_S(INFO) << absl::StrFormat("TT5 Allowed UTurn %lld -> %lld -> %lld",
+                                   GetGNodeIdSafe(g, n3p.node0_idx),
+                                   GetGNodeIdSafe(g, n3p.node1_idx),
+                                   GetGNodeIdSafe(g, n3p.node2_idx));
 #endif
     return true;
   }
@@ -326,62 +326,6 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
 #endif
   return false;
 }
-
-#if 0
-inline void ProcessSimpleTurnRestrictions(
-    const Graph& g, const IndexedTurnRestrictions& indexed_trs, VEHICLE vt,
-    uint32_t start_node_idx, uint32_t edge_idx, TurnCostData* tcd) {
-  const GEdge& e = g.edges.at(edge_idx);
-  const TurnRestriction::TREdge trigger_key = {.from_node_idx = start_node_idx,
-                                               .way_idx = e.way_idx,
-                                               .to_node_idx = e.target_idx};
-  auto iter = indexed_trs.map_to_first.find(trigger_key);
-  if (iter == indexed_trs.map_to_first.end()) {
-    return;
-  }
-  CHECK_S(indexed_trs.sorted_trs.at(iter->second).GetTriggerKey() ==
-          trigger_key);
-
-  const GNode& via_node = g.nodes.at(e.target_idx);
-  const uint32_t num_edges = via_node.num_forward_edges;
-  CHECK_EQ_S(num_edges, tcd->turn_costs.size())
-      << GetGNodeIdSafe(g, e.target_idx);
-
-  for (size_t trs_pos = iter->second;
-       trs_pos < indexed_trs.sorted_trs.size() &&
-       indexed_trs.sorted_trs.at(trs_pos).GetTriggerKey() == trigger_key;
-       ++trs_pos) {
-    const TurnRestriction& tr = indexed_trs.sorted_trs.at(trs_pos);
-    CHECK_EQ_S(tr.path.size(), 2) << tr.relation_id;
-
-    bool found = false;
-    for (size_t offset = 0; offset < num_edges; ++offset) {
-      const GEdge& e = g.edges.at(via_node.edges_start_pos + offset);
-      CHECK_S(!e.inverted) << tr.relation_id;
-
-      // Does the edge match the second leg of the turn restriction?
-      if (e.way_idx == tr.path.back().way_idx &&
-          e.target_idx == tr.path.back().to_node_idx) {
-        found = true;
-        if (tr.forbidden) {
-          // Remove the bit belonging to the edge.
-          tcd->turn_costs.at(offset) = TURN_COST_INFINITY_COMPRESSED;
-        } else {
-          for (size_t offset2 = 0; offset2 < num_edges; ++offset2) {
-            tcd->turn_costs.at(offset) =
-                (offset2 == offset ? TURN_COST_ZERO_COMPRESSED
-                                   : TURN_COST_INFINITY_COMPRESSED);
-          }
-        }
-      }
-    }
-    if (!found) {
-      LOG_S(INFO) << absl::StrFormat(
-          "Warning, no match found for turn restriction %lld", tr.relation_id);
-    }
-  }
-}
-#endif
 
 // Check if there are turn restrictions matching the first leg in n3p. Use this
 // to determine if the second leg in n3p is allowed or not.
@@ -544,6 +488,20 @@ uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   return num_unique * 1500;
 }
 
+// The cost that occurs when entering a new way, i.e. when turning from way A onto way B. Currently this is used only for ways with oneway 'reversible', i.e. alternating traffic over a long period.
+uint32_t EnterNewWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
+  if (vt != VH_FOOT) {
+    const uint32_t way_idx0 = n3p.full_edge0().gedge(g).way_idx;
+    const uint32_t way_idx1 = n3p.full_edge1().gedge(g).way_idx;
+    if (way_idx0 != way_idx1 &&
+        g.way_ids_with_oneway_reversible.contains(way_idx1) &&
+        !g.way_ids_with_oneway_reversible.contains(way_idx0)) {
+      return 30 * 60 * 1000;  // 30 minutes.
+    }
+  }
+  return 0;
+}
+
 // Compute the (uncompressed) turn cost for the specific turn 'n3p'.
 inline uint32_t ComputeTurnCostForN3Path(
     const Graph& g, VEHICLE vt, const IndexedTurnRestrictions& indexed_trs,
@@ -597,12 +555,16 @@ inline uint32_t ComputeTurnCostForN3Path(
   // 1) Time loss because of node (stop sign, signals, etc.)
   // 2) Time loss because of curve.
   // 3) Real crossing
+  // 4) Entering a new way. Currently this has costs of 30m when entering a way
+  // with direction 'reversible'.
 
   const uint32_t cost_node_tags = NodeTagsCost(g, n3p);
   const uint32_t cost_crossing = CrossingCost(g, vt, n3p);
   const uint32_t cost_curve = CurveCost(g, vt, n3p);
+  const uint32_t cost_enter_new_way = EnterNewWayCost(g, vt, n3p);
 
-  return std::max(cost_node_tags, std::max(cost_curve, cost_crossing));
+  return std::max(
+      {cost_node_tags, cost_curve, cost_crossing, cost_enter_new_way});
 }
 
 }  // namespace

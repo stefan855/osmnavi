@@ -39,6 +39,7 @@ struct WayContext {
   GWay way;
   const OSMPBF::Way& osm_way;
   const ParsedTagInfo pti;
+  DIRECTION direction;
   PerCountryConfig::ConfigValue config_forw;
   PerCountryConfig::ConfigValue config_backw;
 };
@@ -58,6 +59,7 @@ void ValidateGraph(const Graph& g) {
       // Nodes are sorted by increasing OSM node_id.
       CHECK_GT_S(node.node_id, g.nodes.at(node_idx - 1).node_id) << node_idx;
     }
+
     // No dup edges.
     const uint32_t num_all_edges = gnode_num_all_edges(g, node_idx);
     for (uint32_t off1 = 0; off1 < num_all_edges; ++off1) {
@@ -76,6 +78,32 @@ void ValidateGraph(const Graph& g) {
           ABORT_S();
         }
       }
+    }
+
+    // Check consistency of some of the edge labels.
+    for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+      // Inverted edges don't have "good" attributes. They should only be used
+      // to find nodes connected by incoming edges.
+      // TODO: It is not clear if it should stay like this. As long as we don't
+      // do backward shortest path search, it seems it isn't needed.
+      // if (e.inverted) continue;
+      const GNode& target = g.nodes.at(e.target_idx);
+
+      // if one or both endpoints are in a deadend, the the edge is marked
+      // 'dead_end' or 'bridge'.
+      CHECK_EQ_S(node.dead_end | target.dead_end, e.bridge | e.dead_end)
+          << debug_str(node) << debug_str(target) << debug_str(g, e);
+
+      // if one endpoint is in a dead end and the other not, then it must be an
+      // bridge and vice versa.
+      CHECK_EQ_S(node.dead_end != target.dead_end, e.bridge);
+
+      // A bridge can't be a cluster border edge.
+      CHECK_S(!(e.cluster_border_edge && e.bridge));
+
+      // Only cluster border edges connect different clusters.
+      CHECK_S(e.cluster_border_edge || node.cluster_id == target.cluster_id)
+          << debug_str(node) << debug_str(target);
     }
   }
 }
@@ -433,13 +461,11 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   RoutingAttrs ra_forw = wc.config_forw.dflt;
   RoutingAttrs ra_backw = wc.config_backw.dflt;
 
-  const DIRECTION direction =
-      CarRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.pti.tags());
-  if (direction == DIR_MAX) {
+  if (wc.direction == DIR_MAX) {
     return;  // For instance wrong vehicle type or some tagging error.
   }
-  ra_forw.dir = IsDirForward(direction);
-  ra_backw.dir = IsDirBackward(direction);
+  ra_forw.dir = IsDirForward(wc.direction);
+  ra_backw.dir = IsDirBackward(wc.direction);
   CarRoadSurface(tagh, wc.way.id, wc.pti.tags(), &ra_forw, &ra_backw);
 
   {
@@ -453,8 +479,8 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
 
   bool acc_forw = RoutableAccess(ra_forw.access);
   bool acc_backw = RoutableAccess(ra_backw.access);
-  if ((!IsDirForward(direction) || !acc_forw) &&
-      (!IsDirBackward(direction) || !acc_backw)) {
+  if ((!IsDirForward(wc.direction) || !acc_forw) &&
+      (!IsDirBackward(wc.direction) || !acc_backw)) {
     if (acc_forw || acc_backw) {
       LOG_S(INFO) << absl::StrFormat(
           "way %lld has no valid direction for cars\n%s", wc.way.id,
@@ -471,12 +497,18 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   ra_forw.maxspeed = LimitedMaxspeed(wc.config_forw, maxspeed_forw);
   ra_backw.maxspeed = LimitedMaxspeed(wc.config_backw, maxspeed_backw);
 
+  if (wc.direction == DIR_ALTERNATING) {
+    // Simulate this by assuming that we can only drive 1/3 of the speed.
+    ra_forw.maxspeed = ra_forw.maxspeed / 3;
+    ra_backw.maxspeed = ra_backw.maxspeed / 3;
+  }
+
   // Store final routing attributes.
-  if (acc_forw && IsDirForward(direction) && ra_forw.maxspeed > 0) {
+  if (acc_forw && IsDirForward(wc.direction) && ra_forw.maxspeed > 0) {
     wsa->ra[RAinWSAIndex(VH_MOTORCAR, DIR_FORWARD)] = ra_forw;
   }
 
-  if (acc_backw && IsDirBackward(direction) && ra_backw.maxspeed > 0) {
+  if (acc_backw && IsDirBackward(wc.direction) && ra_backw.maxspeed > 0) {
     wsa->ra[RAinWSAIndex(VH_MOTORCAR, DIR_BACKWARD)] = ra_backw;
   }
 }
@@ -642,7 +674,9 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     return;  // Not interesting for routing, ignore.
   }
 
-  WayContext wc = {.osm_way = osm_way, .pti = ParseTags(tagh, osm_way)};
+  WayContext wc = {.osm_way = osm_way,
+                   .pti = ParseTags(tagh, osm_way),
+                   .direction = DIR_MAX};
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
   wc.way.area = tagh.GetValue(osm_way, "area") == "yes";
@@ -683,8 +717,12 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
       rural.im_backw);
 
   if (meta->opt.vt == VH_MOTORCAR) {
+    wc.direction =
+        CarRoadDirection(tagh, wc.way.highway_label, wc.way.id, wc.pti.tags());
     ComputeCarWayRoutingData(tagh, wc, &wsa);
   } else if (meta->opt.vt == VH_BICYCLE) {
+    wc.direction = BicycleRoadDirection(tagh, wc.way.highway_label, wc.way.id,
+                                        wc.pti.tags());
     ABORT_S() << "Unsupported vehicle type " << meta->opt.vt;
     // TODO
     // ComputeBicycleWayRoutingData(tagh, wc, &wsa);
@@ -704,6 +742,9 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   // Run modifications of global data behind a mutex.
   {
     std::unique_lock<std::mutex> l(mut);
+    if (wc.direction == DIR_REVERSIBLE) {
+      meta->graph.way_ids_with_oneway_reversible.insert(wc.way.id);
+    }
     uint8_t* node_ids_buff =
         meta->graph.unaligned_pool_.AllocBytes(node_ids_wb.used());
     memcpy(node_ids_buff, node_ids_wb.base_ptr(), node_ids_wb.used());
@@ -711,15 +752,6 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
     std::string_view streetname = tagh.GetValue(wc.osm_way, "name");
     wc.way.streetname_idx = streetname_deduper->Add(std::string(streetname));
-    /*
-    if (!streetname.empty()) {
-      // allocate a 0-terminated char*.
-      wc.way.streetname =
-          (char*)meta->graph.unaligned_pool_.AllocBytes(streetname.size() + 1);
-      memcpy(wc.way.streetname, streetname.data(), streetname.size());
-      wc.way.streetname[streetname.size()] = '\0';
-    }
-    */
 
     MarkSeenAndNeeded(meta, way_nodes, osm_way, stats);
 
@@ -772,7 +804,9 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.stop_sign = 0;
   e.traffic_signal = 0;
   e.road_priority = GEdge::PRIO_UNSET;
-  e.type = GEdge::TYPE_UNKNOWN;
+  e.bridge = 0;
+  e.cluster_border_edge = 0;
+  e.dead_end = 0;
 
   const GWay& way = g.ways.at(way_idx);
   if ((way.priority_road_forward && !contra_way) ||
@@ -834,6 +868,7 @@ void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
       });
   // Make node table searchable, so we can look up lat/lon by node_id.
   node_table->Sort();
+  // Sort the node tags.
   std::sort(meta->graph.node_tags_sorted.begin(),
             meta->graph.node_tags_sorted.end(),
             [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
@@ -1273,35 +1308,29 @@ void ComputeShortestEdgePathsInAllClusters(GraphMetaData* meta) {
 void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   FUNC_TIMER();
   build_clusters::ExecuteLouvain(opt.n_threads, &meta->graph);
-  build_clusters::UpdateGraphClusterInformation(&meta->graph);
+  build_clusters::UpdateEdgesAndBorderNodes(&meta->graph);
 
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::PrintClusterInformation(meta->graph);
+  build_clusters::AssignClusterColors(&(meta->graph));
 
+  /*
   ComputeShortestPathsInAllClusters(meta);
   ComputeShortestEdgePathsInAllClusters(meta);
-
   if (meta->opt.check_shortest_cluster_paths) {
     // Check if astar and dijkstra find the same shortest paths.
     build_clusters::CheckShortestClusterPaths(meta->graph, meta->opt.n_threads);
   }
-  build_clusters::AssignClusterColors(&(meta->graph));
+  */
 }
 
-void AssignInvalidClusterTypeToEdges(Graph* g) {
-  for (size_t node_idx = 0; node_idx < g->nodes.size(); ++node_idx) {
-    const GNode& n = g->nodes.at(node_idx);
-    for (GEdge& e : gnode_all_edges(*g, node_idx)) {
-      const GNode& other = g->nodes.at(e.target_idx);
-      if (e.type == GEdge::TYPE_UNKNOWN) {
-        // We haven't set the edge type yet. This must be an edge outside valid
-        // clusters by construction, so check-fail if it something else.
-        CHECK_S(n.cluster_id == INVALID_CLUSTER_ID ||
-                other.cluster_id == INVALID_CLUSTER_ID)
-            << n.node_id << "->" << other.node_id;
-        e.type = GEdge::TYPE_CLUSTER_INVALID;
-      }
-    }
+void ComputeClusterPaths(const BuildGraphOptions& opt, GraphMetaData* meta) {
+  FUNC_TIMER();
+  ComputeShortestPathsInAllClusters(meta);
+  ComputeShortestEdgePathsInAllClusters(meta);
+  if (meta->opt.check_shortest_cluster_paths) {
+    // Check if astar and dijkstra find the same shortest paths.
+    build_clusters::CheckShortestClusterPaths(meta->graph, meta->opt.n_threads);
   }
 }
 
@@ -1334,9 +1363,13 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       stats->num_ways_no_maxspeed += 1;
     }
     stats->num_ways_has_country += w.uniform_country;
-    stats->num_ways_has_streetname += w.streetname_idx > 0 ? 0 : 1;
-    // stats->num_ways_streetname_bytes +=
-    //     w.streetname == nullptr ? 0 : strlen(w.streetname) + 1;
+    {
+      const std::string& s = g.streetnames.at(w.streetname_idx);
+      if (!s.empty()) {
+        stats->num_ways_has_streetname += 1;
+        stats->num_ways_streetname_bytes += s.size() + 1;
+      }
+    }
     stats->num_ways_oneway_car +=
         (wsa.ra[0].access == ACC_NO) != (wsa.ra[1].access == ACC_NO);
     if ((FreeAccess(wsa.ra[0].access) && RestrictedAccess(wsa.ra[1].access)) ||
@@ -1344,6 +1377,12 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       LOG_S(INFO) << "Way has mixed restrictions: " << w.id;
       stats->num_ways_mixed_restricted_car += 1;
     }
+  }
+  stats->num_ways_unique_streetnames = g.streetnames.size();
+  stats->num_ways_unique_streetname_bytes = 0;
+  for (const std::string& s : g.streetnames) {
+    // Count bytes of string and terminating 0 byte.
+    stats->num_ways_unique_streetname_bytes += s.size() + 1;
   }
 
   std::vector<uint64_t> num_forwards(MAX_NUM_EDGES_OUT + 1, 0);
@@ -1393,7 +1432,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
       }
       num_inverted_edges += e.inverted;
       num_forward_edges += (e.inverted == 0);
-      stats->num_edges_bridge += e.is_deadend_bridge();
+      stats->num_edges_bridge += e.bridge;
 
       stats->num_edges_low_priority +=
           (!e.inverted && (e.road_priority == GEdge::PRIO_LOW));
@@ -1549,9 +1588,15 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  g.ways.size() - stats.num_ways_has_country);
   LOG_S(INFO) << absl::StrFormat("  Has streetname:   %12lld",
                                  stats.num_ways_has_streetname);
+  LOG_S(INFO) << absl::StrFormat("  Unique streetnames:%11lld",
+                                 stats.num_ways_unique_streetnames);
   LOG_S(INFO) << absl::StrFormat(
       "  Avg streetname bytes:%9.2f",
       (double)stats.num_ways_streetname_bytes / stats.num_ways_has_streetname);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Avg unique streetn bytes:%2.2f",
+      (double)stats.num_ways_unique_streetname_bytes /
+          stats.num_ways_unique_streetnames);
   LOG_S(INFO) << absl::StrFormat("  Oneway for cars:  %12lld",
                                  stats.num_ways_oneway_car);
   LOG_S(INFO) << absl::StrFormat("  Mixed restr cars: %12lld",
@@ -1665,6 +1710,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
   // LOG_S(INFO) << absl::StrFormat("  Cross clust restr+de:%9lld",
   //                           stats.num_cross_cluster_restricted_dead_end);
 
+  const uint64_t streetname_bytes = g.streetnames.size() * sizeof(std::string) +
+                                    stats.num_ways_unique_streetname_bytes;
   LOG_S(INFO) << "========= Memory Stats ===========";
   LOG_S(INFO) << absl::StrFormat("Bitset memory:      %12.2f MB",
                                  (meta.way_nodes_seen->NumUsedBytes() +
@@ -1680,10 +1727,13 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  (way_bytes + way_added_bytes) / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Way shared attrs:   %12.2f MB",
                                  way_shared_attrs_bytes / 1000000.0);
-  LOG_S(INFO) << absl::StrFormat("Total graph memory: %12.2f MB",
-                                 (node_bytes + edge_memory + way_bytes +
-                                  way_added_bytes + way_shared_attrs_bytes) /
-                                     1000000.0);
+  LOG_S(INFO) << absl::StrFormat("Way streetnames:    %12.2f MB",
+                                 streetname_bytes / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat(
+      "Total graph memory: %12.2f MB",
+      (node_bytes + edge_memory + way_bytes + way_added_bytes +
+       way_shared_attrs_bytes + streetname_bytes) /
+          1000000.0);
 }
 
 void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
@@ -1976,6 +2026,7 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
   std::vector<std::vector<uint32_t>> vmappings;
   DeDuperWithIds<TurnCostData>::MergeSort(deduper_per_thread, &(g.turn_costs),
                                           &vmappings);
+  CHECK_LT_S(g.turn_costs.size(), MAX_TURN_COST_IDX);
   uint32_t count = 0;
   for (uint32_t from_idx = 0; from_idx < g.nodes.size(); ++from_idx) {
     const GNode& from_node = g.nodes.at(from_idx);
@@ -2062,10 +2113,10 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 
   MarkCrossingNodes(&meta);
   LabelEdgesFromNodeTags(&meta);
-  ComputeAllTurnCosts(&meta);
-
   ClusterGraph(meta.opt, &meta);
-  AssignInvalidClusterTypeToEdges(&meta.graph);
+
+  ComputeAllTurnCosts(&meta);
+  ComputeClusterPaths(meta.opt, &meta);
 
   // Add up all the per thread stats.
   meta.global_stats = CollectThreadStats(*meta.thread_stats);

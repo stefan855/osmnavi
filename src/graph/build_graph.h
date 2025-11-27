@@ -95,6 +95,8 @@ struct BuildGraphStats {
   int64_t num_ways_has_country = 0;
   int64_t num_ways_has_streetname = 0;
   int64_t num_ways_streetname_bytes = 0;
+  int64_t num_ways_unique_streetnames = 0;
+  int64_t num_ways_unique_streetname_bytes = 0;
   int64_t num_ways_oneway_car = 0;
   // Count ways with restricted access in one direction and free access in the
   // other direction.
@@ -177,6 +179,8 @@ struct BuildGraphStats {
     num_ways_has_country += other.num_ways_has_country;
     num_ways_has_streetname += other.num_ways_has_streetname;
     num_ways_streetname_bytes += other.num_ways_streetname_bytes;
+    num_ways_unique_streetnames += other.num_ways_unique_streetnames;
+    num_ways_unique_streetname_bytes += other.num_ways_unique_streetname_bytes;
     num_ways_oneway_car += other.num_ways_oneway_car;
     num_ways_mixed_restricted_car += other.num_ways_mixed_restricted_car;
 
