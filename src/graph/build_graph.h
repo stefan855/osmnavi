@@ -114,12 +114,15 @@ struct BuildGraphStats {
   int64_t num_cluster_outside_edges = 0;
   int64_t num_cluster_border_in_edges = 0;
   int64_t num_cluster_border_out_edges = 0;
+  int64_t num_cluster_valid_paths = 0;
+  int64_t sum_cluster_valid_path_nodes = 0;
 
   int64_t num_cluster_border_edges_restr = 0;
 
   int64_t num_nodes_in_small_component = 0;
   int64_t num_nodes_no_country = 0;
   int64_t num_nodes_simple_tr_via = 0;
+  int64_t num_nodes_cluster_skeleton = 0;
 
   static const uint32_t num_nodes_unique_edges_dim = 7;
   int64_t num_nodes_unique_edges[num_nodes_unique_edges_dim] = {0};  // All 0
@@ -137,6 +140,7 @@ struct BuildGraphStats {
   int64_t num_edges_low_priority = 0;
   int64_t num_edges_high_priority = 0;
   int64_t num_edges_bridge = 0;
+  int64_t num_edges_cluster_skeleton = 0;
   int64_t max_edges = 0;
   int64_t max_edges_out = 0;
   int64_t max_edges_inverted = 0;
@@ -198,11 +202,15 @@ struct BuildGraphStats {
     num_cluster_border_in_edges += other.num_cluster_border_in_edges;
     num_cluster_border_out_edges += other.num_cluster_border_out_edges;
 
+    num_cluster_valid_paths += other.num_cluster_valid_paths;
+    sum_cluster_valid_path_nodes += other.sum_cluster_valid_path_nodes;
+
     num_cluster_border_edges_restr += other.num_cluster_border_edges_restr;
 
     num_nodes_in_small_component += other.num_nodes_in_small_component;
     num_nodes_no_country += other.num_nodes_no_country;
     num_nodes_simple_tr_via += other.num_nodes_simple_tr_via;
+    num_nodes_cluster_skeleton += other.num_nodes_cluster_skeleton;
 
     for (size_t i = 0; i < num_nodes_unique_edges_dim; ++i) {
       num_nodes_unique_edges[i] += other.num_nodes_unique_edges[i];
@@ -223,6 +231,7 @@ struct BuildGraphStats {
     num_edges_low_priority += other.num_edges_low_priority;
     num_edges_high_priority += other.num_edges_high_priority;
     num_edges_bridge += other.num_edges_bridge;
+    num_edges_cluster_skeleton += other.num_edges_cluster_skeleton;
     max_edges = std::max(max_edges, other.max_edges);
     max_edges_out = std::max(max_edges_out, other.max_edges_out);
     max_edges_inverted +=

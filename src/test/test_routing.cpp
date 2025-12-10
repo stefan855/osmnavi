@@ -97,7 +97,7 @@ Graph CreateEdgeClusterGraph(bool both_dirs) {
   for (GCluster& cl : g.clusters) {
     build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
                                                 VH_MOTORCAR, &cl);
-    build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
+    build_clusters::ComputeShortestClusterEdgePaths(&g, RoutingMetricDistance(),
                                                     VH_MOTORCAR, &cl);
   }
 
@@ -251,8 +251,9 @@ Graph CreateGraphWithDeadEnds(bool both_dirs) {
   AddEdge(G, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
-  g.large_components.push_back({.start_node = A, .size = 7});
-  ApplyTarjan(g);
+  g.large_components.push_back({{A, B, C, D, E, F, G}});
+
+  ApplyTarjan(&g);
   return g;
 }
 
@@ -627,7 +628,7 @@ Graph CreateClusterGraph(bool both_dirs) {
   for (GCluster& cl : g.clusters) {
     build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
                                                 VH_MOTORCAR, &cl);
-    build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
+    build_clusters::ComputeShortestClusterEdgePaths(&g, RoutingMetricDistance(),
                                                     VH_MOTORCAR, &cl);
   }
 
@@ -715,7 +716,7 @@ Graph CreateClusterGraphDoubleEdge(bool both_dirs) {
   for (GCluster& cl : g.clusters) {
     build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
                                                 VH_MOTORCAR, &cl);
-    build_clusters::ComputeShortestClusterEdgePaths(g, RoutingMetricDistance(),
+    build_clusters::ComputeShortestClusterEdgePaths(&g, RoutingMetricDistance(),
                                                     VH_MOTORCAR, &cl);
   }
 

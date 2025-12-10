@@ -268,6 +268,14 @@ inline std::string_view AccessToString(ACCESS acc) {
   return VECTOR_AT(v, (size_t)acc);
 }
 
+inline std::string_view AccessToStringSafe(ACCESS acc) {
+  if (acc >= ACC_MAX) {
+    return "n/a";
+  } else {
+    return AccessToString(acc);
+  }
+}
+
 inline ACCESS AccessToEnum(std::string_view acc_str) {
   if (acc_str.empty()) {
     return ACC_MAX;
@@ -634,7 +642,7 @@ static const std::vector<BarrierDef> g_barrier_def_vector = {
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency"},
     {BARRIER_HORSE_STILE, "horse_stile", "horse,foot"},
     {BARRIER_KERB, "kerb", "foot,bicycle,wheelchair"},
-    {BARRIER_KISSING_GATE, "kissing_gate", "foot,bicycle,horse"},
+    {BARRIER_KISSING_GATE, "kissing_gate", "foot,bicycle"},
     {BARRIER_LIFT_GATE, "lift_gate",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
      "emergency"},

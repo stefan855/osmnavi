@@ -242,8 +242,6 @@ inline void SetBarrierRestrictions(VEHICLE vt, const ParsedTagInfo& pti,
 
   node_tags->acc_forw = apd.acc_forw;
   node_tags->acc_backw = apd.acc_backw;
-  node_tags->has_access_restriction =
-      (node_tags->acc_forw != ACC_YES || node_tags->acc_backw != ACC_YES);
 }
 
 }  // namespace

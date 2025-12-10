@@ -45,8 +45,10 @@ class SingleSourceEdgeDijkstra {
   // containing all the added elements for the same base position, using the
   // attribute "next".
   struct VisitedEdge {
-    std::uint32_t min_weight;  // The minimal weight seen so far.
-    std::uint32_t from_v_idx;  // Previous edge entry.
+    // The minimal weight seen so far. INFU32 if unused.
+    std::uint32_t min_weight; 
+    // Previous edge entry. INFU32 if prevous entry does not exist.
+    std::uint32_t from_v_idx;
     std::uint32_t active_ctr_id : 30;
     std::uint32_t in_target_restricted_access_area : 1;
     std::uint32_t done : 1;  // 1 <=> node has been finalized.
@@ -333,6 +335,14 @@ class SingleSourceEdgeDijkstra {
     return cg.edges().at(GetBaseIdx(cg.edges().size(), v_idx));
   }
 
+  inline uint32_t GetBaseIdx(size_t cg_edges_size, uint32_t v_idx) const {
+    if (v_idx < cg_edges_size) return v_idx;
+    while (vis_.at(v_idx).next >= cg_edges_size) {
+      v_idx = vis_.at(v_idx).next;
+    }
+    return vis_.at(v_idx).next;
+  }
+
  private:
   static constexpr uint32_t NO_ACTIVE_CTR_ID = 0;
   // This might exist multiple times for each node, when a node gets
@@ -414,14 +424,6 @@ class SingleSourceEdgeDijkstra {
     // Do not use v_base, pushing to vector might invalidated the reference.
     vis_.at(v_base_idx).next = v_curr_idx;
     return v_curr_idx;
-  }
-
-  inline uint32_t GetBaseIdx(size_t cg_edges_size, uint32_t v_idx) const {
-    if (v_idx < cg_edges_size) return v_idx;
-    while (vis_.at(v_idx).next >= cg_edges_size) {
-      v_idx = vis_.at(v_idx).next;
-    }
-    return vis_.at(v_idx).next;
   }
 
   void AddTriggeringCTRs(const CompactGraph& cg, uint32_t next_edge_idx,

@@ -315,7 +315,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
   uint32_t num_nodes = 0;
   CHECK_S(!g.large_components.empty());
   const std::vector<std::uint32_t>& start_nodes = {
-      g.large_components.front().start_node};
+      g.large_components.front().nodes.front()};
   std::vector<CompactGraph::FullEdge> full_edges;
   // Maps node index in graph.nodes to node index in compact graph.
   absl::flat_hash_map<uint32_t, uint32_t> graph_to_compact_nodemap;

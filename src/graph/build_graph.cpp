@@ -829,10 +829,9 @@ void MarkUniqueOther(std::span<GEdge> edges) {
   }
 }
 
-void FindLargeComponents(Graph* g) {
-  ComponentAnalyzer a(*g);
-  g->large_components = a.FindLargeComponents();
-  ComponentAnalyzer::MarkLargeComponents(g);
+void DetermineComponents(Graph* g) {
+  g->large_components = components::FindComponents(*g, /*min_size=*/2000);
+  components::MarkLargeComponents(g->large_components, g);
 }
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
@@ -967,6 +966,7 @@ void AllocateGNodes(GraphMetaData* meta) {
       n.ncc = INVALID_NCC;
       // n.simple_turn_restriction_via_node = 0;
       n.is_pedestrian_crossing = 0;
+      n.cluster_skeleton = 0;
       n.lat = node->lat;
       n.lon = node->lon;
       meta->graph.nodes.push_back(n);
@@ -1296,7 +1296,7 @@ void ComputeShortestEdgePathsInAllClusters(GraphMetaData* meta) {
     ThreadPool pool;
     for (GCluster& cluster : meta->graph.clusters) {
       pool.AddWork([meta, &metric, &cluster](int) {
-        build_clusters::ComputeShortestClusterEdgePaths(meta->graph, metric,
+        build_clusters::ComputeShortestClusterEdgePaths(&meta->graph, metric,
                                                         meta->opt.vt, &cluster);
       });
     }
@@ -1311,7 +1311,6 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   build_clusters::UpdateEdgesAndBorderNodes(&meta->graph);
 
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
-  build_clusters::PrintClusterInformation(meta->graph);
   build_clusters::AssignClusterColors(&(meta->graph));
 
   /*
@@ -1342,6 +1341,9 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
   for (const GCluster& c : g.clusters) {
     stats->num_cluster_border_in_edges += c.border_in_edges.size();
     stats->num_cluster_border_out_edges += c.border_out_edges.size();
+
+    stats->num_cluster_valid_paths += c.num_valid_paths;
+    stats->sum_cluster_valid_path_nodes += c.sum_valid_path_nodes;
   }
 
   stats->num_nodes_in_pbf = reader.CountEntries(OsmPbfReader::ContentNodes);
@@ -1389,7 +1391,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
   std::vector<int64_t> num_forwards_node_id(MAX_NUM_EDGES_OUT + 1, 0);
   for (size_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
     const GNode& n = g.nodes.at(node_idx);
-
+    stats->num_dead_end_nodes += n.dead_end;
     if (n.cluster_border_node) {
       stats->num_cluster_border_nodes++;
     } else if (n.cluster_id != INVALID_CLUSTER_ID) {
@@ -1423,10 +1425,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
         0) {
       num_forwards_node_id.at(n.num_forward_edges) = n.node_id;
     }
+    stats->num_nodes_cluster_skeleton += n.cluster_skeleton;
 
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
-      const GNode& other = g.nodes.at(e.target_idx);
-      // const bool edge_dead_end = n.dead_end || other.dead_end;
+      const GNode& target = g.nodes.at(e.target_idx);
+      // const bool edge_dead_end = n.dead_end || target.dead_end;
       if (!e.unique_target) {
         stats->num_edges_non_unique++;
       }
@@ -1443,7 +1446,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
         stats->sum_edge_length_cm += e.distance_cm;
         if (e.distance_cm == 0) {
           LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
-                      << other.node_id;
+                      << target.node_id;
         }
         stats->min_edge_length_cm =
             std::min(stats->min_edge_length_cm, (int64_t)e.distance_cm);
@@ -1462,7 +1465,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
                 e.car_label == GEdge::LABEL_RESTRICTED_SECONDARY);
         CHECK_NE_S(e.car_label, GEdge::LABEL_TEMPORARY);
         stats->num_edges_forward_car_forbidden +=
-            !RoutableAccess(GetRAFromWSA(g, e, VH_MOTORCAR).access);
+            !RoutableAccess(GetRAFromEdge(g, e, VH_MOTORCAR).access);
       }
 
       stats->num_cross_country_edges += (!e.inverted && e.cross_country);
@@ -1470,21 +1473,24 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
           (!e.inverted && e.cross_country && e.car_label != GEdge::LABEL_FREE);
 
       if (n.cluster_id == INVALID_CLUSTER_ID ||
-          other.cluster_id == INVALID_CLUSTER_ID) {
+          target.cluster_id == INVALID_CLUSTER_ID) {
         stats->num_cluster_outside_edges += 1;
-      } else if (n.cluster_id != other.cluster_id) {
+      } else if (n.cluster_id != target.cluster_id) {
         stats->num_cluster_border_edges += 1;
         if (e.car_label != GEdge::LABEL_FREE) {
           stats->num_cluster_border_edges_restr += 1;
           LOG_S(INFO) << absl::StrFormat(
               "Cluster border cluster restricted edge %lld to %lld, label:%d "
               "way:%lld",
-              n.node_id, other.node_id, (int)e.car_label,
+              n.node_id, target.node_id, (int)e.car_label,
               g.ways.at(e.way_idx).id);
         }
       } else {
         stats->num_cluster_inside_edges += 1;
       }
+
+      stats->num_edges_cluster_skeleton +=
+          (n.cluster_skeleton && target.cluster_skeleton);
 
       // By construction, this is 0, because dead-ends are omitted from
       // clusters.
@@ -1603,6 +1609,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_ways_mixed_restricted_car);
   LOG_S(INFO) << absl::StrFormat("  Closed ways:      %12lld",
                                  stats.num_ways_closed);
+  LOG_S(INFO) << absl::StrFormat("  Unique shared attrs:%10llu",
+                                 g.way_shared_attrs.size());
   LOG_S(INFO) << absl::StrFormat("  Bytes per way     %12.2f",
                                  (double)way_bytes / g.ways.size());
   LOG_S(INFO) << absl::StrFormat("  Added per way     %12.2f",
@@ -1617,6 +1625,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_nodes_in_small_component);
   LOG_S(INFO) << absl::StrFormat("  Nodes no country: %12lld",
                                  stats.num_nodes_no_country);
+  LOG_S(INFO) << absl::StrFormat("  Cluster skeleton: %12lld",
+                                 stats.num_nodes_cluster_skeleton);
 
   for (uint32_t idx = 0; idx < stats.num_nodes_unique_edges_dim; ++idx) {
     LOG_S(INFO) << absl::StrFormat("  Has %u unique edges: %10lld", idx,
@@ -1660,6 +1670,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_high_priority);
   LOG_S(INFO) << absl::StrFormat("  Bridge:           %12lld",
                                  stats.num_edges_bridge);
+  LOG_S(INFO) << absl::StrFormat("  Cluster skeleton: %12lld",
+                                 stats.num_edges_cluster_skeleton);
 
   LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
                                  stats.min_edge_length_cm);
@@ -1703,6 +1715,10 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_cluster_border_in_edges);
   LOG_S(INFO) << absl::StrFormat("  Num border out edges:%9lld",
                                  stats.num_cluster_border_out_edges);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Avg len paths:    %12.2f",
+      static_cast<double>(stats.sum_cluster_valid_path_nodes) /
+          stats.num_cluster_valid_paths);
 
   LOG_S(INFO) << absl::StrFormat("  Num restr border edges:%7lld",
                                  stats.num_cluster_border_edges_restr);
@@ -1760,15 +1776,6 @@ void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
       ft.TotalUnique(), ft.Total(), (100.0 * ft.TotalUnique()) / ft.Total());
 }
 }  // namespace
-
-// inline void MarkUTurnAllowedEdges_Obsolete(Graph* g) {
-//   FUNC_TIMER();
-//   for (uint32_t from_idx = 0; from_idx < g->nodes.size(); ++from_idx) {
-//     for (GEdge& e : gnode_forward_edges(*g, from_idx)) {
-//       e.car_uturn_allowed = IsUTurnAllowedEdgeOld(*g, from_idx, e);
-//     }
-//   }
-// }
 
 void MarkCrossingNodes(GraphMetaData* meta) {
   FUNC_TIMER();
@@ -2105,11 +2112,9 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   // ======================================================
 
   LoadTurnRestrictionsFromRelations(&reader, &meta, &meta.Stats());
-  // StoreNodeBarrierData_Obsolete(&meta.graph, &meta.Stats());
-  FindLargeComponents(&meta.graph);
-  meta.Stats().num_dead_end_nodes = ApplyTarjan(meta.graph);
+  DetermineComponents(&meta.graph);
+  ApplyTarjan(&(meta.graph));
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
-  // MarkUTurnAllowedEdges_Obsolete(&(meta.graph));
 
   MarkCrossingNodes(&meta);
   LabelEdgesFromNodeTags(&meta);
@@ -2117,6 +2122,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 
   ComputeAllTurnCosts(&meta);
   ComputeClusterPaths(meta.opt, &meta);
+  build_clusters::PrintClusterInformation(meta.graph);
 
   // Add up all the per thread stats.
   meta.global_stats = CollectThreadStats(*meta.thread_stats);

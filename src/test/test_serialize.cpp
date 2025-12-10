@@ -222,9 +222,9 @@ Graph::Component RandomComponent(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  Graph::Component c = {0};
-  c.start_node = dist(myrand);
-  c.size = dist(myrand);
+  Graph::Component c;
+  // c.start_node = dist(myrand);
+  // c.size = dist(myrand);
   return c;
 }
 
@@ -386,7 +386,7 @@ void TestComponents() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 1; ++i) {
-    Graph::Component dec = {0};
+    Graph::Component dec;
     ptr += DecodeComponent(ptr, &dec);
     const Graph::Component re = RandomComponent(i);
     CHECK_COMPONENT_EQUAL(re, dec);

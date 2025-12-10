@@ -37,7 +37,7 @@ inline bool EligibleNodeForLouvain(const GNode& n) {
 // specific kinds of nodes(line nodes, restricted nodes, turn restriction nodes)
 // clustered.
 inline TGVec CreateInitalLouvainGraph(
-    const Graph& graph, const GNodeToLouvainIdx& np_to_louvain_pos) {
+    const Graph& graph, const GNodeToLouvainIdx& gidx_to_louvain_pos) {
   TGVec gvec;
   gvec.push_back(std::make_unique<louvain::LouvainGraph>());
   louvain::LouvainGraph* lg = gvec.back().get();
@@ -50,18 +50,18 @@ inline TGVec CreateInitalLouvainGraph(
   // Add nodes from complex turn restrictions.
   for (const TurnRestriction& ctr : graph.complex_turn_restrictions) {
     for (const TurnRestriction::TREdge& tre : ctr.path) {
-      const auto it1 = np_to_louvain_pos.find(tre.from_node_idx);
-      if (it1 != np_to_louvain_pos.end()) {
+      const auto it1 = gidx_to_louvain_pos.find(tre.from_node_idx);
+      if (it1 != gidx_to_louvain_pos.end()) {
         precluster_common_nodes.AddBit(it1->second);
       }
-      const auto it2 = np_to_louvain_pos.find(tre.to_node_idx);
-      if (it2 != np_to_louvain_pos.end()) {
+      const auto it2 = gidx_to_louvain_pos.find(tre.to_node_idx);
+      if (it2 != gidx_to_louvain_pos.end()) {
         precluster_common_nodes.AddBit(it2->second);
       }
     }
   }
 
-  for (auto [gnode_pos, louvain_pos] : np_to_louvain_pos) {
+  for (auto [gnode_pos, louvain_pos] : gidx_to_louvain_pos) {
     lg->AddNode(louvain_pos, gnode_pos);
     // const GNode& n = graph.nodes.at(gnode_pos);
     // const bool n_has_node_tags = (graph.FindNodeTags(n.node_id) != nullptr);
@@ -70,8 +70,8 @@ inline TGVec CreateInitalLouvainGraph(
       const GNode& other = graph.nodes.at(e.target_idx);
 
       if (e.target_idx != gnode_pos && EligibleNodeForLouvain(other)) {
-        auto it = np_to_louvain_pos.find(e.target_idx);
-        CHECK_S(it != np_to_louvain_pos.end());
+        auto it = gidx_to_louvain_pos.find(e.target_idx);
+        CHECK_S(it != gidx_to_louvain_pos.end());
 
         if (e.unique_target) {
           lg->AddEdge(it->second, /*weight=*/1);
@@ -175,10 +175,12 @@ void AddClustersAndAssignClusterIds(
   const louvain::LouvainGraph& lg = *gvec.front();
 
   // Add new clusters to clusters vector.
-  CHECK_S(g->clusters.empty());
+  // CHECK_S(g->clusters.empty());
+
   // 'offset' was needed when clusters were done by country in increments.
   const size_t offset = g->clusters.size();
   const size_t num_new = gvec.back()->clusters.size();
+  LOG_S(INFO) << "Add clusters " << offset << ".." << (offset + num_new - 1);
 
   g->clusters.resize(offset + num_new);
   CHECK_LT_S(g->clusters.size(), INVALID_CLUSTER_ID);
@@ -205,7 +207,7 @@ void AddClustersAndAssignClusterIds(
 inline void ExecuteLouvain(int n_threads, Graph* graph) {
   FUNC_TIMER();
 
-  // 'np_to_louvain_pos' contains a mapping from node positions in graph.nodes
+  // 'gidx_to_louvain_pos' contains a mapping from node indexes in graph.nodes
   // to the precomputed node positions in the louvain graph.
   //
   // The map is sorted by key in ascending order, and by construction, the
@@ -221,30 +223,43 @@ inline void ExecuteLouvain(int n_threads, Graph* graph) {
   // to find a node. It is not clear if this would be faster though, because
   // lookup in btrees is more cpu-cache friendly than binary search in a vector.
 
-  GNodeToLouvainIdx np_to_louvain_pos;
-  // Iterate over all nodes in the graph and update the node for
-  // eligble nodes.
-  for (uint32_t gnode_pos = 0; gnode_pos < graph->nodes.size(); ++gnode_pos) {
-    const GNode& n = graph->nodes.at(gnode_pos);
-    if (EligibleNodeForLouvain(n)) {
-      for (const GEdge& e : gnode_all_edges(*graph, gnode_pos)) {
-        // Check if this edge is in the louvain graph.
-        if (e.unique_target && e.target_idx != gnode_pos &&
-            EligibleNodeForLouvain(graph->nodes.at(e.target_idx))) {
-          // Edge between two eligible nodes.
-          // Node 'n' at position 'gnode_pos' is good to use.
-          np_to_louvain_pos[gnode_pos] = np_to_louvain_pos.size();
-          break;
+  for (const Graph::Component& comp : graph->large_components) {
+    LOG_S(INFO) << "Cluster component with " << comp.nodes.size() << " entries";
+    GNodeToLouvainIdx gidx_to_louvain_pos;
+    // Iterate over all nodes in the component and update the node for
+    // eligble nodes.
+    // for (uint32_t gnode_idx = 0; gnode_idx < comp.nodes.size(); ++gnode_idx)
+    // {
+    for (uint32_t gnode_idx : comp.nodes) {
+      const GNode& n = graph->nodes.at(gnode_idx);
+      if (EligibleNodeForLouvain(n)) {
+        for (const GEdge& e : gnode_all_edges(*graph, gnode_idx)) {
+          // Check if this edge is in the louvain graph.
+          if (e.unique_target && e.target_idx != gnode_idx &&
+              EligibleNodeForLouvain(graph->nodes.at(e.target_idx))) {
+            // Edge between two eligible nodes.
+            // Node 'n' at position 'gnode_idx' is good to use.
+            gidx_to_louvain_pos[gnode_idx] = 1;  // '1' will be changed below.
+            break;
+          }
         }
       }
     }
-  }
 
-  TGVec gvec = CreateInitalLouvainGraph(*graph, np_to_louvain_pos);
-  np_to_louvain_pos.clear();
-  MainLouvainLoop(&gvec);
-  // Create clusters and store cluster_id for each node.
-  AddClustersAndAssignClusterIds(gvec, graph);
+    // Assign increasing louvain positions 0..size-1.
+    {
+      uint32_t idx = 0;
+      for (auto& it : gidx_to_louvain_pos) {
+        it.second = idx++;
+      }
+    }
+
+    TGVec gvec = CreateInitalLouvainGraph(*graph, gidx_to_louvain_pos);
+    gidx_to_louvain_pos.clear();
+    MainLouvainLoop(&gvec);
+    // Create clusters and store cluster_id for each node.
+    AddClustersAndAssignClusterIds(gvec, graph);
+  }
 }
 
 // Assign cluster_id to the nodes in the subtree below 'start_node_idx'.
@@ -252,10 +267,12 @@ inline void ExecuteLouvain(int n_threads, Graph* graph) {
 // Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
 inline uint32_t AssignClusterIdsInDeadEnd(Graph* g, uint32_t start_node_idx,
                                           uint32_t cluster_id) {
+  GCluster& cluster = g->clusters.at(cluster_id);
   GNode& start = g->nodes.at(start_node_idx);
   CHECK_S(start.dead_end);
   CHECK_EQ_S(start.cluster_id, INVALID_CLUSTER_ID);
   start.cluster_id = cluster_id;
+  cluster.num_deadend_nodes++;
   std::vector<uint32_t> nodes({start_node_idx});
   uint32_t num_nodes = 1;
   size_t pos = 0;
@@ -274,6 +291,7 @@ inline uint32_t AssignClusterIdsInDeadEnd(Graph* g, uint32_t start_node_idx,
       CHECK_S(target.dead_end);
       CHECK_EQ_S(target.cluster_id, INVALID_CLUSTER_ID);
       target.cluster_id = cluster_id;
+      cluster.num_deadend_nodes++;
       num_nodes++;
       nodes.push_back(e.target_idx);
     }
@@ -507,7 +525,7 @@ void AddBorderEdgeInformation(
 
 // Compute all shortest paths between border edges in a cluster. The
 // results are stored in 'cluster.edge_distances'.
-inline void ComputeShortestClusterEdgePaths(const Graph& g,
+inline void ComputeShortestClusterEdgePaths(Graph* g,
                                             const RoutingMetric& metric,
                                             VEHICLE vt, GCluster* cluster) {
   CHECK_S(cluster->edge_distances.empty());
@@ -520,7 +538,7 @@ inline void ComputeShortestClusterEdgePaths(const Graph& g,
   uint32_t num_nodes = 0;
   std::vector<CompactGraph::FullEdge> full_edges;
   absl::flat_hash_map<uint32_t, uint32_t> gnode_to_compact;
-  CollectEdgesForCompactGraph(g, metric,
+  CollectEdgesForCompactGraph(*g, metric,
                               {.vt = vt,
                                .avoid_restricted_access_edges = true,
                                .restrict_to_cluster = true,
@@ -530,10 +548,13 @@ inline void ComputeShortestClusterEdgePaths(const Graph& g,
                               &full_edges, &gnode_to_compact);
   CompactGraph::SortAndCleanupEdges(&full_edges);
   CompactGraph cg(num_nodes, full_edges);
-  cg.AddComplexTurnRestrictions(g.complex_turn_restrictions, gnode_to_compact);
-  cg.AddTurnCosts(g, metric.IsTimeMetric(), gnode_to_compact);
-  AddBorderEdgeInformation(g, cg, gnode_to_compact, cluster);
+  cg.AddComplexTurnRestrictions(g->complex_turn_restrictions, gnode_to_compact);
+  cg.AddTurnCosts(*g, metric.IsTimeMetric(), gnode_to_compact);
+  AddBorderEdgeInformation(*g, cg, gnode_to_compact, cluster);
   cg.LogStats();
+
+  const std::vector<std::uint32_t> compact_to_graph =
+      cg.InvertGraphToCompactNodeMap(gnode_to_compact);
 
   // Execute single source Dijkstra for every incoming border edge
   for (const auto& in_edge : cluster->border_in_edges) {
@@ -555,7 +576,30 @@ inline void ComputeShortestClusterEdgePaths(const Graph& g,
       cluster->edge_distances.back().push_back(
           vis.at(out_edge.c_edge_idx).min_weight);
     }
-  };
+
+    {
+      // Visit all shortest paths (ending at a border-out-edge) and label the
+      // nodes as 'cluster_skeleton'.
+      const std::vector<CompactGraph::PartialEdge>& edges = cg.edges();
+      for (const auto& out_edge : cluster->border_out_edges) {
+        // g->nodes.at(out_edge.g_from_idx).cluster_skeleton = 1;
+        uint32_t e_idx = out_edge.c_edge_idx;
+        if (vis.at(e_idx).min_weight == INFU32) {
+          continue;
+        }
+        cluster->num_valid_paths += 1;
+        cluster->sum_valid_path_nodes += 1;
+        do {
+          uint32_t base_e_idx = router.GetBaseIdx(cg.edges().size(), e_idx);
+          uint32_t gnode_target_idx =
+              compact_to_graph.at(edges.at(base_e_idx).to_c_idx);
+          g->nodes.at(gnode_target_idx).cluster_skeleton = 1;
+          e_idx = vis.at(e_idx).from_v_idx;
+          cluster->sum_valid_path_nodes += 1;
+        } while (e_idx != INFU32);
+      }
+    }
+  }
   CHECK_EQ_S(cluster->edge_distances.size(), cluster->border_in_edges.size());
 }
 
@@ -610,13 +654,18 @@ inline void PrintClusterInformation(const Graph& g) {
   double sum_out = 0;  // Outgoing edges, each edge is counted twice.
   uint32_t max_nodes = 0;
   uint32_t max_border_nodes = 0;
+  uint32_t max_deadend_nodes = 0;
+  uint32_t max_tot_nodes = 0;
   uint32_t max_in = 0;
   uint32_t max_out = 0;
   uint32_t min_nodes = 1 << 31;
   uint32_t min_border_nodes = 1 << 31;
   uint32_t min_in = 1 << 31;
   uint32_t min_out = 1 << 31;
+  uint64_t num_valid_paths = 0;
+  uint64_t sum_valid_path_nodes = 0;
   uint64_t replacement_edges = 0;
+
   for (size_t i = 0; i < stats.size(); ++i) {
     const GCluster& rec = stats.at(i);
 
@@ -627,22 +676,29 @@ inline void PrintClusterInformation(const Graph& g) {
     sum_out += rec.num_outer_edges;
     max_nodes = std::max(max_nodes, rec.num_nodes);
     max_border_nodes = std::max(max_border_nodes, rec.num_border_nodes);
+    max_deadend_nodes = std::max(max_deadend_nodes, rec.num_deadend_nodes);
+    max_tot_nodes =
+        std::max(max_tot_nodes, rec.num_nodes + rec.num_deadend_nodes);
     max_in = std::max(max_in, rec.num_inner_edges);
     max_out = std::max(max_out, rec.num_outer_edges);
     min_nodes = std::min(min_nodes, rec.num_nodes);
     min_border_nodes = std::min(min_border_nodes, rec.num_border_nodes);
     min_in = std::min(min_in, rec.num_inner_edges);
     min_out = std::min(min_out, rec.num_outer_edges);
+    num_valid_paths += rec.num_valid_paths;
+    sum_valid_path_nodes += rec.sum_valid_path_nodes;
 
     replacement_edges +=
         (rec.num_border_nodes * (rec.num_border_nodes - 1)) / 2;
 
     LOG_S(INFO) << absl::StrFormat(
-        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u In:%5u Out:%5u  "
-        "Out/In:%2.2f%% ex-id:%lld",
+        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u Deadend:%5u Tot:%5u In:%5u "
+        "Out:%5u Out/In:%2.2f%% #avg-p-nodes:%.2f ex-id:%lld",
         i, rec.cluster_id, rec.num_nodes, rec.num_border_nodes,
+        rec.num_deadend_nodes, rec.num_nodes + rec.num_deadend_nodes,
         rec.num_inner_edges, rec.num_outer_edges,
         (100.0 * rec.num_outer_edges) / std::max(rec.num_inner_edges, 1u),
+        static_cast<double>(rec.sum_valid_path_nodes) / rec.num_valid_paths,
         rec.border_nodes.empty() ? 0
                                  : g.nodes.at(rec.border_nodes.at(0)).node_id);
   }
@@ -659,11 +715,16 @@ inline void PrintClusterInformation(const Graph& g) {
       sum_nodes / stats.size(), sum_border_nodes / stats.size(),
       sum_in / stats.size(), sum_out / stats.size());
   LOG_S(INFO) << absl::StrFormat(
-      "  Max nodes:%u max border:%u max in-edges:%u max out-edges:%u",
-      max_nodes, max_border_nodes, max_in, max_out);
+      "  Max nodes:%u border:%u deadend:%u tot:%u max in-edges:%u max "
+      "out-edges:%u",
+      max_nodes, max_border_nodes, max_deadend_nodes, max_tot_nodes, max_in,
+      max_out);
   LOG_S(INFO) << absl::StrFormat(
       "  Min nodes:%u min border:%u min in-edges:%u min out-edges:%u",
       min_nodes, min_border_nodes, min_in, min_out);
+  LOG_S(INFO) << absl::StrFormat(
+      "  Avg path nodes:%.2f",
+      static_cast<double>(sum_valid_path_nodes) / num_valid_paths);
 
   // Cluster Graph Summary
   uint64_t total_edges = replacement_edges + (uint64_t)sum_out / 2;

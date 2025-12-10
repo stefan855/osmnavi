@@ -221,11 +221,42 @@ uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vt, const GEdge& e1,
   }
 }
 
-bool VehicleBlockedAtNode(const NodeTags* node_tags) {
-  // TODO: handle direction.
-  return (node_tags != nullptr && node_tags->has_access_restriction &&
-          (!RoutableAccess(node_tags->acc_forw) ||
-           !RoutableAccess(node_tags->acc_backw)));
+// Check if access through a node is blocked.
+// Special case:
+//   If the access at the node is restricted (for instance "destination"), then
+//   the incoming and outgoing ways have to be investigated. At least one of
+//   them should have the same access, otherwise the node can't be traversed.
+bool VehicleBlockedAtNode(const Graph& g, VEHICLE vt, const NodeTags* node_tags,
+                          const N3Path& n3p) {
+  if (node_tags == nullptr || (RoutableFullAccess(node_tags->acc_forw) &&
+                               RoutableFullAccess(node_tags->acc_backw))) {
+    return false;  // not blocked.
+  }
+
+  // TODO: handle direction? It is not clear how a direction on a bollard makes
+  // any sense.
+  if (!RoutableAccess(node_tags->acc_forw) ||
+      !RoutableAccess(node_tags->acc_backw)) {
+    return true;  // blocked.
+  }
+
+  // We know that at least one of the accesses is not "full" (and both are not
+  // ACC_NO) from above, i.e. it is restricted. Find the lowest value of
+  // restriction.
+  ACCESS min_acc = std::min(node_tags->acc_forw, node_tags->acc_backw);
+  // Check that either the incoming or outgoing way has the same access,
+  // otherwise the vehicle is blocked.
+
+  if (GetRAFromEdge(g, n3p.edge0(g), vt).access == min_acc ||
+      GetRAFromEdge(g, n3p.edge1(g), vt).access == min_acc) {
+    LOG_S(INFO) << "VehicleBlockedAtNode(): allow access acc:"
+                << AccessToStringSafe(min_acc) << " " << n3p.DebugStr(g);
+    return false;  // not blocked.
+  } else {
+    LOG_S(INFO) << "VehicleBlockedAtNode(): forbid access acc:"
+                << AccessToStringSafe(min_acc) << " " << n3p.DebugStr(g);
+    return true;  // blocked.
+  }
 }
 
 // Is the U-Turn represented by 'n3p' allowed?
@@ -235,18 +266,12 @@ bool VehicleBlockedAtNode(const NodeTags* node_tags) {
 // at the end of a street or when facing a restricted access area.
 //
 // TODO: handle vehicle types properly.
-#define DEBUG_UTURN_ALLOWED 0
 inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
                            const NodeTags* node_tags, const N3Path& n3p) {
   CHECK_EQ_S(n3p.node0_idx, n3p.node2_idx);
 
   if (node_tags != nullptr && node_tags->bit_turning_circle) {
-#if DEBUG_UTURN_ALLOWED
-    LOG_S(INFO) << absl::StrFormat("TT1 Allowed UTurn %lld -> %lld -> %lld",
-                                   GetGNodeIdSafe(g, n3p.node0_idx),
-                                   GetGNodeIdSafe(g, n3p.node1_idx),
-                                   GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+    // LOG_S(INFO) << "TT1 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
 
@@ -255,35 +280,20 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
 
   // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
   if (way0.highway_label <= HW_TRUNK_LINK) {
-#if DEBUG_UTURN_ALLOWED
-    LOG_S(INFO) << absl::StrFormat(
-        "TT1b Not allowed UTurn %lld -> %lld -> %lld",
-        GetGNodeIdSafe(g, n3p.node0_idx), GetGNodeIdSafe(g, n3p.node1_idx),
-        GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+    // LOG_S(INFO) << "TT1b Not allowed UTurn " << n3p.DebugStr(g);
     return false;
   }
 
   // Special case: Way is an area and both edges are on this way.
   if (way0.area && edge0.way_idx == n3p.edge1(g).way_idx) {
-#if DEBUG_UTURN_ALLOWED
-    LOG_S(INFO) << absl::StrFormat("TT2 Allowed UTurn %lld -> %lld -> %lld",
-                                   GetGNodeIdSafe(g, n3p.node0_idx),
-                                   GetGNodeIdSafe(g, n3p.node1_idx),
-                                   GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+    // LOG_S(INFO) << "TT2 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
 
   // Special case, vehicle is blocked at node and returns on the same way.
-  if (VehicleBlockedAtNode(node_tags) &&
+  if (VehicleBlockedAtNode(g, vt, node_tags, n3p) &&
       edge0.way_idx == n3p.edge1(g).way_idx) {
-#if DEBUG_UTURN_ALLOWED
-    LOG_S(INFO) << absl::StrFormat("TT3 Allowed UTurn %lld -> %lld -> %lld",
-                                   GetGNodeIdSafe(g, n3p.node0_idx),
-                                   GetGNodeIdSafe(g, n3p.node1_idx),
-                                   GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+    // LOG_S(INFO) << "TT3 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
 
@@ -299,31 +309,16 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
 
   // Vehicle can't continue except for returning.
   if (!found_continuation) {
-#if DEBUG_UTURN_ALLOWED
-    LOG_S(INFO) << absl::StrFormat("TT4 Allowed UTurn %lld -> %lld -> %lld",
-                                   GetGNodeIdSafe(g, n3p.node0_idx),
-                                   GetGNodeIdSafe(g, n3p.node1_idx),
-                                   GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+    // LOG_S(INFO) << "TT4 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
   // when arriving through a free edge, it is allowed to do a u-turn if there
   // are only restricted edges to continue on.
   if (edge0.car_label == GEdge::LABEL_FREE && !found_free_continuation) {
-#if DEBUG_UTURN_ALLOWED
-    LOG_S(INFO) << absl::StrFormat("TT5 Allowed UTurn %lld -> %lld -> %lld",
-                                   GetGNodeIdSafe(g, n3p.node0_idx),
-                                   GetGNodeIdSafe(g, n3p.node1_idx),
-                                   GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+    // LOG_S(INFO) << "TT5 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
-#if DEBUG_UTURN_ALLOWED
-  LOG_S(INFO) << absl::StrFormat("TT5b not allowed UTurn %lld -> %lld -> %lld",
-                                 GetGNodeIdSafe(g, n3p.node0_idx),
-                                 GetGNodeIdSafe(g, n3p.node1_idx),
-                                 GetGNodeIdSafe(g, n3p.node2_idx));
-#endif
+  // LOG_S(INFO) << "TT5b not allowed UTurn " << n3p.DebugStr(g);
   return false;
 }
 
@@ -488,7 +483,9 @@ uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   return num_unique * 1500;
 }
 
-// The cost that occurs when entering a new way, i.e. when turning from way A onto way B. Currently this is used only for ways with oneway 'reversible', i.e. alternating traffic over a long period.
+// The cost that occurs when entering a new way, i.e. when turning from way A
+// onto way B. Currently this is used only for ways with oneway 'reversible',
+// i.e. alternating traffic over a long period.
 uint32_t EnterNewWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   if (vt != VH_FOOT) {
     const uint32_t way_idx0 = n3p.full_edge0().gedge(g).way_idx;
@@ -519,30 +516,19 @@ inline uint32_t ComputeTurnCostForN3Path(
   const bool uturn = (n3p.node0_idx == n3p.node2_idx);
   if (uturn) {
     if (tr_status == TRStatus::ALLOWED) {
-      /*
-      LOG_S(INFO) << absl::StrFormat("FF1 Allowed UTurn %lld -> %lld -> %lld",
-                                     GetGNodeIdSafe(g, n3p.node0_idx),
-                                     GetGNodeIdSafe(g, n3p.node1_idx),
-                                     GetGNodeIdSafe(g, n3p.node2_idx));
-
-                                     */
+      // LOG_S(INFO) << "FF1 Allowed UTurn " << n3p.DebugStr(g);
       // Explicitly allowed by turn restriction.
       return TURN_COST_U_TURN;
     }
     if (!IsUTurnAllowed(g, vt, node_tags, n3p)) {
       return TURN_COST_INFINITY;
     }
-    /*
-    LOG_S(INFO) << absl::StrFormat("FF2 Allowed UTurn %lld -> %lld -> %lld",
-                                   GetGNodeIdSafe(g, n3p.node0_idx),
-                                   GetGNodeIdSafe(g, n3p.node1_idx),
-                                   GetGNodeIdSafe(g, n3p.node2_idx));
-                                   */
+    // LOG_S(INFO) << "FF2 Allowed UTurn " << n3p.DebugStr(g);
     return TURN_COST_U_TURN;
   }
 
   // Check if we're blocked by the middle node. We know this is not a u-turn.
-  if (VehicleBlockedAtNode(node_tags)) {
+  if (VehicleBlockedAtNode(g, vt, node_tags, n3p)) {
     const GWay& way0 = g.ways.at(n3p.edge0(g).way_idx);
     if (!way0.area || n3p.edge0(g).way_idx != n3p.edge1(g).way_idx) {
       return TURN_COST_INFINITY;

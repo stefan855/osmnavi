@@ -252,8 +252,8 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
         color = "mag";
       } else {
         bool has_maxspeed =
-            GetRAFromWSA(g, e.way_idx, vt,
-                         e.contra_way == 0 ? DIR_FORWARD : DIR_BACKWARD)
+            GetRAFromWayIdx(g, e.way_idx, vt,
+                            e.contra_way == 0 ? DIR_FORWARD : DIR_BACKWARD)
                 .maxspeed > 0;
         if (has_maxspeed) {
           color = "blue";
@@ -294,6 +294,35 @@ void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
       const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
                                 n.lon, other.lat, other.lon);
+      count++;
+    }
+  }
+  myfile.close();
+  LOG_S(INFO) << absl::StrFormat("Written %u lines", count);
+}
+
+void WriteClusterSkeletonEdges(const Graph& g, const std::string& color,
+                               const std::string& filename) {
+  FuncTimer timer(
+      absl::StrFormat("Write cluster skeleton edges to %s", filename.c_str()),
+      __FILE__, __LINE__);
+  std::ofstream myfile;
+  myfile.open(filename, std::ios::trunc | std::ios::binary | std::ios::out);
+
+  size_t count = 0;
+  for (uint32_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
+    const GNode& n = g.nodes.at(node_idx);
+    if (!n.cluster_skeleton) continue;
+    for (const GEdge& e : gnode_all_edges(g, node_idx)) {
+      // "node_idx >= e.target_idx": prevent duplicated data to be written.
+      if (node_idx > e.target_idx || !e.unique_target ||
+          !g.nodes.at(e.target_idx).cluster_skeleton) {
+        continue;
+      }
+
+      const GNode& target = g.nodes.at(e.target_idx);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
+                                n.lon, target.lat, target.lon);
       count++;
     }
   }
@@ -401,7 +430,7 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
     }
 
     for (const GEdge& e : gnode_all_edges(g, node_pos)) {
-      if (e.bridge || !e.unique_target) continue;
+      if (!e.unique_target) continue;
 
       // Ignore half of the edges (and self-edges).
       if (e.target_idx <= node_pos) {
@@ -621,6 +650,9 @@ int main(int argc, char* argv[]) {
     pool.AddWork([&g](int thread_idx) {
       WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
                         "/tmp/experimental4.csv");
+    });
+    pool.AddWork([&g](int thread_idx) {
+      WriteClusterSkeletonEdges(g, "green", "/tmp/experimental9.csv");
     });
     pool.Start(std::min(meta.opt.n_threads, std::min(8, opt.n_threads)));
     pool.WaitAllFinished();

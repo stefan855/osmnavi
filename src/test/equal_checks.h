@@ -105,5 +105,4 @@ inline bool operator==(const GCluster::EdgeDescriptor& a,
   CHECK_S(tr1.path == tr2.path);
 
 #define CHECK_COMPONENT_EQUAL(c1, c2)       \
-  CHECK_EQ_S(c1.start_node, c2.start_node); \
-  CHECK_EQ_S(c1.size, c2.size);
+  CHECK_S(c1.nodes == c2.nodes);

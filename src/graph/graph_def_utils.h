@@ -51,7 +51,7 @@ class FullEdge final {
 };
 
 inline FullEdge gnode_find_full_edge(const Graph& g, uint32_t from_node_idx,
-                                    uint32_t to_node_idx, uint32_t way_idx) {
+                                     uint32_t to_node_idx, uint32_t way_idx) {
   FullEdge fe;
   uint32_t e_start = gnode_edges_start(g, from_node_idx);
   uint32_t num = gnode_edges_stop(g, from_node_idx) - e_start;
@@ -123,7 +123,7 @@ struct BestHighwayAtNode {
 };
 
 inline BestHighwayAtNode GetBestHighwayAtNode(const Graph& g, VEHICLE vt,
-                                       uint32_t node_idx) {
+                                              uint32_t node_idx) {
   BestHighwayAtNode best;
   for (const GEdge& e : gnode_all_edges(g, node_idx)) {
     const GWay& w = g.ways.at(e.way_idx);
@@ -238,6 +238,9 @@ struct N3Path final {
   const GEdge& edge1(const Graph& g) const {
     return g.edges.at(node1(g).edges_start_pos + edge1_off);
   }
+  const uint32_t way0_idx(const Graph& g) const { return edge0(g).way_idx; }
+  const uint32_t way1_idx(const Graph& g) const { return edge1(g).way_idx; }
+
   // The compressed turn cost between the first and the second edge.
   uint32_t get_compressed_turn_cost_0to1(const Graph& g) const {
     return g.turn_costs.at(edge0(g).turn_cost_idx).turn_costs.at(edge1_off);
@@ -252,6 +255,14 @@ struct N3Path final {
             .edge0_off = fe0.offset(),
             .edge1_off = fe1.offset(),
             .valid = true};
+  }
+
+  std::string DebugStr(const Graph& g) const {
+    return absl::StrFormat(
+        "%lld(%s) -> %lld(%s) -> %lld(%s)", GetGNodeIdSafe(g, node0_idx),
+        node0(g).dead_end ? "d-e" : "-", GetGNodeIdSafe(g, node1_idx),
+        node1(g).dead_end ? "d-e" : "-", GetGNodeIdSafe(g, node2_idx),
+        node2(g).dead_end ? "d-e" : "-");
   }
 };
 

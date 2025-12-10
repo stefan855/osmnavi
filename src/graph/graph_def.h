@@ -71,7 +71,6 @@ struct NodeTags {
 
   // Access for each individual vehicle type for barriers.
   BARRIER barrier_type : 6 = BARRIER_MAX;
-  std::uint32_t has_access_restriction : 1 = 0;
   ACCESS acc_forw = ACC_YES;
   ACCESS acc_backw = ACC_YES;
 
@@ -81,7 +80,8 @@ struct NodeTags {
            !bit_turning_circle && !bit_stop && !bit_traffic_signals &&
            !bit_railway_crossing && !bit_railway_crossing_barrier &&
            !bit_public_transport && !bit_traffic_calming &&
-           (barrier_type == BARRIER_MAX) && !has_access_restriction;
+           (barrier_type == BARRIER_MAX) && acc_forw == ACC_YES &&
+           acc_backw == ACC_YES;
   }
 };
 
@@ -218,6 +218,8 @@ struct GNode {
   // True if there is a node tag entry with bit_crossing set.
   std::uint32_t is_pedestrian_crossing : 1;
 
+  std::uint32_t cluster_skeleton : 1;
+
   std::int32_t lat;
   std::int32_t lon;
 };
@@ -257,30 +259,6 @@ struct GEdge {
     PRIO_HIGH = 2,
     PRIO_SIGNALS = 3,  // Traffic signal on the way to the crossing.
   };
-
-#if 0
-  enum TYPE : uint16_t {
-    // A bridge edge connects two components in the undirected graph. Removing
-    // it creates two non-connected subgraphs. The nodes in the smaller of the
-    // two subgraphs are all marked 'dead end'. On the other side of the bridge,
-    // all nodes are not marked 'dead-end', unless there is another bridge.
-    // Note: Only bridges connect dead-end with non-dead-end nodes.
-    // Can not be part of a cluster, because clustering excludes bridges and
-    // deadends from clusters.
-    TYPE_DEADEND_BRIDGE = 0,
-    // Edge inside a dead end. Can not be part of a cluster.
-    TYPE_DEADEND_INNER,
-    // Edge between border nodes of two different clusters.
-    TYPE_CLUSTER_BORDER,
-    // Edge between two nodes in the same cluster.
-    TYPE_CLUSTER_INNER,
-    // Edge where at least one has cluster_id == INVALID_CLUSTER_ID.
-    TYPE_CLUSTER_INVALID,
-    // Edge type is unknown. This can be set during construction of the graph,
-    // but is not allowed once the graph is fully constructed.
-    TYPE_UNKNOWN
-  };
-#endif
 
   std::uint32_t target_idx;
   std::uint32_t way_idx;
@@ -350,19 +328,6 @@ struct GEdge {
   // 1 iff the edge is in a dead end (excluding the bride), 0 for all other
   // edges.
   std::uint32_t dead_end : 1;
-
-#if 0
-  // Type of the edge.
-  TYPE type : NUM_GEDGE_TYPE_BITS;
-  bool is_deadend_bridge() const { return type == TYPE_DEADEND_BRIDGE; }
-  bool is_deadend_inner_edge() const { return type == TYPE_DEADEND_INNER; }
-  bool is_cluster_border_edge() const { return type == TYPE_CLUSTER_BORDER; }
-  bool is_cluster_inner_edge() const { return type == TYPE_CLUSTER_INNER; }
-  // Is cluster inner or border edge, i.e both ends are in valid clusters.
-  bool is_cluster_edge() const {
-    return type == TYPE_CLUSTER_BORDER || type == TYPE_CLUSTER_INNER;
-  }
-#endif
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -376,13 +341,26 @@ struct GCluster {
     uint32_t c_edge_idx = INFU32;
     uint32_t pos = INFU32;
   };
-  std::uint32_t cluster_id = 0;
-  std::uint32_t num_nodes = 0;
-  std::uint32_t num_border_nodes = 0;
+  uint32_t cluster_id = 0;
+
+  // Number of non-deadend nodes.
+  uint32_t num_nodes = 0;
+  // Number of border nodes (part of num_nodes above).
+  uint32_t num_border_nodes = 0;
+  // Number of deadend_nodes. Total number of nodes is num_nodes +
+  // num_deadend_nodes.
+  uint32_t num_deadend_nodes = 0;
+
   // Each edge is either 'inner', 'outer' (connects to another cluster) or a
   // bridge.
-  std::uint32_t num_inner_edges = 0;
-  std::uint32_t num_outer_edges = 0;
+  uint32_t num_inner_edges = 0;
+  uint32_t num_outer_edges = 0;
+  uint32_t num_deadend_edges = 0;
+
+  // The number of valid paths, and the sum of all path nodes in these paths.
+  uint32_t num_valid_paths = 0;
+  uint32_t sum_valid_path_nodes = 0;
+
   // Sorted vector containing the border node indexes (pointing into
   // Graph::nodes).
   std::vector<std::uint32_t> border_nodes;
@@ -398,7 +376,7 @@ struct GCluster {
   std::vector<std::vector<std::uint32_t>> edge_distances;
   // Color number for drawing clusters. Avoids neighbouring clusters having the
   // same color.
-  std::uint16_t color_no = 0;
+  uint16_t color_no = 0;
 
   uint32_t FindBorderNodePos(uint32_t node_idx) const {
     const auto it =
@@ -438,8 +416,8 @@ struct GCluster {
 
 struct Graph {
   struct Component {
-    uint32_t start_node;
-    uint32_t size;
+    // Node indexes of all nodes in the component.
+    std::vector<uint32_t> nodes;
   };
 
   std::vector<NodeTags> node_tags_sorted;
@@ -827,22 +805,27 @@ inline RoutingAttrs GetRAFromWSA(const WaySharedAttrs& wsa, VEHICLE vt,
   return wsa.ra[RAinWSAIndex(vt, dir)];
 }
 
-inline RoutingAttrs GetRAFromWSA(const Graph& g, uint32_t way_idx, VEHICLE vt,
-                                 DIRECTION dir) {
+inline RoutingAttrs GetRAFromWayIdx(const Graph& g, uint32_t way_idx,
+                                    VEHICLE vt, DIRECTION dir) {
   return GetRAFromWSA(GetWSA(g, way_idx), vt, dir);
 }
 
-inline RoutingAttrs GetRAFromWSA(const Graph& g, const GEdge& e, VEHICLE vt) {
+inline RoutingAttrs GetRAFromEdge(const Graph& g, const GEdge& e, VEHICLE vt) {
   return GetRAFromWSA(GetWSA(g, e.way_idx), vt, EDGE_DIR(e));
 }
 
-inline RoutingAttrs GetRAFromWSA(const Graph& g, const GWay& way, VEHICLE vt,
+inline RoutingAttrs GetRAFromWay(const Graph& g, const GWay& way, VEHICLE vt,
                                  DIRECTION dir) {
   return GetRAFromWSA(GetWSA(g, way), vt, dir);
 }
 
 inline bool RoutableAccess(ACCESS acc) {
   return acc >= ACC_CUSTOMERS && acc < ACC_MAX;
+}
+
+// Access is not restricted in any way.
+inline bool RoutableFullAccess(ACCESS acc) {
+  return acc == ACC_YES || acc == ACC_PERMISSIVE || acc == ACC_DESIGNATED;
 }
 
 inline bool FreeAccess(ACCESS acc) {
@@ -881,11 +864,11 @@ inline bool WSAAnyRoutable(const WaySharedAttrs& wsa) {
 }
 
 inline bool RoutableForward(const Graph& g, const GWay& way, VEHICLE vt) {
-  return RoutableAccess(GetRAFromWSA(g, way, vt, DIR_FORWARD).access);
+  return RoutableAccess(GetRAFromWay(g, way, vt, DIR_FORWARD).access);
 }
 
 inline bool RoutableBackward(const Graph& g, const GWay& way, VEHICLE vt) {
-  return RoutableAccess(GetRAFromWSA(g, way, vt, DIR_BACKWARD).access);
+  return RoutableAccess(GetRAFromWay(g, way, vt, DIR_BACKWARD).access);
 }
 
 inline DIRECTION RoutableDirection(const Graph& g, const GWay& way,
@@ -899,13 +882,12 @@ inline DIRECTION RoutableDirection(const Graph& g, const GWay& way,
 }
 
 inline bool RoutableForward(const Graph& g, const GEdge& e, VEHICLE vt) {
-  return RoutableAccess(
-      GetRAFromWSA(g, g.ways.at(e.way_idx), vt, EDGE_DIR(e)).access);
+  return RoutableAccess(GetRAFromEdge(g, e, vt).access);
 }
 
 inline bool RoutableBackward(const Graph& g, const GEdge& e, VEHICLE vt) {
   return RoutableAccess(
-      GetRAFromWSA(g, g.ways.at(e.way_idx), vt, EDGE_INVERSE_DIR(e)).access);
+      GetRAFromWayIdx(g, e.way_idx, vt, EDGE_INVERSE_DIR(e)).access);
 }
 
 namespace std {

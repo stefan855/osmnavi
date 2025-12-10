@@ -67,7 +67,7 @@ class Tarjan {
     std::int32_t time = 0;
 
     std::vector<StackEntry> stack;
-    stack.emplace_back(/*parent=*/-1, /*node=*/comp.start_node,
+    stack.emplace_back(/*parent=*/-1, /*node=*/comp.nodes.front(),
                        /*next_edge_offset=*/0);
 
     while (!stack.empty()) {
@@ -103,16 +103,18 @@ class Tarjan {
             // The edge "parent <=> node" is a bridge.
             if (bridges != nullptr) {
               // Arrange such that the tree below 'to_node_idx' is smaller.
-              if (e.tree_size < comp.size / 2) {
-                CHECK_LE_S(e.tree_size, comp.size);
+              if (e.tree_size < comp.nodes.size() / 2) {
+                CHECK_LE_S(e.tree_size, comp.nodes.size());
                 bridges->push_back({.from_node_idx = e.parent,
                                     .to_node_idx = e.node,
                                     .subtree_size = e.tree_size});
               } else {
                 // This can happen when DFS started in a dead-end.
-                bridges->push_back({.from_node_idx = e.node,
-                                    .to_node_idx = e.parent,
-                                    .subtree_size = comp.size - e.tree_size});
+                bridges->push_back(
+                    {.from_node_idx = e.node,
+                     .to_node_idx = e.parent,
+                     .subtree_size =
+                         (uint32_t)comp.nodes.size() - e.tree_size});
               }
             }
           }
@@ -129,10 +131,11 @@ class Tarjan {
                             std::vector<BridgeInfo>* bridges = nullptr) {
     std::vector<std::int32_t> visno(g_.nodes.size(), -1);
     std::vector<std::int32_t> low(g_.nodes.size(), -1);
+    CHECK_GT_S(comp.nodes.size(), 0u);
     LOG_S(INFO) << absl::StrFormat(
         "Tarjan.FindBridges() Component start node %lld (idx:%u) size %u",
-        GetGNodeIdSafe(g_, comp.start_node), comp.start_node, comp.size);
-    CHECK_GT_S(comp.size, 0u);
+        GetGNodeIdSafe(g_, comp.nodes.front()), comp.nodes.front(),
+        comp.nodes.size());
     DFSIterative(comp, &visno, &low, bridges);
     return 0;
   }
@@ -182,10 +185,10 @@ class Tarjan {
 // Mark the bridge (from_idx, to_idx) as bridge, but only when node 'from_idx'
 // is not marked as 'dead-end'. This happens when a larger dead-end contains a
 // smaller dead-end.
-inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
-  GNode& from = g.nodes.at(from_idx);
+inline void MarkBridgeEdge(Graph* g, uint32_t from_idx, uint32_t to_idx) {
+  GNode& from = g->nodes.at(from_idx);
   if (from.dead_end) return;
-  for (GEdge& e : gnode_all_edges(g, from_idx)) {
+  for (GEdge& e : gnode_all_edges(*g, from_idx)) {
     if (e.target_idx == to_idx) {
       e.bridge = 1;
     }
@@ -198,9 +201,9 @@ inline void MarkBridgeEdge(Graph& g, uint32_t from_idx, uint32_t to_idx) {
 //
 // Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
 // Requires that bridge edges at 'start_node_idx' are already marked.
-inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
+inline uint32_t MarkDeadEndNodes(Graph* g, uint32_t start_node_idx,
                                  uint32_t expected_size) {
-  GNode& start = g.nodes.at(start_node_idx);
+  GNode& start = g->nodes.at(start_node_idx);
   if (start.dead_end) {
     // There was a bridge with a larger subtree that contained this bridge, so
     // we ignore this start_node.
@@ -213,19 +216,18 @@ inline uint32_t MarkDeadEndNodes(Graph& g, uint32_t start_node_idx,
   size_t pos = 0;
   while (pos < nodes.size()) {
     uint32_t node_pos = nodes.at(pos++);
-    // GNode& n = g.nodes.at(node_pos);
-    for (GEdge& e : gnode_all_edges(g, node_pos)) {
+    for (GEdge& e : gnode_all_edges(*g, node_pos)) {
       if (e.bridge) continue;
       e.dead_end = 1;
       if (!e.unique_target) continue;
-      GNode& other = g.nodes.at(e.target_idx);
+      GNode& other = g->nodes.at(e.target_idx);
       if (!other.dead_end) {
         other.dead_end = 1;
         num_nodes++;
         nodes.push_back(e.target_idx);
         // Mark to_bridge edges on the other node.
         bool has_to_bridge = false;
-        for (GEdge& e : gnode_all_edges(g, e.target_idx)) {
+        for (GEdge& e : gnode_all_edges(*g, e.target_idx)) {
           if (e.target_idx == node_pos) {
             e.to_bridge = true;
             has_to_bridge = true;
@@ -273,15 +275,15 @@ inline void FindBridge(const Graph& g, const uint32_t start_node_idx,
             << count;
 }
 
-inline int64_t ApplyTarjan(Graph& g) {
+inline void ApplyTarjan(Graph* g) {
   FUNC_TIMER();
   int64_t num_dead_end_nodes = 0;
-  if (g.large_components.empty()) {
-    ABORT_S() << "g.large_components is empty";
+  if (g->large_components.empty()) {
+    ABORT_S() << "g->large_components is empty";
   }
-  Tarjan t(g);
+  Tarjan t(*g);
   std::vector<Tarjan::BridgeInfo> bridges;
-  for (const Graph::Component& comp : g.large_components) {
+  for (const Graph::Component& comp : g->large_components) {
     bridges.clear();
     t.FindBridges(comp, &bridges);
     // Sort bridges in descending order of subtrees. If a dead-end contains
@@ -298,8 +300,7 @@ inline int64_t ApplyTarjan(Graph& g) {
           MarkDeadEndNodes(g, bridge.to_node_idx, bridge.subtree_size);
     }
   }
-  LOG_S(INFO) << absl::StrFormat("Graph has %lld (%.2f%%) dead end nodes.",
-                                 num_dead_end_nodes,
-                                 (100.0 * num_dead_end_nodes) / g.nodes.size());
-  return num_dead_end_nodes;
+  LOG_S(INFO) << absl::StrFormat(
+      "Graph has %lld (%.2f%%) dead end nodes.", num_dead_end_nodes,
+      (100.0 * num_dead_end_nodes) / g->nodes.size());
 }
