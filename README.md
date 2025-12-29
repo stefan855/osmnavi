@@ -41,13 +41,15 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Ported the code to Raspberry Pi, i.e. to another architecture more similar to phone hardware. The port was actually very easy. Only one test started to fail due to comparing double values that were marginally different.
   
 ## Current Tasks
-* Partition serialized graph data into smallish pieces. This should support partial loading of graphs when using the data. 
+* Design and implement a memory mapped file containing the routing graph. To be used in the routing engine. 
 
 ## Tasks ahead
-1. Make the routing server use https instead of http.
+1. Extend config for car routing and cover more central European countries.
+2. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
 1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
-2. Experiment and potentially replace the Louvain clustering algorithm with a MaximumFlow/MinCut based algorithm, which should provide better clusters. See [Schild, Aaron, and Christian Sommer. "On balanced separators in road networks.", 2015](https://aschild.github.io/papers/roadseparator.pdf)
+2. Make the routing server use https instead of http.
+3. Experiment and potentially replace the Louvain clustering algorithm with a MaximumFlow/MinCut based algorithm, which should provide better clusters. See [Schild, Aaron, and Christian Sommer. "On balanced separators in road networks.", 2015](https://aschild.github.io/papers/roadseparator.pdf)
 1. Add routing configs for more countries (see [routing.cfg](config/routing.cfg)).
 1. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
 1. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
