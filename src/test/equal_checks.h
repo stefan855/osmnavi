@@ -58,7 +58,6 @@
 inline bool operator==(const GCluster::EdgeDescriptor& a,
                        const GCluster::EdgeDescriptor& b) {
   return a.g_from_idx == b.g_from_idx && a.g_edge_idx == b.g_edge_idx &&
-         a.c_from_idx == b.c_from_idx && a.c_edge_idx == b.c_edge_idx &&
          a.pos == b.pos;
 }
 
@@ -104,5 +103,4 @@ inline bool operator==(const GCluster::EdgeDescriptor& a,
   CHECK_S(tr1.direction == tr2.direction);      \
   CHECK_S(tr1.path == tr2.path);
 
-#define CHECK_COMPONENT_EQUAL(c1, c2)       \
-  CHECK_S(c1.nodes == c2.nodes);
+#define CHECK_COMPONENT_EQUAL(c1, c2) CHECK_S(c1.nodes == c2.nodes);

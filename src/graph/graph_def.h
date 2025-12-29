@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -289,6 +290,8 @@ struct GEdge {
   // This way, using EDGE_DIR(e) when querying the way's access (or other
   // information) works the same for inverted and non-inverted edges.
   std::uint32_t contra_way : 1;
+  // 1 iff the edges passes one or more shape nodes.
+  std::uint32_t has_shapes : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
   std::uint32_t cross_country : 1;
@@ -337,25 +340,27 @@ struct GCluster {
   struct EdgeDescriptor {
     uint32_t g_from_idx = INFU32;
     uint32_t g_edge_idx = INFU32;
-    uint32_t c_from_idx = INFU32;
-    uint32_t c_edge_idx = INFU32;
+    uint32_t tmp_c_from_idx = INFU32;
+    uint32_t tmp_c_edge_idx = INFU32;
     uint32_t pos = INFU32;
   };
   uint32_t cluster_id = 0;
 
-  // Number of non-deadend nodes.
+  // Number of non-dead-end nodes.
   uint32_t num_nodes = 0;
-  // Number of border nodes (part of num_nodes above).
+  // Number of border nodes (contained in num_nodes above).
   uint32_t num_border_nodes = 0;
-  // Number of deadend_nodes. Total number of nodes is num_nodes +
-  // num_deadend_nodes.
+  // Number of dead-end nodes.
+  // Total number of nodes is num_deadend_nodes + num_nodes above.
   uint32_t num_deadend_nodes = 0;
 
-  // Each edge is either 'inner', 'outer' (connects to another cluster) or a
-  // bridge.
+  // Forward edges between (non-dead-end) nodes in the cluster.
   uint32_t num_inner_edges = 0;
-  uint32_t num_outer_edges = 0;
+  // Forward edges between nodes in the cluster with at least one node is in a
+  // dead-end. Note that this includes bridges.
   uint32_t num_deadend_edges = 0;
+  // Forward edges between nodes in different (but valid) clusters.
+  uint32_t num_outer_edges = 0;
 
   // The number of valid paths, and the sum of all path nodes in these paths.
   uint32_t num_valid_paths = 0;
@@ -540,6 +545,44 @@ struct Graph {
     return node_idx;
   }
 
+  // Get the shape nodes between node1_idx and node2_idx in 'way'.
+  uint32_t GetGWayShadowNodes(const GWay& way, uint32_t node1_idx,
+                              uint32_t node2_idx) const {
+    std::vector<uint64_t> ids = GetGWayNodeIds(way);
+    const GNode& n1 = nodes.at(node1_idx);
+    const GNode& n2 = nodes.at(node2_idx);
+
+    int64_t pos1 = -1;
+    int64_t pos2 = -1;
+    for (uint32_t i = 0; i < ids.size(); ++i) {
+      if (ids.at(i) == (uint64_t)n1.node_id && pos1 < 0) {
+        pos1 = i;
+      }
+      if (pos1 >= 0 && ids.at(i) == (uint64_t)n2.node_id && pos2 < 0) {
+        pos2 = i;
+      }
+    }
+    if (pos1 < 0) {
+      LOG_S(INFO) << absl::StrFormat("Way %lld shape1 %lld not found", way.id,
+                                     n1.node_id);
+    } else if (pos2 < 0) {
+      LOG_S(INFO) << absl::StrFormat("Way %lld shape2 %lld not found", way.id,
+                                     n2.node_id);
+    } else if (pos2 <= pos1) {
+      LOG_S(INFO) << absl::StrFormat("Way %lld shapes %lld to %lld wrong order",
+                                     way.id, n1.node_id, n2.node_id);
+    } else if (pos2 == pos1 + 1) {
+      LOG_S(INFO) << absl::StrFormat("Way %lld shapes empty %lld to %lld",
+                                     way.id, n1.node_id, n2.node_id);
+    } else {
+      LOG_S(INFO) << absl::StrFormat("Way %lld shapes %lld to %lld length %lld",
+                                     way.id, n1.node_id, n2.node_id,
+                                     pos2 - pos1 - 1);
+      return (pos2 - pos1 - 1);
+    }
+    return 0;
+  }
+
   inline size_t gnode_edges_stop(uint32_t node_idx) const {
     return node_idx + 1 < nodes.size() ? nodes.at(node_idx + 1).edges_start_pos
                                        : edges.size();
@@ -712,10 +755,10 @@ inline uint32_t gnode_num_incoming_edges(const Graph& g, uint32_t node_idx) {
   return count;
 }
 
-inline const uint32_t gnode_find_forward_edge_offset(const Graph& g,
-                                                     uint32_t from_node_idx,
-                                                     uint32_t to_node_idx,
-                                                     uint32_t way_idx) {
+inline uint32_t gnode_find_forward_edge_offset(const Graph& g,
+                                               uint32_t from_node_idx,
+                                               uint32_t to_node_idx,
+                                               uint32_t way_idx) {
   const GNode& from = g.nodes.at(from_node_idx);
   uint32_t e_start = from.edges_start_pos;
   for (uint32_t off = 0; off < from.num_forward_edges; ++off) {
@@ -730,10 +773,8 @@ inline const uint32_t gnode_find_forward_edge_offset(const Graph& g,
       g.ways.at(way_idx).id);
 }
 
-inline const uint32_t gnode_find_edge_idx(const Graph& g,
-                                          uint32_t from_node_idx,
-                                          uint32_t to_node_idx,
-                                          uint32_t way_idx) {
+inline uint32_t gnode_find_edge_idx(const Graph& g, uint32_t from_node_idx,
+                                    uint32_t to_node_idx, uint32_t way_idx) {
   uint32_t e_start = gnode_edges_start(g, from_node_idx);
   uint32_t num = gnode_edges_stop(g, from_node_idx) - e_start;
   for (uint32_t off = 0; off < num; ++off) {

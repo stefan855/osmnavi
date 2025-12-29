@@ -46,7 +46,7 @@ struct TurnRestriction {
     std::uint32_t from_node_idx;
     std::uint32_t way_idx;
     std::uint32_t to_node_idx;
-    std::uint32_t edge_idx;
+    std::uint32_t edge_idx{}; // TODO: really needed?
 
     bool operator==(const TREdge& other) const {
       return from_node_idx == other.from_node_idx && way_idx == other.way_idx &&

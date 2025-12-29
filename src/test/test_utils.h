@@ -201,6 +201,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         // .bridge = 0, // TODO: remove
                         .to_bridge = 0,
                         .contra_way = std::get<5>(e),
+                        .has_shapes = 0,
                         .cross_country = 0,
                         .inverted = 0,
                         .both_directions = 0,

@@ -93,7 +93,7 @@ Graph CreateEdgeClusterGraph(bool both_dirs) {
   AddEdge(C, D, 4000, GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
-  build_clusters::UpdateEdgesAndBorderNodes(&g);
+  build_clusters::LabelEdgesAndNodes(&g);
   for (GCluster& cl : g.clusters) {
     build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
                                                 VH_MOTORCAR, &cl);
@@ -624,7 +624,7 @@ Graph CreateClusterGraph(bool both_dirs) {
   AddEdge(F, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
-  build_clusters::UpdateEdgesAndBorderNodes(&g);
+  build_clusters::LabelEdgesAndNodes(&g);
   for (GCluster& cl : g.clusters) {
     build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
                                                 VH_MOTORCAR, &cl);
@@ -712,7 +712,7 @@ Graph CreateClusterGraphDoubleEdge(bool both_dirs) {
   AddEdge(F, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
-  build_clusters::UpdateEdgesAndBorderNodes(&g);
+  build_clusters::LabelEdgesAndNodes(&g);
   for (GCluster& cl : g.clusters) {
     build_clusters::ComputeShortestClusterPaths(g, RoutingMetricDistance(),
                                                 VH_MOTORCAR, &cl);

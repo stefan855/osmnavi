@@ -265,22 +265,19 @@ inline void ExecuteLouvain(int n_threads, Graph* graph) {
 // Assign cluster_id to the nodes in the subtree below 'start_node_idx'.
 //
 // Note that 'start_node_idx' has to be on the dead-end side of a bridge edge.
-inline uint32_t AssignClusterIdsInDeadEnd(Graph* g, uint32_t start_node_idx,
-                                          uint32_t cluster_id) {
-  GCluster& cluster = g->clusters.at(cluster_id);
+inline void AssignClusterIdsInDeadEnd(Graph* g, uint32_t start_node_idx,
+                                      uint32_t cluster_id) {
   GNode& start = g->nodes.at(start_node_idx);
   CHECK_S(start.dead_end);
   CHECK_EQ_S(start.cluster_id, INVALID_CLUSTER_ID);
   start.cluster_id = cluster_id;
-  cluster.num_deadend_nodes++;
   std::vector<uint32_t> nodes({start_node_idx});
-  uint32_t num_nodes = 1;
   size_t pos = 0;
   while (pos < nodes.size()) {
     uint32_t node_pos = nodes.at(pos++);
     for (GEdge& e : gnode_all_edges(*g, node_pos)) {
       if (e.bridge) {
-        continue;
+        continue;  // This leaves the dead-end.
       }
       CHECK_S(e.dead_end) << GetGNodeIdSafe(*g, node_pos) << "->"
                           << GetGNodeIdSafe(*g, e.target_idx);
@@ -291,12 +288,9 @@ inline uint32_t AssignClusterIdsInDeadEnd(Graph* g, uint32_t start_node_idx,
       CHECK_S(target.dead_end);
       CHECK_EQ_S(target.cluster_id, INVALID_CLUSTER_ID);
       target.cluster_id = cluster_id;
-      cluster.num_deadend_nodes++;
-      num_nodes++;
       nodes.push_back(e.target_idx);
     }
   }
-  return num_nodes;
 }
 
 inline void AssignClusterIdsInAllDeadEnds(Graph* g) {
@@ -321,65 +315,73 @@ inline void AssignClusterIdsInAllDeadEnds(Graph* g) {
   }
 }
 
-inline void UpdateEdgesAndBorderNodes(Graph* g) {
+// This is called after all clusters have been created and the cluster id of
+// non-dead-end nodes has been set.
+inline void LabelEdgesAndNodes(Graph* g) {
   FUNC_TIMER();
-  // Mark cross-cluster edges and count edge types.
+
+  // Label border-nodes and edges.
   for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
     GNode& n = g->nodes.at(node_pos);
     n.cluster_border_node = 0;
     if (n.cluster_id == INVALID_CLUSTER_ID) {
       continue;
     }
-    GCluster& cluster = g->clusters.at(n.cluster_id);
-    cluster.num_nodes++;
-
+    // We label all edges (also inverted edges). But we don't count forward
+    // edges below.
     for (GEdge& e : gnode_all_edges(*g, node_pos)) {
-      GNode& other = g->nodes.at(e.target_idx);
+      GNode& target = g->nodes.at(e.target_idx);
 
-      // By construction, any connection to an non-clustered node must be
-      // through a bridge.
-      // CHECK_EQ_S(other.cluster_id == INVALID_CLUSTER_ID, e.bridge !=
-      // 0);
-      if (e.bridge) {
-        // Assign cluster id to all edges in dead end.
-        ;  // do nothing, ignore dead-ends.
-      } else if (n.cluster_id == other.cluster_id) {
-        // Count inner edges only once (instead of twice). Self-edges are
-        // not counted.
-        if (n.node_id > other.node_id) {
-          cluster.num_inner_edges++;
-        }
-        // CHECK_S(e.type == GEdge::TYPE_UNKNOWN ||
-        //         e.type == GEdge::TYPE_CLUSTER_INNER)
-        //     << e.type;
-        // e.type = GEdge::TYPE_CLUSTER_INNER;
-      } else {
-        CHECK_NE_S(other.cluster_id, INVALID_CLUSTER_ID);
-        cluster.num_outer_edges++;
+      if (!e.bridge && n.cluster_id != target.cluster_id) {
+        CHECK_NE_S(target.cluster_id, INVALID_CLUSTER_ID);
         n.cluster_border_node = 1;
-        other.cluster_border_node = 1;
-        // CHECK_EQ_S(e.type, GEdge::TYPE_UNKNOWN);
-        // e.type = GEdge::TYPE_CLUSTER_BORDER;
+        target.cluster_border_node = 1;
         e.cluster_border_edge = 1;
       }
     }
   }
 
-  // Store and count border nodes in a *separate* loop. This avoids issues
-  // when there are parallel edges.
-  for (uint32_t node_pos = 0; node_pos < g->nodes.size(); ++node_pos) {
-    GNode& n = g->nodes.at(node_pos);
-    if (!n.cluster_border_node) {
+  // Label nodes and edges in dead ends
+  AssignClusterIdsInAllDeadEnds(g);
+
+  // Count nodes and edges for each cluster and collect border nodes.
+  for (uint32_t n0_pos = 0; n0_pos < g->nodes.size(); ++n0_pos) {
+    const GNode& n0 = g->nodes.at(n0_pos);
+    if (n0.cluster_id == INVALID_CLUSTER_ID) {
+      // n0 is in a component that hasn't been clustered.
       continue;
     }
-    CHECK_NE_S(n.cluster_id, INVALID_CLUSTER_ID);
-    if (n.cluster_id != INVALID_CLUSTER_ID) {
-      GCluster& cluster = g->clusters.at(n.cluster_id);
-      cluster.num_border_nodes++;
-      cluster.border_nodes.push_back(node_pos);
+    GCluster& cl0 = g->clusters.at(n0.cluster_id);
+    if (n0.cluster_border_node) {
+      CHECK_S(!n0.dead_end);
+      cl0.num_nodes++;
+      cl0.num_border_nodes++;
+      // Since g->nodes is sorted by 'id', this vector is also sorted.
+      cl0.border_nodes.push_back(n0_pos);
+    } else if (!n0.dead_end) {
+      cl0.num_nodes++;
+    } else {
+      cl0.num_deadend_nodes++;
+    }
+
+    for (GEdge& e : gnode_forward_edges(*g, n0_pos)) {
+      const GNode& n1 = g->nodes.at(e.target_idx);
+      if (e.cluster_border_edge) {
+        CHECK_NE_S(n0.cluster_id, n1.cluster_id);
+        cl0.num_outer_edges++;
+        g->clusters.at(n1.cluster_id).num_outer_edges++;
+      } else if (e.bridge || e.dead_end) {
+        CHECK_EQ_S(n0.cluster_id, n1.cluster_id);
+        CHECK_S(!e.cluster_border_edge);
+        cl0.num_deadend_edges++;
+      } else {
+        CHECK_EQ_S(n0.cluster_id, n1.cluster_id);
+        cl0.num_inner_edges++;
+      }
     }
   }
 
+  // Validate.
   for (GCluster& cluster : g->clusters) {
     // By construction, we should not have empty clusters.
     CHECK_GT_S(cluster.num_nodes, 0) << cluster.cluster_id;
@@ -387,11 +389,8 @@ inline void UpdateEdgesAndBorderNodes(Graph* g) {
     CHECK_S(std::is_sorted(cluster.border_nodes.begin(),
                            cluster.border_nodes.end()))
         << cluster.cluster_id;
-    // std::sort(cluster.border_nodes.begin(),
-    // cluster.border_nodes.end());
+    CHECK_EQ_S(cluster.border_nodes.size(), cluster.num_border_nodes);
   }
-
-  AssignClusterIdsInAllDeadEnds(g);
 }
 
 // Compute all shortest paths between border nodes in a cluster. The
@@ -454,10 +453,6 @@ void AddBorderEdgeInformation(
     const Graph& g, const CompactGraph& cg,
     const absl::flat_hash_map<uint32_t, uint32_t>& gnode_to_compact,
     GCluster* cluster) {
-  // const std::vector<uint32_t>& cg_edges_start = cg.edges_start();
-  // const std::vector<CompactGraph::PartialEdge>& cg_edges =
-  // cg.edges();
-
   // Iterate over all border nodes and collect information about
   // incoming/outgoing edges from/to other clusters.
   for (uint32_t cn_idx = 0; cn_idx < cluster->border_nodes.size(); ++cn_idx) {
@@ -484,8 +479,8 @@ void AddBorderEdgeInformation(
         cluster->border_in_edges.push_back(
             {.g_from_idx = g_from_idx,
              .g_edge_idx = gfe.gedge_idx(g),
-             .c_from_idx = c_from_idx,
-             .c_edge_idx = (uint32_t)ce_idx,
+             .tmp_c_from_idx = c_from_idx,
+             .tmp_c_edge_idx = (uint32_t)ce_idx,
              .pos = (uint32_t)cluster->border_in_edges.size()});
       }
     }
@@ -505,8 +500,8 @@ void AddBorderEdgeInformation(
         cluster->border_out_edges.push_back(
             {.g_from_idx = gn_idx,
              .g_edge_idx = ge_idx,
-             .c_from_idx = cn_idx,
-             .c_edge_idx = (uint32_t)ce_idx,
+             .tmp_c_from_idx = cn_idx,
+             .tmp_c_edge_idx = (uint32_t)ce_idx,
              .pos = (uint32_t)cluster->border_out_edges.size()});
         // Edges between clusters should not trigger complex restrictions.
         CHECK_S(cg.edges().at(ce_idx).complex_tr_trigger == 0);
@@ -561,10 +556,10 @@ inline void ComputeShortestClusterEdgePaths(Graph* g,
     // Now store the edge_distances for this border node.
     cluster->edge_distances.emplace_back();
     SingleSourceEdgeDijkstra router;
-    int16_t off =
-        (int16_t)(in_edge.c_edge_idx - cg.edges_start().at(in_edge.c_from_idx));
+    int16_t off = (int16_t)(in_edge.tmp_c_edge_idx -
+                            cg.edges_start().at(in_edge.tmp_c_from_idx));
     router.Route(cg,
-                 {.c_start_idx = in_edge.c_from_idx,
+                 {.c_start_idx = in_edge.tmp_c_from_idx,
                   .c_edge_offset = off,
                   .edge_weight_fraction = 0.0},
                  {.handle_restricted_access = true});
@@ -574,7 +569,7 @@ inline void ComputeShortestClusterEdgePaths(Graph* g,
     for (const auto& out_edge : cluster->border_out_edges) {
       // Get the best min_weight if there is more than one entry.
       cluster->edge_distances.back().push_back(
-          vis.at(out_edge.c_edge_idx).min_weight);
+          vis.at(out_edge.tmp_c_edge_idx).min_weight);
     }
 
     {
@@ -583,7 +578,7 @@ inline void ComputeShortestClusterEdgePaths(Graph* g,
       const std::vector<CompactGraph::PartialEdge>& edges = cg.edges();
       for (const auto& out_edge : cluster->border_out_edges) {
         // g->nodes.at(out_edge.g_from_idx).cluster_skeleton = 1;
-        uint32_t e_idx = out_edge.c_edge_idx;
+        uint32_t e_idx = out_edge.tmp_c_edge_idx;
         if (vis.at(e_idx).min_weight == INFU32) {
           continue;
         }
@@ -692,12 +687,13 @@ inline void PrintClusterInformation(const Graph& g) {
         (rec.num_border_nodes * (rec.num_border_nodes - 1)) / 2;
 
     LOG_S(INFO) << absl::StrFormat(
-        "Rank:%5u Cluster %4u: Nodes:%5u Border:%5u Deadend:%5u Tot:%5u In:%5u "
-        "Out:%5u Out/In:%2.2f%% #avg-p-nodes:%.2f ex-id:%lld",
+        "Rnk:%5u Clust:%5u Nodes #:%5u #b:%3u #d-e:%5u tot:%5u Edges #in:%5u "
+        "#out:%5u o/i:%2.2f%% #d-e:%5u #avg-l-path:%.2f exid:%lld",
         i, rec.cluster_id, rec.num_nodes, rec.num_border_nodes,
         rec.num_deadend_nodes, rec.num_nodes + rec.num_deadend_nodes,
         rec.num_inner_edges, rec.num_outer_edges,
         (100.0 * rec.num_outer_edges) / std::max(rec.num_inner_edges, 1u),
+        rec.num_deadend_edges,
         static_cast<double>(rec.sum_valid_path_nodes) / rec.num_valid_paths,
         rec.border_nodes.empty() ? 0
                                  : g.nodes.at(rec.border_nodes.at(0)).node_id);

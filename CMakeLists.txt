@@ -30,10 +30,21 @@ add_definitions(-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D LOGURU_DEBUG_CHECK
 # add_compile_options(-H)
 add_compile_options(-O3)
 add_compile_options(-Wall)
+add_compile_options(-Wclobbered -Wcast-function-type -Wdangling-reference
+  -Wdeprecated-copy -Wempty-body -Wignored-qualifiers  -Wimplicit-fallthrough=3
+  -Wstring-compare  -Wredundant-move -Wtype-limits
+  -Wuninitialized -Wshift-negative-value
+  -Wunused-but-set-parameter)
+# Turn on when things are more or less finished. Right now there is too much
+# temporary code we would need to fix.
+# add_compile_options(-Wmissing-field-initializers)
+
+
 # add_compile_options(-Wno-unused-but-set-variable)
 # add_compile_options(-Wno-unused-variable)
 add_compile_options(-DLOGURU_WITH_STREAMS=1)
-add_compile_options(-march=native -mtune=native -ffast-math)
+add_compile_options(-march=native -mtune=native)
+# add_compile_options(-march=native -mtune=native -ffast-math)
 # lto=Link Time Optimization
 # add_compile_options(-flto -fwhole-program)
 

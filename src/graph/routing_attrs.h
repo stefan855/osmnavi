@@ -147,7 +147,6 @@ inline DIRECTION DirectionToEnum(std::string_view dir_str) {
   return DIR_MAX;
 }
 
-
 inline bool IsDirBoth(DIRECTION dir) {
   return dir >= DIR_BOTH && dir < DIR_MAX;
 }
@@ -695,20 +694,26 @@ constexpr uint16_t INFINITE_MAXSPEED = 1023;  // 2^10 - 1
 constexpr uint16_t WALK_MAXSPEED = 7;
 
 struct alignas(2) RoutingAttrs {
-  uint8_t dir : 1;    // 1 if the direction of the road is allowed, 0 if not.
-  ACCESS access : 4;  // no, private, ...
+  // 1 if the direction of the road is allowed, 0 if not.
+  uint8_t dir : 1;
+  // no, private, ...
+  ACCESS access : 4;
   uint16_t maxspeed : 10;
   uint16_t lit : 1;
   uint16_t toll : 1;
   SURFACE surface : 6;
   TRACKTYPE tracktype : 3;
   SMOOTHNESS smoothness : 4;
-  uint16_t left_side : 1;   // is on left side, e.g. a sidewalk or a cycleway.
-  uint16_t right_side : 1;  // is on right side. Both left_side and right_side
-                            // can be 1!
-  uint16_t width_dm : 8;    // 0 = unknown, otherwise width in decimeters.
-  // uint16_t smoothness : 3;
+  // is on left side, e.g. a sidewalk or a cycleway.
+  uint16_t left_side : 1;
+  // is on right side. Both left_side and right_side can be 1!
+  uint16_t right_side : 1;
+  // 0 = unknown, otherwise width in decimeters.
+  uint16_t width_dm : 8;
 };
+static_assert(std::is_standard_layout<RoutingAttrs>::value);
+static_assert(std::is_trivial<RoutingAttrs>::value);
+
 
 inline void ClearRoutingAttrs(RoutingAttrs* ra) {
   std::memset(ra, 0, sizeof(RoutingAttrs));

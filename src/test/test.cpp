@@ -679,6 +679,26 @@ void TestInts() {
   TestInt(-9223372036854775807ll - 1);
 }
 
+void CheckZigZag(int64_t i) {
+  uint64_t enci = ZigZagEncode(i);
+  int64_t deci = ZigZagDecode(enci);
+  LOG_S(INFO) << absl::StrFormat("ZigZagEncode/Decode %lli -> %llu > %lli", i,
+                                 enci, deci);
+  CHECK_EQ_S(i, deci) << enci;
+}
+
+void TestZigZag() {
+  FUNC_TIMER()
+  uint64_t u = 0;
+  while (u < std::numeric_limits<int64_t>::max()) {
+    CheckZigZag(-static_cast<int64_t>(u));
+    CheckZigZag(static_cast<int64_t>(u));
+    u = (u + 1ll) * 2ll;  // will overflow to < 0 before stopping.
+  }
+  CheckZigZag(std::numeric_limits<int64_t>::max());
+  CheckZigZag(std::numeric_limits<int64_t>::min());
+}
+
 void TestString(const std::string& val) {
   WriteBuff buff;
   LOG_S(INFO) << absl::StrFormat("Encode String <%s> length:%llu", val.c_str(),
@@ -1369,7 +1389,7 @@ void TestDeDuperMergeSort() {
   std::vector<std::vector<uint32_t>> mappings;
   const std::vector<DeDuperWithIds<std::string>> input = {dd1, dd2};
   DeDuperWithIds<std::string>::MergeSort(input, &objects, &mappings);
-  
+
   // Result is a:4 c:3 b:2 d:1.
   CHECK_S(objects == std::vector<std::string>({"a", "c", "b", "d"}));
   CHECK_EQ_S(mappings.size(), 2);
@@ -1576,6 +1596,69 @@ void TestSmallVector() {
   }
 }
 
+namespace {
+uint64_t uint64_diff(int64_t a, int64_t b) {
+  // Option 1: use std::abs (C++ only) – works because the result fits in
+  // uint64_t Note: std::abs on int64_t returns int64_t, which is safe for the
+  // range we need. return static_cast<uint64_t>(std::llabs(a - b));
+
+  // Option 2: manual branch (portable C and C++)
+  if (a >= b) {
+    // Cast after subtraction to keep the intermediate signed math correct
+    return static_cast<uint64_t>(a - b);
+  } else {
+    return static_cast<uint64_t>(b - a);
+  }
+}
+
+uint64_t uint64_diff_unsigned(int64_t a, int64_t b) {
+  uint64_t ua = static_cast<uint64_t>(a);
+  uint64_t ub = static_cast<uint64_t>(b);
+
+  // Ensure we always subtract the smaller from the larger
+  if (ua > ub) {
+    return ua - ub;
+  } else {
+    return ub - ua;
+  }
+}
+
+#if 0
+uint64_t abs_diff(int64_t a, int64_t b) {
+    return llabs(a - b);
+}
+#endif
+
+uint64_t abs_diff(int64_t a, int64_t b) {
+  int64_t diff = a - b;
+  return diff < 0 ? ~static_cast<uint64_t>(diff) + 1
+                  : static_cast<uint64_t>(diff);
+}
+
+}  // namespace
+
+void TestDeltaInt() {
+  FUNC_TIMER();
+
+  int64_t i1 = std::numeric_limits<int64_t>::max() - 1;
+  int64_t i2 = std::numeric_limits<int64_t>::min() + 1;
+
+  LOG_S(INFO) << "i1 - i2:" << (i1 - i2);
+  LOG_S(INFO) << "i2 - i1:" << (i2 - i1);
+  LOG_S(INFO) << "uint64_diff_unsigned(i1, i2):"
+              << uint64_diff_unsigned(i1, i2);
+  LOG_S(INFO) << "uint64_diff_unsigned(i2, i1):"
+              << uint64_diff_unsigned(i2, i1);
+  LOG_S(INFO) << "uint64_diff(i1, i2):" << uint64_diff(i1, i2);
+  LOG_S(INFO) << "uint64_diff(i2, i1):" << uint64_diff(i2, i1);
+  LOG_S(INFO) << "static_cast<uint64_t>(std::llabs((i1 - i2)))"
+              << static_cast<uint64_t>(std::llabs((i1 - i2)));
+  LOG_S(INFO) << "static_cast<uint64_t>(std::llabs((i2 - i1)))"
+              << static_cast<uint64_t>(std::llabs((i2 - i1)));
+  LOG_S(INFO) << "abs_diff(i1, i2):" << abs_diff(i1, i2);
+  LOG_S(INFO) << "abs_diff(i2, i1):" << abs_diff(i2, i1);
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -1586,6 +1669,7 @@ int main(int argc, char* argv[]) {
   TestSimpleMemPoolAligned();
   TestHugeBitset();
   TestInts();
+  TestZigZag();
   TestStrings();
   TestNodeLists();
   TestNodeids();
@@ -1618,6 +1702,8 @@ int main(int argc, char* argv[]) {
 
   TestTurningCostCompression();
   TestSmallVector();
+
+  TestDeltaInt();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

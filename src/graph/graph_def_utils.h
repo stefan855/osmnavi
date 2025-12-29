@@ -11,18 +11,18 @@
 // edge index is stored.
 class FullEdge final {
  public:
-  FullEdge() : valid_(0) {}
-  FullEdge(const FullEdge& e)
-      : start_idx_(e.start_idx_), offset_(e.offset_), valid_(e.valid_) {}
-  FullEdge(uint32_t start_idx, uint32_t offset)
+  constexpr FullEdge() : valid_(0) {}
+  // constexpr FullEdge(const FullEdge& e)
+  //     : start_idx_(e.start_idx_), offset_(e.offset_), valid_(e.valid_) {}
+  constexpr FullEdge(uint32_t start_idx, uint32_t offset)
       : start_idx_(start_idx), offset_(offset), valid_(1) {}
 
-  inline const uint32_t start_idx() const { return start_idx_; }
-  inline const uint32_t offset() const { return offset_; }
+  inline uint32_t start_idx() const { return start_idx_; }
+  inline uint32_t offset() const { return offset_; }
   inline const GNode& start_node(const Graph& g) const {
     return g.nodes.at(start_idx_);
   }
-  inline const uint32_t target_idx(const Graph& g) const {
+  inline uint32_t target_idx(const Graph& g) const {
     return gedge(g).target_idx;
   }
   inline const GNode& target_node(const Graph& g) const {
@@ -94,7 +94,8 @@ inline std::vector<FullEdge> gnode_unique_forward_edges(
   return res;
 }
 
-// Note, this returns a new vector, not a span.
+// Returns a vector contain all incoming edges at 'node_idx'.
+// Note that inverted edges are never returned here.
 inline std::vector<FullEdge> gnode_incoming_edges(const Graph& g,
                                                   uint32_t node_idx) {
   std::vector<FullEdge> res;
@@ -238,8 +239,8 @@ struct N3Path final {
   const GEdge& edge1(const Graph& g) const {
     return g.edges.at(node1(g).edges_start_pos + edge1_off);
   }
-  const uint32_t way0_idx(const Graph& g) const { return edge0(g).way_idx; }
-  const uint32_t way1_idx(const Graph& g) const { return edge1(g).way_idx; }
+  uint32_t way0_idx(const Graph& g) const { return edge0(g).way_idx; }
+  uint32_t way1_idx(const Graph& g) const { return edge1(g).way_idx; }
 
   // The compressed turn cost between the first and the second edge.
   uint32_t get_compressed_turn_cost_0to1(const Graph& g) const {

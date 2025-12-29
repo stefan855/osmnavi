@@ -135,6 +135,7 @@ struct BuildGraphStats {
   int64_t num_edges_forward_car_restricted2 = 0;
   int64_t num_edges_forward_car_strange = 0;
   int64_t num_edges_forward_car_forbidden = 0;
+  int64_t num_edges_has_shapes = 0;
   int64_t num_edges_non_unique = 0;
   int64_t num_edges_at_simple_tr_via = 0;
   int64_t num_edges_low_priority = 0;
@@ -226,6 +227,7 @@ struct BuildGraphStats {
         other.num_edges_forward_car_restricted2;
     num_edges_forward_car_strange += other.num_edges_forward_car_strange;
     num_edges_forward_car_forbidden += other.num_edges_forward_car_forbidden;
+    num_edges_has_shapes += other.num_edges_has_shapes;
     num_edges_non_unique += other.num_edges_non_unique;
     num_edges_at_simple_tr_via += other.num_edges_at_simple_tr_via;
     num_edges_low_priority += other.num_edges_low_priority;

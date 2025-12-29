@@ -38,13 +38,13 @@
 class Argli {
  public:
   struct ArgDef {
-    std::string name;
-    std::string type;  // "string", "int", "bool" or "double".
+    std::string name{};
+    std::string type{};  // "string", "int", "bool" or "double".
     bool positional = false;
     bool required = false;  // true if argument must be specified.
-    std::string dflt;       // default value if any. The default of the default
+    std::string dflt{};     // default value if any. The default of the default
                             // is "", 0, false and 0.0 for the four types.
-    std::string desc;       // description of the argument.
+    std::string desc{};     // description of the argument.
   };
 
   // Parse commandline arguments. Aborts with an error message if arguments are

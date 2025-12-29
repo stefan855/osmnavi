@@ -184,7 +184,8 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       const std::vector<uint32_t> v = p.GetWayNodeIndexes(g);
       tr->path.push_back({.from_node_idx = v.at(v.size() - 2),
                           .way_idx = p.way_idx,
-                          .to_node_idx = v.at(v.size() - 1)});
+                          .to_node_idx = v.at(v.size() - 1),
+                          .edge_idx = INFU32});
       // tr->path_start_node_idx = v.at(v.size() - 2);
     }
 
@@ -196,7 +197,8 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
         for (size_t pos = 0; pos < node_indexes.size() - 1; ++pos) {
           tr->path.push_back({.from_node_idx = node_indexes.at(pos),
                               .way_idx = p.way_idx,
-                              .to_node_idx = node_indexes.at(pos + 1)});
+                              .to_node_idx = node_indexes.at(pos + 1),
+                              .edge_idx = INFU32});
         }
       }
     }
@@ -208,7 +210,8 @@ inline bool ConnectTurnRestriction(const Graph& g, Verbosity verbosity,
       const std::vector<uint32_t> v = p.GetWayNodeIndexes(g);
       tr->path.push_back({.from_node_idx = v.at(0),
                           .way_idx = p.way_idx,
-                          .to_node_idx = v.at(1)});
+                          .to_node_idx = v.at(1),
+                          .edge_idx = INFU32});
     }
   }
 
@@ -477,7 +480,8 @@ inline void ParseTurnRestriction(const Graph& g, const OSMTagHelper& tagh,
                             .to_way_id = to_id,
                             .via_is_node = via_type == OSMPBF::Relation::NODE,
                             .forbidden = forbidden,
-                            .direction = direction};
+                            .direction = direction,
+                            .path = {}};
       if (ConnectTurnRestriction(g, verbosity, &tr)) {
         res->trs.push_back(tr);
         res->num_success += 1;

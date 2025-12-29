@@ -75,7 +75,7 @@ void WritePolygon(const AdminInfo& info,
 }
 
 void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
-                     int thread_idx, std::mutex& mut, AdminInfo* admin_info) {
+                     std::mutex& mut, AdminInfo* admin_info) {
   AdminRelation rel;
   if (ExtractAdminRelation(tagh, osm_rel, &rel)) {
     std::unique_lock<std::mutex> l(mut);
@@ -115,7 +115,7 @@ void ReadData(const std::string& filename, int n_threads,
   reader.ReadRelations([&admin_info](const OSMTagHelper& tagh,
                                      const OSMPBF::Relation& osm_rel,
                                      int thread_idx, std::mutex& mut) {
-    ConsumeRelation(tagh, osm_rel, thread_idx, mut, &admin_info);
+    ConsumeRelation(tagh, osm_rel, mut, &admin_info);
   });
   StoreAdminWayRefs(&admin_info);
 

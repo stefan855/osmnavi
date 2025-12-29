@@ -48,7 +48,7 @@ struct RoutingOptions {
     std::uint32_t start_cluster_id = INFU32;
     std::uint32_t target_cluster_id = INFU32;
   };
-  HybridOptions hybrid;
+  HybridOptions hybrid = {};
 
   // If the target node is in a dead-end, fills 'allow_bridge_node_id' with
   // the node_id of the bridge leading to node 'target_idx'. Does nothing if

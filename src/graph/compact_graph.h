@@ -89,8 +89,8 @@ class CompactGraph {
 
   // Return the position of the edge (from_node, to_node) in edges().
   // Returns -1 in case the edge does not exist.
-  const int64_t FindEdge(uint32_t from_node, uint32_t to_node,
-                         int64_t way_idx = -1) const {
+  int64_t FindEdge(uint32_t from_node, uint32_t to_node,
+                   int64_t way_idx = -1) const {
     for (size_t i = edges_start_.at(from_node);
          i < edges_start_.at(from_node + 1); ++i) {
       if (edges_.at(i).to_c_idx == to_node &&
@@ -295,7 +295,7 @@ class CompactGraph {
       const absl::flat_hash_map<uint32_t, uint32_t>& graph_to_compact_nodemap) {
     // Fill complex_trs_.
     for (const TurnRestriction& g_tr : graph_based_trs) {
-      ComplexTurnRestriction cg_tr = {.forbidden = g_tr.forbidden};
+      ComplexTurnRestriction cg_tr = {.path = {}, .forbidden = g_tr.forbidden};
 
       for (const TurnRestriction::TREdge& tr_edge : g_tr.path) {
         TurnRestriction::TREdge cg_edge;
@@ -422,7 +422,11 @@ class CompactGraph {
                         .way_idx = e.way_idx,
                         .restricted_access = e.restricted_access,
                         .simple_tr_trigger = 0,
-                        .complex_tr_trigger = 0});
+                        .complex_tr_trigger = 0,
+                        .turn_cost_idx = 0});
+      // TODO: Setting turn_cost_idx=INVALID_TURN_COST_IDX above makes some
+      // tests fail, although they seem to set turn_cost_idx to valid values.
+      // They shouldn't fail!
       full_restricted += e.restricted_access;
       partial_restricted += edges_.back().restricted_access;
     }

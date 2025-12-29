@@ -18,7 +18,7 @@ GNode RandomGNode(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GNode n = {0};
+  GNode n = {};
 
   // TODO: handle sign?
   n.node_id = dist(myrand) % (1llu << GNODE_ID_BITS);
@@ -42,7 +42,7 @@ GEdge RandomGEdge(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GEdge e = {0};
+  GEdge e = {};
 
   e.target_idx = (uint32_t)(dist(myrand) % (1llu << 32));
   e.way_idx = (uint32_t)(dist(myrand) % (1llu << 32));
@@ -74,7 +74,7 @@ GWay RandomWay(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GWay w = {0};
+  GWay w = {};
 
   // handle sign?
   w.id = dist(myrand) % (1llu << GWAY_ID_BITS);
@@ -112,8 +112,6 @@ GCluster::EdgeDescriptor RandomEdgeDescriptor(uint64_t seed) {
   GCluster::EdgeDescriptor ed;
   ed.g_from_idx = seed % 12345678;
   ed.g_edge_idx = seed % 23456789;
-  ed.c_from_idx = seed % 34567890;
-  ed.c_edge_idx = seed % 45678901;
   ed.pos = seed % 56789012;
   return ed;
 }
@@ -124,7 +122,7 @@ GCluster RandomGCluster(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  GCluster cl = {0};
+  GCluster cl = {};
 
   cl.cluster_id = (uint32_t)dist(myrand);
   cl.num_nodes = (uint32_t)dist(myrand);
@@ -172,7 +170,7 @@ WaySharedAttrs RandomWaySharedAttrs(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  WaySharedAttrs wsa = {0};
+  WaySharedAttrs wsa = {};
   for (RoutingAttrs& ra : wsa.ra) {
     ra.dir = dist(myrand) % (1llu << 1);
     ra.access = static_cast<ACCESS>(dist(myrand) % (1llu << 4));
@@ -195,7 +193,7 @@ TurnRestriction RandomTurnRestriction(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  TurnRestriction tr = {0};
+  TurnRestriction tr = {};
   tr.relation_id = dist(myrand);
   tr.from_way_id = dist(myrand);
   tr.via_ids = RandomVec<int64_t>(dist(myrand) % 5);
@@ -237,16 +235,16 @@ void TestGNode() {
   }
 
   WriteBuff wb;
-  GNode prev = {0};
+  GNode prev = {};
   for (uint32_t i = 0; i < 100; ++i) {
     EncodeGNode(prev, nodes.at(i), &wb);
     prev = nodes.at(i);
   }
 
-  prev = {0};
+  prev = {};
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 100; ++i) {
-    GNode dec = {0};
+    GNode dec = {};
     ptr += DecodeGNode(prev, ptr, &dec);
     CHECK_NODES_EQUAL(nodes.at(i), dec);
     prev = dec;
@@ -265,7 +263,7 @@ void TestGEdge() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 100; ++i) {
-    GEdge dec = {0};
+    GEdge dec = {};
     ptr += DecodeGEdge(ptr, &dec);
     const GEdge re = RandomGEdge(i);
     CHECK_EDGES_EQUAL(re, dec);
@@ -310,7 +308,7 @@ void TestGCluster() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 100; ++i) {
-    GCluster dec = {0};
+    GCluster dec = {};
     ptr += DecodeGCluster(ptr, &dec);
     const GCluster re = RandomGCluster(i);
     CHECK_CLUSTERS_EQUAL(re, dec);
@@ -348,7 +346,7 @@ void TestWaySharedAttrs() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 100; ++i) {
-    WaySharedAttrs dec = {0};
+    WaySharedAttrs dec = {};
     ptr += DecodeWaySharedAttrs(ptr, &dec);
     const WaySharedAttrs re = RandomWaySharedAttrs(i);
     CHECK_WAY_SHARED_ATTRS_EQUAL(re, dec);
@@ -367,7 +365,7 @@ void TestTurnRestrictions() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 1; ++i) {
-    TurnRestriction dec = {0};
+    TurnRestriction dec = {};
     ptr += DecodeTurnRestriction(ptr, &dec);
     const TurnRestriction re = RandomTurnRestriction(i);
     CHECK_TURN_RESTRICTION_EQUAL(re, dec);

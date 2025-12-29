@@ -106,6 +106,18 @@ void ValidateGraph(const Graph& g) {
           << debug_str(node) << debug_str(target);
     }
   }
+  // Validate.
+  for (const GCluster& cluster : g.clusters) {
+    // By construction, we should not have empty clusters.
+    CHECK_GT_S(cluster.num_nodes, 0) << cluster.cluster_id;
+    // By construction, the node positions should be sorted.
+    CHECK_S(std::is_sorted(cluster.border_nodes.begin(),
+                           cluster.border_nodes.end()))
+        << cluster.cluster_id;
+    CHECK_EQ_S(cluster.border_nodes.size(), cluster.num_border_nodes);
+    CHECK_EQ_S(cluster.num_outer_edges, cluster.border_in_edges.size() +
+                                            cluster.border_out_edges.size());
+  }
 }
 }  // namespace
 
@@ -674,9 +686,12 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     return;  // Not interesting for routing, ignore.
   }
 
-  WayContext wc = {.osm_way = osm_way,
+  WayContext wc = {.way = {},
+                   .osm_way = osm_way,
                    .pti = ParseTags(tagh, osm_way),
-                   .direction = DIR_MAX};
+                   .direction = DIR_MAX,
+                   .config_forw = {},
+                   .config_backw = {}};
   wc.way.id = osm_way.id();
   wc.way.highway_label = highway_label;
   wc.way.area = tagh.GetValue(osm_way, "area") == "yes";
@@ -763,7 +778,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 
 namespace {
 void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
-             const bool inverted, const bool contra_way,
+             const bool inverted, const bool contra_way, const bool has_shapes,
              const bool both_directions, const size_t way_idx,
              const std::uint64_t distance_cm, bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
@@ -795,6 +810,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.unique_target = 0;
   e.to_bridge = 0;
   e.contra_way = contra_way ? 1 : 0;
+  e.has_shapes = has_shapes ? 1 : 0;
   e.cross_country = n.ncc != other.ncc;
   e.inverted = inverted ? 1 : 0;
   e.both_directions = both_directions ? 1 : 0;
@@ -1042,7 +1058,11 @@ void AllocateEdgeArrays(GraphMetaData* meta) {
   CHECK_S(meta->graph.edges.empty());
 
   meta->graph.edges.reserve(edge_start);
-  meta->graph.edges.resize(edge_start, {.target_idx = INFU32});
+  meta->graph.edges.resize(edge_start);
+  for (auto& e : meta->graph.edges) {
+    e = {};
+    e.target_idx = INFU32;
+  }
 }
 
 void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
@@ -1056,6 +1076,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
   for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
     const GWay& way = graph.ways.at(way_idx);
     ids.clear();
+    // Contains the node index in g.nodes or max() if it is a shape node.
     node_idx.clear();
     dist_sums.clear();
     // Decode node_ids.
@@ -1081,13 +1102,17 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
         if (prev_node.id != 0) {
           sum += calculate_distance(prev_node.lat, prev_node.lon, node.lat,
                                     node.lon);
+#if 0
+          LOG_S(INFO) << "delta-lat:" << (node.lat - prev_node.lat);
+          LOG_S(INFO) << "delta-lon:" << (node.lon - prev_node.lon);
+#endif
         }
         prev_node = node;
       }
       dist_sums.push_back(sum);
       if (meta->way_nodes_needed->GetBit(id)) {
         std::size_t idx = graph.FindNodeIndex(id);
-        CHECK_S(idx >= 0 && idx < graph.nodes.size());
+        CHECK_S(idx < graph.nodes.size());
         node_idx.push_back(idx);
       } else {
         node_idx.push_back(std::numeric_limits<size_t>::max());
@@ -1122,23 +1147,24 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
             std::size_t idx1 = node_idx.at(last_pos);
             std::size_t idx2 = node_idx.at(pos);
             uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(last_pos);
+            bool has_shapes = pos - last_pos > 1;
             // Store edges with the summed up distance.
 
             // if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
             //     WSAAnyRoutable(wsa, DIR_BACKWARD)) {
             if (vt_forward && vt_backward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
-                      /*contra_way=*/false,
+                      /*contra_way=*/false, has_shapes,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_f);
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
-                      /*contra_way=*/true,
+                      /*contra_way=*/true, has_shapes,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_b);
               // } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
             } else if (vt_forward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
-                      /*contra_way=*/false,
+                      /*contra_way=*/false, has_shapes,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
               // Inverted edges should have the same contra way as the
@@ -1146,14 +1172,14 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               // querying the way information works the same for inverted and
               // non-inverted edges.
               AddEdge(graph, idx2, idx1, /*inverted=*/true,
-                      /*contra_way=*/false,
+                      /*contra_way=*/false, has_shapes,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
             } else {
               // CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
               CHECK_S(vt_backward) << way.id;
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
-                      /*contra_way=*/true,
+                      /*contra_way=*/true, has_shapes,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
               // Inverted edges should have the same contra way as the
@@ -1161,7 +1187,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               // querying the way information works the same for inverted and
               // non-inverted edges.
               AddEdge(graph, idx1, idx2, /*inverted=*/true,
-                      /*contra_way=*/true,
+                      /*contra_way=*/true, has_shapes,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
             }
@@ -1308,7 +1334,7 @@ void ComputeShortestEdgePathsInAllClusters(GraphMetaData* meta) {
 void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   FUNC_TIMER();
   build_clusters::ExecuteLouvain(opt.n_threads, &meta->graph);
-  build_clusters::UpdateEdgesAndBorderNodes(&meta->graph);
+  build_clusters::LabelEdgesAndNodes(&meta->graph);
 
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::AssignClusterColors(&(meta->graph));
@@ -1430,6 +1456,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     for (const GEdge& e : gnode_all_edges(g, node_idx)) {
       const GNode& target = g.nodes.at(e.target_idx);
       // const bool edge_dead_end = n.dead_end || target.dead_end;
+      stats->num_edges_has_shapes += e.has_shapes;
       if (!e.unique_target) {
         stats->num_edges_non_unique++;
       }
@@ -1647,6 +1674,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_forward);
   LOG_S(INFO) << absl::StrFormat("  Num inverted:     %12lld",
                                  stats.num_edges_inverted);
+  LOG_S(INFO) << absl::StrFormat("  Num has shapes   %12lld",
+                                 stats.num_edges_has_shapes);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  stats.num_edges_non_unique);
   LOG_S(INFO) << absl::StrFormat("  turn cost table size:%9lld",

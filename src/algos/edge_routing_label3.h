@@ -89,7 +89,7 @@ class alignas(2) EdgeRoutingLabel3 final {
 
   // Get the index of the current edge. For CLUSTER, it returns the index of the
   // outgoing edge.
-  const uint32_t GetEdgeIdx(const Graph& g, const CTRList& ctr_list) const {
+  uint32_t GetEdgeIdx(const Graph& g, const CTRList& ctr_list) const {
     if (type_ == GRAPH) {
       const GNode& n = g.nodes.at(GetFromIdx(g, ctr_list));
       return n.edges_start_pos + GetOffset();

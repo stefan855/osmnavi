@@ -67,7 +67,7 @@ class WriteBuff {
   std::uint32_t used_ = 0;
 };
 
-// Encodes an unsigned 64 bit integer into a a byte array.
+// Encodes an unsigned 64 bit integer into a byte array.
 // Maximum needed size is for the encoding is 'max_varint_bytes'.
 // Return the number of bytes written to 'ptr'.
 inline std::uint32_t EncodeUInt(std::uint64_t v, WriteBuff* buff) {
@@ -83,7 +83,6 @@ inline std::uint32_t EncodeUInt(std::uint64_t v, WriteBuff* buff) {
   return cnt;
 }
 
-#if 1
 inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
   int cnt = 0;
   *v = ptr[cnt] & 127;
@@ -93,51 +92,6 @@ inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
   CHECK_LE_S(cnt, max_varint_bytes);
   return cnt;
 }
-#else
-inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint64_t* v) {
-  *v = ptr[0] & 127;
-  if ((ptr[0] & 128) == 0) {
-    return 1;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[1] & 127)) << 7);
-  if ((ptr[1] & 128) == 0) {
-    return 2;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[2] & 127)) << 14);
-  if ((ptr[2] & 128) == 0) {
-    return 3;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[3] & 127)) << 21);
-  if ((ptr[3] & 128) == 0) {
-    return 4;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[4] & 127)) << 28);
-  if ((ptr[4] & 128) == 0) {
-    return 5;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[5] & 127)) << 35);
-  if ((ptr[5] & 128) == 0) {
-    return 6;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[6] & 127)) << 42);
-  if ((ptr[6] & 128) == 0) {
-    return 7;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[7] & 127)) << 49);
-  if ((ptr[7] & 128) == 0) {
-    return 8;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[8] & 127)) << 56);
-  if ((ptr[8] & 128) == 0) {
-    return 9;
-  }
-  (*v) = (*v) | (((std::uint64_t)(ptr[9] & 127)) << 63);
-  if ((ptr[9] & 128) == 0) {
-    return 10;
-  }
-  ABORT_S() << "corrupted varint input data";
-}
-#endif
 
 inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint32_t* v) {
   uint64_t utmp;
@@ -146,17 +100,60 @@ inline std::uint32_t DecodeUInt(const std::uint8_t* ptr, std::uint32_t* v) {
   return cnt;
 }
 
+// ZigZag encoding, converts signed integers to unsigned integers.
+// See https://github.com/stepchowfun/typical
+inline uint64_t ZigZagEncode(int64_t v) { return (v >> 63) ^ (v << 1); }
+
+// ZigZag decoding, converts unsigned integers that were converted with
+// ZigZagEncode() back to the original signed value.
+// See // https://github.com/stepchowfun/typical
+inline int64_t ZigZagDecode(uint64_t uv) { return (uv >> 1) ^ -(uv & 1); }
+
 inline std::uint32_t EncodeInt(std::int64_t v, WriteBuff* buff) {
-  // ZigZag encoding, see https://github.com/stepchowfun/typical
+#if 0
   std::uint64_t uv = (v >> 63) ^ (v << 1);
   return EncodeUInt(uv, buff);
+#endif
+  return EncodeUInt(ZigZagEncode(v), buff);
 }
 
 inline std::uint32_t DecodeInt(const std::uint8_t* ptr, std::int64_t* v) {
   std::uint64_t uv;
   int cnt = DecodeUInt(ptr, &uv);
-  // ZigZag decoding, see https://github.com/stepchowfun/typical
+#if 0
   *v = (uv >> 1) ^ -(uv & 1);
+#endif
+  *v = ZigZagDecode(uv);
+  return cnt;
+}
+
+inline std::uint32_t DeltaEncodeInt32(int32_t prev, int32_t value,
+                                      WriteBuff* buff) {
+  int64_t delta = (int64_t)value - (int64_t)prev;
+  return EncodeInt(delta, buff);
+}
+
+inline std::uint32_t DeltaDecodeInt32(const std::uint8_t* ptr, int32_t prev,
+                                      int32_t* value) {
+  int64_t delta;
+  const uint32_t cnt = DecodeInt(ptr, &delta);
+  *value = static_cast<int32_t>(prev + delta);
+  return cnt;
+}
+
+// Encodes with positives deltas only, namely value >= prev.
+inline std::uint32_t PositiveDeltaEncodeInt64(int64_t prev, int64_t value,
+                                              WriteBuff* buff) {
+  CHECK_GE_S(value, prev);
+  int64_t delta = value - prev;
+  return EncodeUInt((uint64_t)delta, buff);
+}
+
+inline std::uint32_t PositiveDeltaDecodeInt64(const std::uint8_t* ptr,
+                                              int64_t prev, int64_t* value) {
+  uint64_t delta;
+  const uint32_t cnt = DecodeUInt(ptr, &delta);
+  *value = static_cast<int64_t>(prev + delta);
   return cnt;
 }
 

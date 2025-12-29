@@ -5,7 +5,7 @@
 
 #include "base/simple_mem_pool.h"
 #include "base/varbyte.h"
-#include "graph/graph_def.h"
+// #include "graph/graph_def.h"
 
 // Contains 'num_records' records, encoded into a buffer 'buff', using
 // 'buff_size' bytes.

@@ -246,8 +246,8 @@ void EncodeEdgeDescriptorVector(const std::vector<GCluster::EdgeDescriptor> v,
     struct EdgeDescriptor {
       uint32_t g_from_idx = INFU32;
       uint32_t g_edge_idx = INFU32;
-      uint32_t c_from_idx = INFU32;
-      uint32_t c_edge_idx = INFU32;
+      uint32_t tmp_c_from_idx = INFU32;
+      uint32_t tmp_c_edge_idx = INFU32;
       uint32_t pos = INFU32;
     };
   */
@@ -255,8 +255,6 @@ void EncodeEdgeDescriptorVector(const std::vector<GCluster::EdgeDescriptor> v,
   for (const GCluster::EdgeDescriptor ed : v) {
     EncodeUInt(ed.g_from_idx, buff);
     EncodeUInt(ed.g_edge_idx, buff);
-    EncodeUInt(ed.c_from_idx, buff);
-    EncodeUInt(ed.c_edge_idx, buff);
     EncodeUInt(ed.pos, buff);
   }
 }
@@ -270,8 +268,6 @@ uint32_t DecodeEdgeDescriptorVector(const std::uint8_t* ptr,
     GCluster::EdgeDescriptor ed;
     cnt += DecodeUInt(ptr + cnt, &ed.g_from_idx);
     cnt += DecodeUInt(ptr + cnt, &ed.g_edge_idx);
-    cnt += DecodeUInt(ptr + cnt, &ed.c_from_idx);
-    cnt += DecodeUInt(ptr + cnt, &ed.c_edge_idx);
     cnt += DecodeUInt(ptr + cnt, &ed.pos);
     v->push_back(ed);
   }
