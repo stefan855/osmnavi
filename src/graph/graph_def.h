@@ -112,6 +112,7 @@ struct WaySharedAttrs final {
     return wsa;
   }
 };
+CHECK_IS_POD(WaySharedAttrs);
 
 // Check that WaySharedAttrs is POD. Note the struct has to be completely zeroed
 // when creating one, because bot the equal operator and hash function below

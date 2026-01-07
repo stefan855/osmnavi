@@ -14,6 +14,10 @@
 #include "absl/time/time.h"
 #include "logging/loguru.h"
 
+#define CHECK_IS_POD(type_to_check) \
+  static_assert(std::is_standard_layout<type_to_check>::value); \
+  static_assert(std::is_trivial<type_to_check>::value);
+
 enum class Verbosity : int {
   Quiet = 0,
   Brief = 1,

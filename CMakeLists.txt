@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 
-set( CMAKE_CXX_STANDARD 23 )
+set( CMAKE_CXX_STANDARD 26 )
 # valgrind needs this.
 # set( CMAKE_CXX_FLAGS "-mno-avx" ) 
 set( CMAKE_POSITION_INDEPENDENT_CODE true )
@@ -91,6 +91,10 @@ target_link_libraries(test_louvain PRIVATE absl::strings absl::str_format loguru
 add_executable(test_routing src/test/test_routing.cpp)
 target_include_directories(test_routing SYSTEM PRIVATE)
 target_link_libraries(test_routing PRIVATE osmpbf protobuf::libprotobuf absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time build_graph_lib)
+
+add_executable(test_mmap src/test/test_mmap.cpp)
+target_include_directories(test_mmap SYSTEM PRIVATE)
+target_link_libraries(test_mmap PRIVATE osmpbf protobuf::libprotobuf absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time build_graph_lib)
 
 add_executable(test_serialize src/test/test_serialize.cpp)
 target_include_directories(test_serialize SYSTEM PRIVATE)

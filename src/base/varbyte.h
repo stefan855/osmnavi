@@ -142,18 +142,18 @@ inline std::uint32_t DeltaDecodeInt32(const std::uint8_t* ptr, int32_t prev,
 }
 
 // Encodes with positives deltas only, namely value >= prev.
-inline std::uint32_t PositiveDeltaEncodeInt64(int64_t prev, int64_t value,
-                                              WriteBuff* buff) {
+inline std::uint32_t PositiveDeltaEncodeUInt64(uint64_t prev, uint64_t value,
+                                               WriteBuff* buff) {
   CHECK_GE_S(value, prev);
-  int64_t delta = value - prev;
-  return EncodeUInt((uint64_t)delta, buff);
+  uint64_t delta = value - prev;
+  return EncodeUInt(delta, buff);
 }
 
-inline std::uint32_t PositiveDeltaDecodeInt64(const std::uint8_t* ptr,
-                                              int64_t prev, int64_t* value) {
+inline uint32_t PositiveDeltaDecodeUInt64(const uint8_t* ptr, uint64_t prev,
+                                          uint64_t* value) {
   uint64_t delta;
   const uint32_t cnt = DecodeUInt(ptr, &delta);
-  *value = static_cast<int64_t>(prev + delta);
+  *value = prev + delta;
   return cnt;
 }
 
