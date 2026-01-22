@@ -6,6 +6,9 @@
 constexpr int32_t INF32 = std::numeric_limits<int32_t>::max();
 constexpr int64_t INF64 = std::numeric_limits<int64_t>::max();
 
+constexpr uint32_t MAXU16 = std::numeric_limits<uint16_t>::max();
+constexpr uint32_t INFU16 = MAXU16;
+
 constexpr uint32_t MAXU30 = (1u << 30) - 1;
 constexpr uint32_t INFU30 = MAXU30;
 

@@ -135,9 +135,26 @@ inline std::uint32_t DeltaEncodeInt32(int32_t prev, int32_t value,
 
 inline std::uint32_t DeltaDecodeInt32(const std::uint8_t* ptr, int32_t prev,
                                       int32_t* value) {
-  int64_t delta;
+  int64_t delta;  // use 64 bits to avoid overflows.
   const uint32_t cnt = DecodeInt(ptr, &delta);
   *value = static_cast<int32_t>(prev + delta);
+  return cnt;
+}
+
+inline std::uint32_t DeltaEncodeInt64(int64_t prev, int64_t value,
+                                      WriteBuff* buff) {
+  int64_t delta = value - prev;
+  // The delta could have an overflow, it is not clear to me if this
+  // causes wrong decodings. Check that decoding will work in any case.
+  CHECK_EQ_S(prev + delta, value);
+  return EncodeInt(delta, buff);
+}
+
+inline std::uint32_t DeltaDecodeInt64(const std::uint8_t* ptr, int64_t prev,
+                                      int64_t* value) {
+  int64_t delta;
+  const uint32_t cnt = DecodeInt(ptr, &delta);
+  *value = prev + delta;
   return cnt;
 }
 

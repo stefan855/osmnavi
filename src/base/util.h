@@ -14,9 +14,12 @@
 #include "absl/time/time.h"
 #include "logging/loguru.h"
 
-#define CHECK_IS_POD(type_to_check) \
+#define CHECK_IS_POD(type_to_check)                             \
   static_assert(std::is_standard_layout<type_to_check>::value); \
   static_assert(std::is_trivial<type_to_check>::value);
+
+#define CHECK_IS_TRIVIALLY_COPYABLE(type_to_check) \
+  static_assert(std::is_trivially_copyable_v<type_to_check>);
 
 enum class Verbosity : int {
   Quiet = 0,
@@ -236,4 +239,8 @@ inline void LogMemoryUsage() {
   LOG_S(INFO) << "Total mapped:    " << info.hblkhd;
   LOG_S(INFO) << "Total heap used: " << info.uordblks;
   LOG_S(INFO) << "Total heap free: " << info.fordblks;
+}
+
+inline uint64_t PseudoRandom64(uint64_t state) {
+  return state * 6364136223846793005ULL + 1ULL;
 }

@@ -766,6 +766,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     meta->graph.way_node_ids.push_back(node_ids_buff);
 
     std::string_view streetname = tagh.GetValue(wc.osm_way, "name");
+    CHECK_EQ_S(streetname.find('\0'), streetname.npos) << streetname;
     wc.way.streetname_idx = streetname_deduper->Add(std::string(streetname));
 
     MarkSeenAndNeeded(meta, way_nodes, osm_way, stats);
@@ -1539,6 +1540,11 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
         (100.0 * num_forwards.at(i)) / (g.nodes.size() + 0.01),
         num_forwards_node_id.at(i));
   }
+
+  for (const TurnRestriction& tr : g.complex_turn_restrictions) {
+    stats->max_complex_turn_restriction_path_len =
+        std::max(stats->max_complex_turn_restriction_path_len, tr.path.size());
+  }
 }
 
 void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
@@ -1579,6 +1585,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  meta.simple_turn_restrictions.size());
   LOG_S(INFO) << absl::StrFormat("Num t-restr complex: %11lld",
                                  g.complex_turn_restrictions.size());
+  LOG_S(INFO) << absl::StrFormat("Max compl t-restr path len:%5llu",
+                                 stats.max_complex_turn_restriction_path_len);
 #if 0
   LOG_S(INFO) << absl::StrFormat("Num t-restr comb/simple:%8lld",
                                  g.simple_turn_restriction_map.size());
@@ -1674,7 +1682,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_forward);
   LOG_S(INFO) << absl::StrFormat("  Num inverted:     %12lld",
                                  stats.num_edges_inverted);
-  LOG_S(INFO) << absl::StrFormat("  Num has shapes   %12lld",
+  LOG_S(INFO) << absl::StrFormat("  Num has shapes    %12lld",
                                  stats.num_edges_has_shapes);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
                                  stats.num_edges_non_unique);

@@ -25,9 +25,11 @@
 #include "graph/build_graph.h"
 #include "graph/graph_def.h"
 #include "graph/graph_serialize.h"
+#include "graph/mmgraph.h"
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
 #include "test/equal_checks.h"
+// #include "algos/mm_edge_dijkstra.h"
 
 void PrintDebugInfoForNode(const build_graph::GraphMetaData& meta,
                            int64_t node_id) {
@@ -717,8 +719,12 @@ int main(int argc, char* argv[]) {
   }
 
   WriteSerializedGraph(g, "/tmp/graph.ser");
-  Graph g2 = ReadSerializedGraph("/tmp/graph.ser");
-  CheckGraphsEqual(g, g2);
+  {
+    Graph g2 = ReadSerializedGraph("/tmp/graph.ser");
+    CheckGraphsEqual(g, g2);
+  }
+
+  WriteGraphToMMFile(g, "/tmp/mmgraph.file");
 
   return 0;
 }

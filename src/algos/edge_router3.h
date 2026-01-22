@@ -435,7 +435,7 @@ class EdgeRouter3 {
         (!ctx.opt.hybrid.on || expansion_node.dead_end ||
          expansion_node.cluster_id == ctx.opt.hybrid.target_cluster_id ||
          (expansion_node.cluster_id == ctx.opt.hybrid.start_cluster_id &&
-          !prev_ge.is_cluster_border_edge()));
+          !prev_ge.cluster_border_edge()));
 #endif
 
     const TurnCostData& turn_costs = g_.turn_costs.at(prev_ge.turn_cost_idx);
@@ -532,11 +532,6 @@ class EdgeRouter3 {
       }
     }
 
-#if 0
-    if (ctx.opt.hybrid.on && expansion_node.cluster_border_node &&
-        expansion_node.cluster_id != ctx.opt.hybrid.start_cluster_id &&
-        expansion_node.cluster_id != ctx.opt.hybrid.target_cluster_id) {
-#endif
     // Check if we can and should travel through a cluster after 'prev'.
     // If previous edge is a cross border edge and the edge doesn't end at
     // target cluster then expand cluster links.

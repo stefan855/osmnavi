@@ -81,6 +81,7 @@ struct BuildGraphStats {
   int64_t max_turn_restriction_via_ways = 0;
   int64_t num_turn_restriction_error = 0;
   int64_t num_turn_restriction_error_connection = 0;
+  uint64_t max_complex_turn_restriction_path_len = 0;
 
   int64_t num_node_barrier_free = 0;
   int64_t num_edge_barrier_block = 0;
@@ -171,6 +172,10 @@ struct BuildGraphStats {
     num_turn_restriction_error += other.num_turn_restriction_error;
     num_turn_restriction_error_connection +=
         other.num_turn_restriction_error_connection;
+
+    max_complex_turn_restriction_path_len =
+        std::max(max_complex_turn_restriction_path_len,
+                 other.max_complex_turn_restriction_path_len);
 
     num_node_barrier_free += other.num_node_barrier_free;
     num_edge_barrier_block += other.num_edge_barrier_block;
