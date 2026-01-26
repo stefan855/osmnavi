@@ -7,8 +7,8 @@
 // of the edge within the list of edges of this node.
 // Storing an edge this way uses more space and is a little bit slower for most
 // operations. But it allows access to the start node of the edge much more
-// easily. Note that accessing the start node is almost impossible when only the
-// edge index is stored.
+// easily. Note that finding the start node would be very costly if only the
+// edge index is known.
 class FullEdge final {
  public:
   constexpr FullEdge() : valid_(0) {}

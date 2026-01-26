@@ -598,6 +598,10 @@ int main(int argc, char* argv[]) {
         .type = "bool",
         .desc = "Run a few test routes and output data."},
 
+       {.name = "check_mmgraph",
+        .type = "bool",
+        .desc = "Check contents of mmgraph.file after writing it to disk."},
+
        {.name = "debug_node",
         .type = "int",
         .desc = "Print debug information for this node_id."}});
@@ -620,6 +624,8 @@ int main(int argc, char* argv[]) {
   opt.check_shortest_cluster_paths =
       argli.GetBool("check_shortest_cluster_paths");
   opt.keep_all_nodes = argli.GetBool("keep_all_nodes");
+
+  const bool check_mmgraph = argli.GetBool("check_mmgraph");
 
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
@@ -724,7 +730,7 @@ int main(int argc, char* argv[]) {
     CheckGraphsEqual(g, g2);
   }
 
-  WriteGraphToMMFile(g, "/tmp/mmgraph.file");
+  WriteGraphToMMFile(g, "/tmp/mmgraph.file", check_mmgraph);
 
   return 0;
 }
