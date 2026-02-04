@@ -11,7 +11,7 @@
 #include "base/util.h"
 #include "graph/graph_def.h"
 #include "graph/graph_def_utils.h"
-#include "graph/mmgraph.h"
+#include "graph/mmgraph_def.h"
 
 namespace {
 int OpenTempFile() {
@@ -38,38 +38,38 @@ void TestMMNode() {
   FUNC_TIMER();
 
   uint64_t u = 0;
-  MM_NODE_RW(u).set_edge_start_pos(123);
-  CHECK_EQ_S(MM_NODE(u).edge_start_pos(), 123);
+  MM_NODE_RW(u).set_edge_start_idx(123);
+  CHECK_EQ_S(MM_NODE(u).edge_start_idx(), 123);
 
   MMNode x{0};
   CHECK_S(!x.border_node());
   CHECK_S(!x.dead_end());
   CHECK_S(!x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_pos(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), 0);
 
   x.set_border_node(true);
   CHECK_S(x.border_node());
   CHECK_S(!x.dead_end());
   CHECK_S(!x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_pos(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), 0);
 
   x.set_dead_end(true);
   CHECK_S(x.border_node());
   CHECK_S(x.dead_end());
   CHECK_S(!x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_pos(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), 0);
 
   x.set_off_cluster_node(true);
   CHECK_S(x.border_node());
   CHECK_S(x.dead_end());
   CHECK_S(x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_pos(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), 0);
 
-  x.set_edge_start_pos(1234567);
+  x.set_edge_start_idx(1234567);
   CHECK_S(x.border_node());
   CHECK_S(x.dead_end());
   CHECK_S(x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_pos(), 1234567);
+  CHECK_EQ_S(x.edge_start_idx(), 1234567);
 }
 
 void TestMMEdge() {
@@ -172,7 +172,7 @@ void TestMMVec64() {
     AppendData("mm-struct", fd, (const uint8_t*)&mm, sizeof(mm));
     mm.v.WriteDataBlob("mmvec", offsetof(MM, v), fd, inp);
     CHECK_EQ_S(inp.size(), mm.v.size());
-    CHECK_EQ_S(mm.v.relative_blob_offset(), sizeof(MMVec64<uint32_t>));
+    CHECK_EQ_S(mm.v.relative_blob_offset__, sizeof(MMVec64<uint32_t>));
     WriteDataTo(fd, 0, (const uint8_t*)&mm, sizeof(mm));
   }
 
@@ -183,6 +183,44 @@ void TestMMVec64() {
     CHECK_EQ_S(inp.size(), mm->v.size());
     for (size_t i = 0; i < inp.size(); ++i) {
       CHECK_EQ_S(inp.at(i), mm->v.at(i));
+    }
+    munmap((void*)base_ptr, GetFileSize(fd));
+  }
+
+  CloseTempFile(fd);
+}
+
+void TestMMBitset() {
+  FUNC_TIMER();
+  struct MM {
+    uint64_t magic = 12345;
+    MMBitset v;
+  };
+
+  std::vector<bool> inp;
+  for (size_t i = 0; i < 10000; ++i) {
+    inp.push_back((i % 13) != 0);
+    // inp.push_back(i == 0);
+  }
+  int fd = OpenTempFile();
+
+  // Build file.
+  {
+    MM mm;
+    AppendData("mm-struct", fd, (const uint8_t*)&mm, sizeof(mm));
+    mm.v.WriteDataBlob("mmbitset", offsetof(MM, v), fd, inp);
+    CHECK_EQ_S(inp.size(), mm.v.size());
+    CHECK_EQ_S(mm.v.relative_blob_offset__, sizeof(MMBitset));
+    WriteDataTo(fd, 0, (const uint8_t*)&mm, sizeof(mm));
+  }
+
+  // MMap and compare.
+  {
+    const uint8_t* base_ptr = (const uint8_t*)MMapTempFile(fd);
+    const MM* mm = (MM*)base_ptr;
+    CHECK_EQ_S(inp.size(), mm->v.size());
+    for (size_t i = 0; i < inp.size(); ++i) {
+      CHECK_EQ_S(inp.at(i), mm->v.at(i)) << i;
     }
     munmap((void*)base_ptr, GetFileSize(fd));
   }
@@ -208,7 +246,7 @@ void TestMMCompressedUIntVec() {
     mm.cv.WriteDataBlob("compressed vector", offsetof(MM, cv), fd, inp);
     CHECK_EQ_S(inp.size(), mm.cv.size());
     CHECK_EQ_S(7, mm.cv.bit_width());
-    CHECK_EQ_S(mm.cv.relative_blob_offset(), sizeof(MMCompressedUIntVec));
+    CHECK_EQ_S(mm.cv.relative_blob_offset__, sizeof(MMCompressedUIntVec));
     WriteDataTo(fd, 0, (const uint8_t*)&mm, sizeof(mm));
   }
 
@@ -338,7 +376,18 @@ void TestMMGroupedOSMIds() {
     CHECK_EQ_S(ids.size(), mm->gi.size());
     for (size_t i = 0; i < ids.size(); ++i) {
       CHECK_EQ_S(ids.at(i), mm->gi.at(i));
+      int64_t pos = mm->gi.find_idx(ids.at(i));
+      CHECK_GE_S(pos, 0);
+      CHECK_S((size_t)pos == i || ids.at(pos) == ids.at(i));
     }
+
+    uint64_t rand_state = 1;
+    for (size_t i = 0; i < 1000; ++i) {
+      rand_state = PseudoRandom64(rand_state);
+      int64_t idx = mm->gi.find_idx((int64_t)rand_state);
+      CHECK_S(idx < 0 || ids.at(idx) == (int64_t)rand_state);
+    }
+
     munmap((void*)base_ptr, GetFileSize(fd));
   }
 
@@ -354,6 +403,7 @@ int main(int argc, char* argv[]) {
   TestMMNode();
   TestMMEdge();
   TestMMVec64();
+  TestMMBitset();
   TestMMCompressedUIntVec();
   TestMMTurnCostsTable();
   TestMMStringsTable();

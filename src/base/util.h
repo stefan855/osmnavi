@@ -18,8 +18,14 @@
   static_assert(std::is_standard_layout<type_to_check>::value); \
   static_assert(std::is_trivial<type_to_check>::value);
 
-#define CHECK_IS_TRIVIALLY_COPYABLE(type_to_check) \
-  static_assert(std::is_trivially_copyable_v<type_to_check>);
+#define CHECK_IS_MM_OK(type_to_check) \
+  static_assert(std::is_standard_layout<type_to_check>::value);
+
+// Disallow constructors that copy, assign or move the object.
+#define DISALLOW_COPY_ASSIGN_MOVE(TypeName) \
+  TypeName(const TypeName&);                \
+  void operator=(const TypeName&);          \
+  TypeName(TypeName&&)
 
 enum class Verbosity : int {
   Quiet = 0,

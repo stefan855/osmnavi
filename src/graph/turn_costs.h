@@ -86,6 +86,9 @@ constexpr uint32_t TURN_COST_ZERO_COMPRESSED =
     compress_turn_cost(TURN_COST_ZERO);
 constexpr uint32_t TURN_COST_INFINITY_COMPRESSED =
     compress_turn_cost(TURN_COST_INFINITY);
+constexpr uint32_t TURN_COST_U_TURN_COMPRESSED =
+    compress_turn_cost(TURN_COST_U_TURN);
+
 static_assert(TURN_COST_ZERO_COMPRESSED == 0);
 static_assert(TURN_COST_INFINITY_COMPRESSED ==
               compressed_turn_cost_values_dim - 1);

@@ -16,6 +16,7 @@
 #include "absl/time/time.h"
 #include "algos/compact_edge_dijkstra.h"
 #include "algos/edge_router3.h"
+#include "algos/mm_edge_dijkstra.h"
 #include "algos/router.h"
 #include "base/argli.h"
 #include "base/huge_bitset.h"
@@ -25,11 +26,10 @@
 #include "graph/build_graph.h"
 #include "graph/graph_def.h"
 #include "graph/graph_serialize.h"
-#include "graph/mmgraph.h"
+#include "graph/mmgraph_build.h"
 #include "graph/routing_attrs.h"
 #include "osm/osm_helpers.h"
 #include "test/equal_checks.h"
-// #include "algos/mm_edge_dijkstra.h"
 
 void PrintDebugInfoForNode(const build_graph::GraphMetaData& meta,
                            int64_t node_id) {
@@ -528,6 +528,24 @@ void CheckGraphsEqual(const Graph& g1, const Graph& g2) {
   }
 }
 
+bool FindMMNode(const MMGraph& mmheader, int64_t id, MMFullNode* fn) {
+  if (mmheader.find_node_by_id(id, fn)) {
+    const MMCluster& mmc = mmheader.clusters.at(fn->cluster_id);
+    CHECK_EQ_S(id, mmc.grouped_node_to_osm_id.at(fn->node_idx));
+    LOG_S(INFO) << absl::StrFormat("Found node %lld in cluster %u at pos %u",
+                                   id, fn->cluster_id, fn->node_idx);
+    for (uint32_t edge_idx : mmc.edge_indices(fn->node_idx)) {
+      const MMEdge e(mmc.edges.at(edge_idx));
+      LOG_S(INFO) << absl::StrFormat("  connected to node idx:%u id:%lld",
+                                     e.target_idx(),
+                                     mmc.get_node_id(e.target_idx()));
+    }
+    return true;
+  }
+  LOG_S(INFO) << "Did not find node " << id;
+  return false;
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   FUNC_TIMER();
@@ -625,7 +643,7 @@ int main(int argc, char* argv[]) {
       argli.GetBool("check_shortest_cluster_paths");
   opt.keep_all_nodes = argli.GetBool("keep_all_nodes");
 
-  const bool check_mmgraph = argli.GetBool("check_mmgraph");
+  // const bool check_mmgraph = argli.GetBool("check_mmgraph");
 
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
@@ -730,7 +748,67 @@ int main(int argc, char* argv[]) {
     CheckGraphsEqual(g, g2);
   }
 
+#if 0
   WriteGraphToMMFile(g, "/tmp/mmgraph.file", check_mmgraph);
+  {
+    int fd = ::open("/tmp/mmgraph.file", O_RDONLY | O_CLOEXEC, 0644);
+    if (fd < 0) FileAbortOnError("open");
+
+    const uint64_t file_size = GetFileSize(fd);
+    void* ptr = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (ptr == MAP_FAILED) {
+      perror("mmap");
+      ::close(fd);
+      ABORT_S();
+    }
+    ::close(fd);
+    const MMGraph& mmg = *((MMGraph*)ptr);
+    CHECK_EQ_S(mmg.magic, kMagic);
+
+    for (uint32_t cluster_id = 0; cluster_id < mmg.clusters.size();
+         ++cluster_id) {
+      MMClusterWrapper mcw = {.g = mmg.clusters.at(cluster_id)};
+      LOG_S(INFO) << "Fill Edge weights " << cluster_id;
+      mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
+
+      LOG_S(INFO) << "Compute shortest paths in cluster " << cluster_id;
+      MMClusterShortestPaths sp =
+          ComputeShortestMMClusterPaths(mcw, RoutingMetricTime(), VH_MOTORCAR);
+
+      LOG_S(INFO) << "Check routing results";
+      std::vector<std::vector<std::uint32_t>> gmetrics =
+          g.clusters.at(cluster_id).edge_distances;
+      CHECK_EQ_S(gmetrics.size(), mcw.g.in_edges.size());
+      for (uint32_t idx1 = 0; idx1 < mcw.g.in_edges.size(); ++idx1) {
+        for (uint32_t idx2 = 0; idx2 < mcw.g.out_edges.size(); ++idx2) {
+          uint32_t ma = gmetrics.at(idx1).at(idx2);
+          uint32_t mb = sp.metrics.at(idx1).at(idx2);
+          /*
+          LOG_S(INFO) << absl::StrFormat(
+              "Compare cl:%u idx1:%2u idx2:%2u ma:%8u mb:%8u%s", cluster_id,
+              idx1, idx2, ma, mb, ma != mb ? " DIFF" : "");
+          */
+          CHECK_EQ_S(ma, mb)
+              << cluster_id << " idx1:" << idx1 << " idx2:" << idx2;
+        }
+      }
+      LOG_S(INFO) << "Done";
+    }
+
+    MMFullNode fn1;
+    MMFullNode fn2;
+    if (FindMMNode(mmg, 413974806, &fn1) &&
+        FindMMNode(mmg, 357301279, &fn2)) {
+      MMClusterWrapper mcw = {.g = mmg.clusters.at(fn1.cluster_id)};
+      mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
+      if (fn1.cluster_id == fn2.cluster_id) {
+        RouteOnMMGraph(mcw, fn1.node_idx, fn2.node_idx, Verbosity::Verbose);
+      }
+    }
+
+    munmap((void*)ptr, file_size);
+  }
+#endif
 
   return 0;
 }

@@ -300,10 +300,9 @@ class EdgeRouter3 {
         WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        {.distance_cm = static_cast<uint32_t>(
-             1.00 * calculate_distance(node.lat, node.lon, ctx.target_lat,
-                                       ctx.target_lon)),
-         .contra_way = 0});
+        static_cast<uint32_t>(1.00 * calculate_distance(node.lat, node.lon,
+                                                        ctx.target_lat,
+                                                        ctx.target_lon)));
   }
 
   // Add turn restrictions that have the initial trigger on edge 'e'.
@@ -406,8 +405,9 @@ class EdgeRouter3 {
       uint32_t v_idx =
           FindOrAddVisitedEdge(edge_label, ctx.opt.use_astar_heuristic);
       VisitedEdge& ve = visited_edges_.at(v_idx);
-      ve.min_metric = ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(curr_ge),
-                                         curr_ge, TURN_COST_ZERO_COMPRESSED);
+      ve.min_metric =
+          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(curr_ge),
+                             curr_ge.distance_cm, TURN_COST_ZERO_COMPRESSED);
       ve.prev_v_idx = INFU32;
       ve.restricted_obsolete = (curr_ge.car_label != GEdge::LABEL_FREE);
 
@@ -511,7 +511,7 @@ class EdgeRouter3 {
 
       std::uint32_t new_metric =
           prev.metric + ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(curr_ge),
-                                           curr_ge,
+                                           curr_ge.distance_cm,
                                            turn_costs.turn_costs.at(offset));
 
       if (new_metric < ve.min_metric) {

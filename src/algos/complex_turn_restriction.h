@@ -4,6 +4,7 @@
 #include "base/deduper_with_ids.h"
 #include "graph/compact_graph.h"
 #include "graph/graph_def.h"
+#include "graph/mmgraph_def.h"
 
 // Complex turn restriction vector data structures.
 struct CTRPosition {
@@ -50,6 +51,18 @@ struct CTRPosition {
     // LOG_S(INFO) << "BB: match:" << ctr_edge_match << " " << edge_idx << "=?"
     //             << ctr.path.at(position + 1);
     return UpdateNewEdge(ctr.path.size(), ctr_edge_match, ctr.forbidden);
+  }
+
+  Status AddNextEdge(const MMCluster& g, uint32_t edge_idx) {
+    const MMComplexTurnRestriction& ctr =
+        g.complex_turn_restrictions.at(ctr_idx);
+    // We're not allowed to point to the last edge in the path.
+    CHECK_LT_S(position + 1, ctr.num_legs);
+    const std::span<const uint32_t> path =
+        g.get_complex_turn_restriction_legs(ctr);
+    CHECK_EQ_S(path.size(), ctr.num_legs);
+    const bool ctr_edge_match = (edge_idx == path[position + 1]);
+    return UpdateNewEdge(ctr.num_legs, ctr_edge_match, ctr.forbidden);
   }
 
   // Compute the new status of the CTR. Increments the position when the

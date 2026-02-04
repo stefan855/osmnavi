@@ -210,174 +210,177 @@ class Router {
 
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        {.distance_cm = static_cast<uint32_t>(
+        static_cast<uint32_t>(
              1.00 * calculate_distance(node.lat, node.lon, ctx.target_lat,
-                                       ctx.target_lon)),
-         .contra_way = 0});
-  }
+                                       ctx.target_lon)));
+}
 
   // Expand the forward edges.
   // Note: It is important to pass vnode by value, because a call to
   // FindOrAddVisitedNode() may invalidate a reference.
   void ExpandNeighboursForward(const QueuedNode& qnode, const Context& ctx,
                                const VisitedNode vnode) {
-    const GNode& node = g_.nodes.at(vnode.node_idx);
+  const GNode& node = g_.nodes.at(vnode.node_idx);
 
-    for (const GEdge& edge : gnode_forward_edges(g_, vnode.node_idx)) {
-      // for (size_t i = 0; i < node.num_edges_out; ++i) {
-      // const GEdge& edge = node.edges[i];
-      const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
-      if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
-                            EDGE_DIR(edge))) {
-        continue;
+  for (const GEdge& edge : gnode_forward_edges(g_, vnode.node_idx)) {
+    // for (size_t i = 0; i < node.num_edges_out; ++i) {
+    // const GEdge& edge = node.edges[i];
+    const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
+    if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
+                          EDGE_DIR(edge))) {
+      continue;
+    }
+
+    std::uint32_t v_idx =
+        FindOrAddVisitedNode(edge.target_idx, ctx.opt.use_astar_heuristic);
+    VisitedNode& vother = visited_nodes_.at(v_idx);
+    if (vother.done) {
+      continue;
+    }
+
+    std::uint32_t new_metric =
+        vnode.min_metric +
+        ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge.distance_cm);
+    if (verbosity_ >= 3) {
+      LOG_S(INFO) << absl::StrFormat(
+          "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
+          "old-metric:%d",
+          node.node_id, qnode.metric, g_.nodes.at(edge.target_idx).node_id,
+          vother.done, new_metric, vother.min_metric);
+    }
+
+    if (new_metric < vother.min_metric) {
+      vother.min_metric = new_metric;
+      vother.from_v_idx = qnode.visited_node_idx;
+
+      // Compute heuristic distance from new node to target.
+      if (vother.heuristic_to_target == INFU30) {
+        const uint32_t h =
+            ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
+        CHECK_LT_S(h, INFU30);
+        vother.heuristic_to_target = h;
       }
+      pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
+    }
+  }
 
-      std::uint32_t v_idx = FindOrAddVisitedNode(edge.target_idx,
-                                                 ctx.opt.use_astar_heuristic);
-      VisitedNode& vother = visited_nodes_.at(v_idx);
-      if (vother.done) {
-        continue;
+  if (ctx.opt.hybrid.on && node.cluster_border_node &&
+      node.cluster_id != ctx.opt.hybrid.start_cluster_id &&
+      node.cluster_id != ctx.opt.hybrid.target_cluster_id) {
+    {
+      // Check if we just traversed this cluster in the shortest path to this
+      // node. A cluster can not be traversed more than once in the shortest
+      // path!
+      const GNode& parent_node =
+          g_.nodes.at(visited_nodes_.at(vnode.from_v_idx).node_idx);
+      if (parent_node.cluster_id == node.cluster_id) {
+        return;
       }
+    }
 
-      std::uint32_t new_metric =
-          vnode.min_metric +
-          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge);
+    // Expand the 'virtual' links within the cluster, using the precomputed
+    // distances.
+    const GCluster& cluster = g_.clusters.at(node.cluster_id);
+    const std::vector<std::uint32_t>& v_dist =
+        cluster.GetBorderNodeDistances(vnode.node_idx);
+
+    for (size_t i = 0; i < cluster.border_nodes.size(); ++i) {
+      uint32_t other_idx = cluster.border_nodes.at(i);
+      if (other_idx == vnode.node_idx) continue;
+      const std::uint32_t dist = v_dist.at(i);
+      if (dist == INFU32) continue;  // node is not reachable.
+      CHECK_LT_S(dist, INFU30);      // This shouldn't be so big.
+      // TODO: check for potential overflow.
+      const std::uint32_t v_other_idx =
+          FindOrAddVisitedNode(other_idx, ctx.opt.use_astar_heuristic);
+      VisitedNode& vother = visited_nodes_.at(v_other_idx);
+      std::uint32_t new_metric = vnode.min_metric + dist;
+
       if (verbosity_ >= 3) {
         LOG_S(INFO) << absl::StrFormat(
-            "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
+            "CLUSTER %5u from:%u(m:%d) to:%u done:%d new-metric:%d "
             "old-metric:%d",
-            node.node_id, qnode.metric,
-            g_.nodes.at(edge.target_idx).node_id, vother.done, new_metric,
+            node.cluster_id, node.node_id, qnode.metric,
+            g_.nodes.at(other_idx).node_id, vother.done, new_metric,
             vother.min_metric);
       }
 
-      if (new_metric < vother.min_metric) {
+      if (!vother.done && new_metric < vother.min_metric) {
         vother.min_metric = new_metric;
         vother.from_v_idx = qnode.visited_node_idx;
 
         // Compute heuristic distance from new node to target.
         if (vother.heuristic_to_target == INFU30) {
           const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
+              ComputeHeuristicToTarget(g_.nodes.at(other_idx), ctx);
           CHECK_LT_S(h, INFU30);
           vother.heuristic_to_target = h;
         }
-        pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
-      }
-    }
-
-    if (ctx.opt.hybrid.on && node.cluster_border_node &&
-        node.cluster_id != ctx.opt.hybrid.start_cluster_id &&
-        node.cluster_id != ctx.opt.hybrid.target_cluster_id) {
-      {
-        // Check if we just traversed this cluster in the shortest path to this
-        // node. A cluster can not be traversed more than once in the shortest
-        // path!
-        const GNode& parent_node =
-            g_.nodes.at(visited_nodes_.at(vnode.from_v_idx).node_idx);
-        if (parent_node.cluster_id == node.cluster_id) {
-          return;
-        }
-      }
-
-      // Expand the 'virtual' links within the cluster, using the precomputed
-      // distances.
-      const GCluster& cluster = g_.clusters.at(node.cluster_id);
-      const std::vector<std::uint32_t>& v_dist =
-          cluster.GetBorderNodeDistances(vnode.node_idx);
-
-      for (size_t i = 0; i < cluster.border_nodes.size(); ++i) {
-        uint32_t other_idx = cluster.border_nodes.at(i);
-        if (other_idx == vnode.node_idx) continue;
-        const std::uint32_t dist = v_dist.at(i);
-        if (dist == INFU32) continue;  // node is not reachable.
-        CHECK_LT_S(dist, INFU30);      // This shouldn't be so big.
-        // TODO: check for potential overflow.
-        const std::uint32_t v_other_idx =
-            FindOrAddVisitedNode(other_idx, ctx.opt.use_astar_heuristic);
-        VisitedNode& vother = visited_nodes_.at(v_other_idx);
-        std::uint32_t new_metric = vnode.min_metric + dist;
-
-        if (verbosity_ >= 3) {
-          LOG_S(INFO) << absl::StrFormat(
-              "CLUSTER %5u from:%u(m:%d) to:%u done:%d new-metric:%d "
-              "old-metric:%d",
-              node.cluster_id, node.node_id, qnode.metric,
-              g_.nodes.at(other_idx).node_id, vother.done, new_metric,
-              vother.min_metric);
-        }
-
-        if (!vother.done && new_metric < vother.min_metric) {
-          vother.min_metric = new_metric;
-          vother.from_v_idx = qnode.visited_node_idx;
-
-          // Compute heuristic distance from new node to target.
-          if (vother.heuristic_to_target == INFU30) {
-            const uint32_t h =
-                ComputeHeuristicToTarget(g_.nodes.at(other_idx), ctx);
-            CHECK_LT_S(h, INFU30);
-            vother.heuristic_to_target = h;
-          }
-          pq_.emplace(new_metric + vother.heuristic_to_target, v_other_idx);
-        }
+        pq_.emplace(new_metric + vother.heuristic_to_target, v_other_idx);
       }
     }
   }
+}
 
-  // Expand the backward edges (for traveling backwards).
-  // Note: It is important to pass vnode by value, because a call to
-  // FindOrAddVisitedNode() may invalidate a reference.
-  void ExpandNeighboursBackward(const QueuedNode& qnode, const Context& ctx,
-                                const VisitedNode vnode) {
-    const GNode& node = g_.nodes.at(vnode.node_idx);
+// Expand the backward edges (for traveling backwards).
+// Note: It is important to pass vnode by value, because a call to
+// FindOrAddVisitedNode() may invalidate a reference.
+void ExpandNeighboursBackward(const QueuedNode& qnode, const Context& ctx,
+                              const VisitedNode vnode) {
+  const GNode& node = g_.nodes.at(vnode.node_idx);
 
-    for (const GEdge& edge : gnode_all_edges(g_, vnode.node_idx)) {
-      // for (size_t i = 0; i < gnode_total_edges(node); ++i) {
-      // const GEdge& edge = node.edges[i];
-      // Skip edges that are forward only.
-      if (!edge.inverted /*i < node.num_edges_out*/ && !edge.both_directions) {
-        continue;
+  for (const GEdge& edge : gnode_all_edges(g_, vnode.node_idx)) {
+    // for (size_t i = 0; i < gnode_total_edges(node); ++i) {
+    // const GEdge& edge = node.edges[i];
+    // Skip edges that are forward only.
+    if (!edge.inverted /*i < node.num_edges_out*/ && !edge.both_directions) {
+      continue;
+    }
+
+    const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
+    if (RoutingRejectEdge(
+            g_, ctx.opt, node, vnode.node_idx, edge, wsa,
+            edge.inverted ? EDGE_DIR(edge) : EDGE_INVERSE_DIR(edge))) {
+      continue;
+    }
+
+    std::uint32_t v_idx =
+        FindOrAddVisitedNode(edge.target_idx, ctx.opt.use_astar_heuristic);
+    VisitedNode& vother = visited_nodes_.at(v_idx);
+    if (vother.done) {
+      continue;
+    }
+    std::uint32_t new_metric =
+        vnode.min_metric + ctx.metric.Compute(wsa, ctx.opt.vt,
+                                              edge.inverted
+                                                  ? EDGE_DIR(edge)
+                                                  : EDGE_INVERSE_DIR(edge),
+                                              edge.distance_cm);
+    if (new_metric < vother.min_metric) {
+      vother.min_metric = new_metric;
+      vother.from_v_idx = qnode.visited_node_idx;
+
+      // Compute heuristic distance from new node to target.
+      if (vother.heuristic_to_target == INFU30) {
+        const uint32_t h =
+            ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
+        CHECK_LT_S(h, INFU30);
+        vother.heuristic_to_target = h;
       }
-
-      const WaySharedAttrs& wsa = GetWSA(g_, edge.way_idx);
-      if (RoutingRejectEdge(g_, ctx.opt, node, vnode.node_idx, edge, wsa,
-                            edge.inverted ? EDGE_DIR(edge) : EDGE_INVERSE_DIR(edge))) {
-        continue;
-      }
-
-      std::uint32_t v_idx = FindOrAddVisitedNode(edge.target_idx,
-                                                 ctx.opt.use_astar_heuristic);
-      VisitedNode& vother = visited_nodes_.at(v_idx);
-      if (vother.done) {
-        continue;
-      }
-      std::uint32_t new_metric =
-          vnode.min_metric +
-          ctx.metric.Compute(wsa, ctx.opt.vt, edge.inverted ? EDGE_DIR(edge) : EDGE_INVERSE_DIR(edge), edge);
-      if (new_metric < vother.min_metric) {
-        vother.min_metric = new_metric;
-        vother.from_v_idx = qnode.visited_node_idx;
-
-        // Compute heuristic distance from new node to target.
-        if (vother.heuristic_to_target == INFU30) {
-          const uint32_t h =
-              ComputeHeuristicToTarget(g_.nodes.at(edge.target_idx), ctx);
-          CHECK_LT_S(h, INFU30);
-          vother.heuristic_to_target = h;
-        }
-        pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
-      }
+      pq_.emplace(new_metric + vother.heuristic_to_target, v_idx);
     }
   }
+}
 
-  const Graph& g_;
-  std::vector<VisitedNode> visited_nodes_;
+const Graph& g_;
+std::vector<VisitedNode> visited_nodes_;
 
-  typedef absl::flat_hash_map<uint32_t, uint32_t> NodeIdMap;
-  NodeIdMap node_to_vnode_idx_;
+typedef absl::flat_hash_map<uint32_t, uint32_t> NodeIdMap;
+NodeIdMap node_to_vnode_idx_;
 
-  std::priority_queue<QueuedNode, std::vector<QueuedNode>, decltype(&MetricCmp)>
-      pq_;
-  std::uint32_t target_visited_node_index_;
-  const int verbosity_;
-};
+std::priority_queue<QueuedNode, std::vector<QueuedNode>, decltype(&MetricCmp)>
+    pq_;
+std::uint32_t target_visited_node_index_;
+const int verbosity_;
+}
+;

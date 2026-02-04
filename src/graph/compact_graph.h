@@ -652,7 +652,7 @@ inline void CollectEdgesForCompactGraph(
       full_edges->push_back(
           {.from_c_idx = c_idx,
            .to_c_idx = other_c_idx,
-           .weight = metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge),
+           .weight = metric.Compute(wsa, opt.vt, EDGE_DIR(edge), edge.distance_cm),
            .way_idx = edge.way_idx,
            .restricted_access = edge.car_label != GEdge::LABEL_FREE});
     }
