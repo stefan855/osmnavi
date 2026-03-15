@@ -2,7 +2,6 @@
 // border nodes in a cluster, using a CompactGraph.
 
 #pragma once
-
 #include <algorithm>
 #include <fstream>
 #include <memory>
@@ -10,7 +9,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "algos/mm_edge_dijkstra.h"
+#include "algos/mm_cluster_router.h"
 #include "algos/routing_defs.h"
 #include "algos/routing_metric.h"
 #include "base/thread_pool.h"
@@ -18,7 +17,7 @@
 
 #define DEBUG_PRINT 0
 
-class SingleSourceMMEdgeDijkstra {
+class MMClusterRouter {
  public:
   // Start routing with either an edge or a start n node.
   struct RoutingStart {
@@ -64,7 +63,7 @@ class SingleSourceMMEdgeDijkstra {
     bool include_dead_end = false;
   };
 
-  SingleSourceMMEdgeDijkstra() { ; }
+  MMClusterRouter() { ; }
 
   const std::vector<VisitedEdge>& GetVisitedEdges() const { return vis_; }
 
@@ -494,7 +493,7 @@ inline RoutingResult RouteOnMMGraph(const MMClusterWrapper& mcw,
     LOG_S(INFO) << "Route using mmcluster routing data";
   }
 
-  SingleSourceMMEdgeDijkstra router;
+  MMClusterRouter router;
   router.Route(mcw, {.start_idx = start_idx},
                {.handle_restricted_access = true, .include_dead_end = true});
   if (verb >= Verbosity::Brief) {
@@ -522,7 +521,7 @@ inline RoutingResult RouteOnMMGraph(const MMClusterWrapper& mcw,
     uint32_t pos = 1;
     LOG_S(INFO) << "CompactDijkstra: Shortest path";
     for (uint32_t v_idx : res.route_v_idx) {
-      const SingleSourceMMEdgeDijkstra::VisitedEdge& ve = vis.at(v_idx);
+      const MMClusterRouter::VisitedEdge& ve = vis.at(v_idx);
       uint32_t edge_idx = router.GetGraphEdgeIdx(g, v_idx);
       const MMEdge e(g.edges.at(edge_idx));
       int64_t way_id = g.grouped_way_to_osm_id.at(g.edge_to_way.at(edge_idx));
@@ -623,13 +622,14 @@ uint32_t GetBestStreetnameFollowEdge(const MMCluster& mmc,
   return start_edge_idx + found_off;
 }
 
+// Check how well edge prediction would work.
 void AnalyzePath(const MMCluster& mmc, const std::vector<uint32_t>& path) {
   // Wrong, but will display non-lowest-cost, which is correct.
   uint32_t prev_edge_idx = path.at(0);
   uint32_t num_special = 0;
 
   for (uint32_t i = 1; i < path.size(); ++i) {
-    uint32_t expand_node_idx = mmc.get_edge(prev_edge_idx).target_idx();
+    // uint32_t expand_node_idx = mmc.get_edge(prev_edge_idx).target_idx();
     // Based on the previous edge, compute the default next edge.
     // uint32_t p = 0;
     uint32_t predicted_edge = GetBestStreetnameFollowEdge(mmc, prev_edge_idx);
@@ -644,18 +644,22 @@ void AnalyzePath(const MMCluster& mmc, const std::vector<uint32_t>& path) {
     // LOG_S(INFO) << "predicted edge:" << predicted_edge << " p:" << p;
 
     uint32_t edge_idx = path.at(i);
-    uint32_t way_idx = mmc.edge_to_way.at(edge_idx);
+    // uint32_t way_idx = mmc.edge_to_way.at(edge_idx);
     bool predicted_selected = (edge_idx == predicted_edge);
     num_special += !predicted_selected;
+#if 0
     LOG_S(INFO) << absl::StrFormat(
         "%3u Edge predicted:%s node:%llu->%llu way_id:%llu streetname:<%s>", i,
         predicted_selected ? "*" : "-", mmc.get_node_id(expand_node_idx),
         mmc.get_node_id(mmc.get_edge(edge_idx).target_idx()),
         mmc.get_way_to_way_id(way_idx), mmc.get_streetname(way_idx));
+#endif
     prev_edge_idx = edge_idx;
   }
+#if 0
   LOG_S(INFO) << absl::StrFormat("  %u of %llu are special", num_special,
                                  path.size());
+#endif
 }
 
 // Compute all shortest paths between border edges in a cluster.
@@ -668,7 +672,7 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
   for (const MMInEdge& in_edge : mmc.in_edges.span()) {
     // Now store the metrics for this border node.
     res.metrics.emplace_back();
-    SingleSourceMMEdgeDijkstra router;
+    MMClusterRouter router;
     int16_t off =
         (int16_t)(in_edge.edge_idx - mmc.edge_start_idx(in_edge.from_node_idx));
     router.Route(mcw,
@@ -677,7 +681,7 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
                   .edge_weight_fraction = 0.0},
                  {.handle_restricted_access = true});
 
-    const std::vector<SingleSourceMMEdgeDijkstra::VisitedEdge>& vis =
+    const std::vector<MMClusterRouter::VisitedEdge>& vis =
         router.GetVisitedEdges();
     for (const MMOutEdge& out_edge : mmc.out_edges.span()) {
       // Check that the out edge has only one label.
@@ -688,7 +692,7 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
 
       const std::vector<uint32_t> path =
           router.GetShortestPathFromTargetEdge(mmc, out_edge.edge_idx);
-      LOG_S(INFO) << "shortest cluster path len: " << path.size();
+      // LOG_S(INFO) << "shortest cluster path len: " << path.size();
       if (path.size() > 0) {
         AnalyzePath(mmc, path);
       }

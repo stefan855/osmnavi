@@ -374,12 +374,14 @@ void ClusterAddInEdges(const Graph& g, TmpClusterInfo* ci) {
       const uint32_t g_way_idx = ci->cedge_to_gway_idx.at(c_edge_idx);
       if (c_target_idx == cto_idx && g_edge.way_idx == g_way_idx) {
         found = true;
+        CHECK_LT_S(ci->mm_in_edges.size(),
+                   std::numeric_limits<uint16_t>::max());
         ci->mm_in_edges.push_back(
             {.from_cluster_id = g.nodes.at(gi.g_from_idx).cluster_id,
              .from_node_idx = cfrom_idx,
              .to_node_idx = cto_idx,
              .edge_idx = c_edge_idx,
-             .in_edge_pos = static_cast<uint32_t>(ci->mm_in_edges.size())});
+             .in_edge_idx = static_cast<uint16_t>(ci->mm_in_edges.size())});
         break;
       }
     }
@@ -412,12 +414,14 @@ void ClusterAddOutEdges(const Graph& g, TmpClusterInfo* ci) {
       const uint32_t g_way_idx = ci->cedge_to_gway_idx.at(c_edge_idx);
       if (c_target_idx == cto_idx && g_edge.way_idx == g_way_idx) {
         found = true;
+        CHECK_LT_S(ci->mm_out_edges.size(),
+                   std::numeric_limits<uint16_t>::max());
         ci->mm_out_edges.push_back(
             {.from_node_idx = cfrom_idx,
              .to_node_idx = cto_idx,
              .edge_idx = c_edge_idx,
              .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
-             .out_edge_pos = static_cast<uint32_t>(ci->mm_out_edges.size())});
+             .out_edge_idx = static_cast<uint16_t>(ci->mm_out_edges.size())});
         break;
       }
     }
@@ -724,8 +728,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
       CHECK_EQ_S(mmc.in_edges.at(i).to_node_idx,
                  tci.mm_in_edges.at(i).to_node_idx);
       CHECK_EQ_S(mmc.in_edges.at(i).edge_idx, tci.mm_in_edges.at(i).edge_idx);
-      CHECK_EQ_S(mmc.in_edges.at(i).in_edge_pos,
-                 tci.mm_in_edges.at(i).in_edge_pos);
+      CHECK_EQ_S(mmc.in_edges.at(i).in_edge_idx,
+                 tci.mm_in_edges.at(i).in_edge_idx);
     }
 
     // out_edges
@@ -739,8 +743,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
       CHECK_EQ_S(mmc.out_edges.at(i).edge_idx, tci.mm_out_edges.at(i).edge_idx);
       CHECK_EQ_S(mmc.out_edges.at(i).to_cluster_id,
                  tci.mm_out_edges.at(i).to_cluster_id);
-      CHECK_EQ_S(mmc.out_edges.at(i).out_edge_pos,
-                 tci.mm_out_edges.at(i).out_edge_pos);
+      CHECK_EQ_S(mmc.out_edges.at(i).out_edge_idx,
+                 tci.mm_out_edges.at(i).out_edge_idx);
     }
 
     // nodes
@@ -889,6 +893,15 @@ void WriteMMCluster(const TmpClusterInfo& tci, MMCluster* mmcluster,
   mmcluster->out_edges.WriteDataBlob(
       "out_edges", global_object_offset + offsetof(MMCluster, out_edges), fd,
       tci.mm_out_edges);
+
+  {
+    std::vector<uint32_t> empty_metrics(
+        tci.mm_in_edges.size() * tci.mm_out_edges.size(), 0);
+    mmcluster->path_metrics.WriteDataBlob(
+        "path_metrics",
+        global_object_offset + offsetof(MMCluster, path_metrics), fd,
+        empty_metrics);
+  }
 
   mmcluster->nodes.WriteDataBlob(
       "nodes", global_object_offset + offsetof(MMCluster, nodes), fd,

@@ -81,7 +81,9 @@ struct MMInEdge {
   uint32_t from_node_idx;
   uint32_t to_node_idx;
   uint32_t edge_idx;     // Index of this edge in the edge array.
-  uint32_t in_edge_pos;  // Position in the list of in-edges of this cluster.
+
+  uint16_t in_edge_idx;  // Position of this entry in the containing vector.
+
 };
 
 struct MMOutEdge {
@@ -89,7 +91,8 @@ struct MMOutEdge {
   uint32_t to_node_idx;
   uint32_t edge_idx;
   uint32_t to_cluster_id;  // Id of the other cluster.
-  uint32_t out_edge_pos;   // Position in the list of in-edges of this cluster.
+                           //
+  uint16_t out_edge_idx;   // Position of this entry in the containing vector.
 };
 
 struct MMComplexTurnRestriction {
@@ -145,9 +148,6 @@ struct MMCluster {
   // client might compute new distances with different settings. Dimension is
   // #in_edges x #out_edges.
   MMVec64<uint32_t> path_metrics;
-  // Bit is set for a node exactly when there is a shortest path that passes
-  // through this node.
-  MMBitset skeleton_nodes;
 
   // *** Inside cluster routing.
   // MMVec64<MMNode> nodes;
@@ -318,8 +318,8 @@ CHECK_IS_MM_OK(MMGraph);
 
 // TODO: add scope.
 constexpr uint64_t kMagic = 7715514337782280064ull;
-constexpr uint64_t kVersionMajor = 0;
-constexpr uint64_t kVersionMinor = 1;
+constexpr uint32_t kVersionMajor = 0;
+constexpr uint32_t kVersionMinor = 1;
 
 struct MMClusterWrapper {
   const MMCluster& g;
