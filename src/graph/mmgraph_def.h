@@ -80,10 +80,9 @@ struct MMInEdge {
   uint32_t from_cluster_id;  // The cluster id of the other cluster.
   uint32_t from_node_idx;
   uint32_t to_node_idx;
-  uint32_t edge_idx;     // Index of this edge in the edge array.
+  uint32_t edge_idx;  // Index of this edge in the edge array.
 
   uint16_t in_edge_idx;  // Position of this entry in the containing vector.
-
 };
 
 struct MMOutEdge {
@@ -112,18 +111,6 @@ struct MMBoundingRect {
   // Upper left and lower right corner of the bounding rectangle;
   MMLatLon min;
   MMLatLon max;
-};
-
-struct MMFullNode {
-  uint32_t node_idx;
-  uint32_t cluster_id;
-};
-
-// An edge with enough data to find it in a mmgraph.
-struct MMFullEdge {
-  uint32_t from_node_idx;
-  uint32_t cluster_id : 24;
-  uint32_t edge_offset : 8;
 };
 
 // This is the memory mapped data structure that represents one cluster in the
@@ -159,7 +146,7 @@ struct MMCluster {
   MMCompressedUIntVec edge_to_turn_costs_pos;
   MMCompressedUIntVec way_to_wsa;
 
-  // Deduped shared attributes, referencded by index.
+  // Deduped shared attributes, referenced by index.
   MMVec64<WaySharedAttrs> way_shared_attrs;
   MMTurnCostsTable turn_costs_table;
   // A vector of complex turn restrictions needed for routing. Sorted by
@@ -168,8 +155,9 @@ struct MMCluster {
   // Array referenced by entries in complex_turn_restrictions.
   MMVec64<uint32_t> complex_turn_restriction_legs;
 
-  // *** Way description generation.
   MMVec64<MMLatLon> node_to_latlon;
+
+  // *** Way description generation.
   MMCompressedUIntVec way_to_streetname_pos;
   MMStringsTable streetnames_table;
 
@@ -278,8 +266,24 @@ struct MMCluster {
   int64_t find_node_idx_by_id(int64_t id) const {
     return grouped_node_to_osm_id.find_idx(id);
   }
+
+  uint32_t find_edge_idx(uint32_t from_node_idx, uint32_t target_idx,
+                         uint32_t way_idx) const {
+    for (uint32_t idx : edge_indices(from_node_idx)) {
+      if (get_edge(idx).target_idx() == target_idx &&
+          edge_to_way.at(idx) == way_idx) {
+        return idx;
+      }
+    }
+    return INFU32;
+  }
 };
 CHECK_IS_MM_OK(MMCluster);
+
+struct MMFullNode {
+  uint32_t node_idx;
+  uint32_t cluster_id;
+};
 
 struct MMClusterBoundingRect {
   uint32_t cluster_id;
@@ -316,25 +320,57 @@ struct MMGraph {
 };
 CHECK_IS_MM_OK(MMGraph);
 
+// An edge with enough data to find it in a mmgraph.
+struct MMFullEdge {
+  uint32_t from_node_idx;
+  uint32_t cluster_id : 24;
+  uint32_t edge_offset : 8;
+
+  uint32_t edge_idx(const MMCluster& mc) const {
+    return mc.edge_start_idx(from_node_idx) + edge_offset;
+  }
+  const MMEdge edge(const MMCluster& mc) const {
+    return MM_EDGE(mc.edges.at(edge_idx(mc)));
+  }
+  uint32_t target_idx(const MMCluster& mc) const {
+    return edge(mc).target_idx();
+  }
+  uint32_t way_idx(const MMCluster& mc) const {
+    return mc.edge_to_way.at(edge_idx(mc));
+  }
+  const MMCluster& mc(const MMGraph& mg) const {
+    return mg.clusters.at(cluster_id);
+  }
+
+  static MMFullEdge Create(const MMCluster& mc, uint32_t from_node_idx,
+                           uint32_t edge_idx) {
+    uint32_t offset = edge_idx - mc.edge_start_idx(from_node_idx);
+    CHECK_LT_S(offset, 256);
+    return {.from_node_idx = from_node_idx,
+            .cluster_id = mc.cluster_id,
+            .edge_offset = offset};
+  }
+};
+
 // TODO: add scope.
 constexpr uint64_t kMagic = 7715514337782280064ull;
 constexpr uint32_t kVersionMajor = 0;
 constexpr uint32_t kVersionMinor = 1;
 
 struct MMClusterWrapper {
-  const MMCluster& g;
+  const MMCluster& mc;
   std::vector<uint32_t> edge_weights;
   const uint8_t* const base_ptr;
 
   // Pre-compute all edge weights for the edges of the cluster.
   void FillEdgeWeights(VEHICLE vt, const RoutingMetric& metric) {
     edge_weights.clear();
-    edge_weights.reserve(g.edges.size());
-    for (uint32_t edge_idx = 0; edge_idx < g.edges.size(); ++edge_idx) {
-      const WaySharedAttrs& wsa = g.get_wsa(g.edge_to_way.at(edge_idx));
+    edge_weights.reserve(mc.edges.size());
+    for (uint32_t edge_idx = 0; edge_idx < mc.edges.size(); ++edge_idx) {
+      const WaySharedAttrs& wsa = mc.get_wsa(mc.edge_to_way.at(edge_idx));
       const DIRECTION direction =
-          ((DIRECTION)MM_EDGE(g.edges.at(edge_idx)).contra_way());
-      const uint32_t distance_cm = g.edge_to_distance.at(edge_idx);
+          ((DIRECTION)MM_EDGE(mc.edges.at(edge_idx)).contra_way());
+      const uint32_t distance_cm = mc.edge_to_distance.at(edge_idx);
       edge_weights.push_back(metric.Compute(wsa, vt, direction, distance_cm));
     }
   }

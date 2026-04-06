@@ -1,7 +1,8 @@
 #pragma once
 
-#include <limits>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 
 constexpr int32_t INF32 = std::numeric_limits<int32_t>::max();
 constexpr int64_t INF64 = std::numeric_limits<int64_t>::max();
@@ -22,3 +23,7 @@ constexpr uint64_t MAXU64 = std::numeric_limits<uint64_t>::max();
 constexpr uint64_t INFU64 = MAXU64;
 
 constexpr int64_t TEN_POW_7 = 10'000'000;
+constexpr double TEN_POW_7_DBL = 10'000'000.0;
+constexpr int64_t kEarthRadiusCm = 637100000;
+constexpr int64_t kEarthCircumReferenceCm =
+    std::llround(kEarthRadiusCm * 2.0 * M_PI);

@@ -77,7 +77,7 @@ inline double RelativeDifference(double a, double b) {
 }
 
 #define CHECK_DOUBLE_EQ_S(a, b, tolerance)      \
-  CHECK_S(RelativeDifference(a, b) < tolerance) \
+  CHECK_S(RelativeDifference(a, b) <= tolerance) \
       << absl::StrFormat("a=%.19f and b=%.19f are different", a, b);
 
 // Object that measures time execution time of a function and prints information

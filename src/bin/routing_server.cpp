@@ -375,6 +375,7 @@ int main(int argc, char* argv[]) {
                      }),
       end(sorted_node_indexes));
 
+#if 0
   std::string root("/tmp");
   std::string admin_root("../../data");
 
@@ -382,6 +383,7 @@ int main(int argc, char* argv[]) {
     root = argv[1];
     admin_root = argv[1];
   }
+#endif
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");

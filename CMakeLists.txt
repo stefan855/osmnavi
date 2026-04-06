@@ -29,6 +29,7 @@ add_definitions(-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D LOGURU_DEBUG_CHECK
 # print file paths
 # add_compile_options(-H)
 add_compile_options(-O3)
+# add_compile_options(-mno-avx2)
 add_compile_options(-Wall)
 add_compile_options(-Wclobbered -Wcast-function-type -Wdangling-reference
   -Wdeprecated-copy -Wempty-body -Wignored-qualifiers  -Wimplicit-fallthrough=3
@@ -96,6 +97,14 @@ add_executable(test_mmap src/test/test_mmap.cpp)
 target_include_directories(test_mmap SYSTEM PRIVATE)
 target_link_libraries(test_mmap PRIVATE osmpbf protobuf::libprotobuf absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time build_graph_lib)
 
+add_executable(test_geometry src/test/test_geometry.cpp)
+target_include_directories(test_geometry SYSTEM PRIVATE)
+target_link_libraries(test_geometry PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
+
+add_executable(test_base src/test/test_base.cpp)
+target_include_directories(test_base SYSTEM PRIVATE)
+target_link_libraries(test_base PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
+
 add_executable(test_serialize src/test/test_serialize.cpp)
 target_include_directories(test_serialize SYSTEM PRIVATE)
 target_link_libraries(test_serialize PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
@@ -115,4 +124,8 @@ target_link_libraries(poi_traffic PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobu
 add_executable(routing_server src/bin/routing_server.cpp)
 target_include_directories(routing_server SYSTEM PRIVATE)
 target_link_libraries(routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_format loguru_lib absl::time absl::time build_graph_lib)
+
+add_executable(mm_routing_server src/bin/mm_routing_server.cpp)
+target_include_directories(mm_routing_server SYSTEM PRIVATE)
+target_link_libraries(mm_routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_format loguru_lib absl::time absl::time build_graph_lib)
 

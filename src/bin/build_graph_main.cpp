@@ -549,7 +549,7 @@ bool FindMMNode(const MMGraph& mmheader, int64_t id, MMFullNode* fn) {
 void ComputeShortestMMPathsForCluster(MMGraph* mmgptr, uint32_t cluster_id) {
   const MMGraph& mmg = *mmgptr;
 
-  MMClusterWrapper mcw = {.g = mmg.clusters.at(cluster_id)};
+  MMClusterWrapper mcw = {.mc = mmg.clusters.at(cluster_id)};
   // LOG_S(INFO) << "Fill Edge weights " << cluster_id;
   mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
 
@@ -560,8 +560,8 @@ void ComputeShortestMMPathsForCluster(MMGraph* mmgptr, uint32_t cluster_id) {
   // Store data.
   uint32_t* ptr =
       (uint32_t*)&mmgptr->clusters.at(cluster_id).path_metrics.at(0);
-  for (uint32_t idx1 = 0; idx1 < mcw.g.in_edges.size(); ++idx1) {
-    for (uint32_t idx2 = 0; idx2 < mcw.g.out_edges.size(); ++idx2) {
+  for (uint32_t idx1 = 0; idx1 < mcw.mc.in_edges.size(); ++idx1) {
+    for (uint32_t idx2 = 0; idx2 < mcw.mc.out_edges.size(); ++idx2) {
       *ptr++ = sp.metrics.at(idx1).at(idx2);
     }
   }
@@ -827,12 +827,15 @@ int main(int argc, char* argv[]) {
     MMFullNode fn1;
     MMFullNode fn2;
     if (FindMMNode(mmg, 413974806, &fn1) && FindMMNode(mmg, 357301279, &fn2)) {
-      MMClusterWrapper mcw = {.g = mmg.clusters.at(fn1.cluster_id)};
+      MMClusterWrapper mcw = {.mc = mmg.clusters.at(fn1.cluster_id)};
       mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
       if (fn1.cluster_id == fn2.cluster_id) {
         RouteOnMMGraph(mcw, fn1.node_idx, fn2.node_idx, Verbosity::Verbose);
       }
     }
+
+    // Start Hofuhrenstrasse 29:   47.3488610, 8.7030114
+    // Target Sonnenbergstr.26/28: 47.3501609, 8.7030207
 
     munmap((void*)ptr, file_size);
   }

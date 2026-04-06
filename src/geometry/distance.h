@@ -2,9 +2,9 @@
 
 #include <cmath>
 
-namespace {
-constexpr int64_t kEarthRadiusCm = 637100000;
+#include "base/constants.h"
 
+namespace {
 // Length of a segment on a longitude circle in cm, given its size in degrees.
 // This assumes that the earth is a perfect sphere (although it isn't). This is
 // necessary because the calculate_distance() does the same.
