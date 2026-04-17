@@ -258,6 +258,21 @@ struct MMCluster {
   uint32_t start_dead_end_nodes() const {
     return num_border_nodes + num_off_cluster_nodes + num_inner_nodes;
   }
+  // The first index of an edge belonging to a dead end. This is the first edge
+  // that is labelled bridge() or dead_end().
+  // Note that this is - by construction - the same as the number of
+  // non-dead-end edges in the cluster.
+  uint32_t start_dead_end_edges() const {
+    uint32_t first_n_idx = start_dead_end_nodes();
+    if (first_n_idx == 0) {
+      return 0;
+    }
+    return edge_stop_idx(first_n_idx - 1);
+  }
+
+  // The number of non-dead-end edges. They are stored at the beginning of the
+  // edges vector, i.e. in [0..num_non_dead_end_edges()-1].
+  uint32_t num_non_dead_end_edges() const { return start_dead_end_edges(); }
 
   // Debugging
 
@@ -342,8 +357,9 @@ struct MMFullEdge {
     return mg.clusters.at(cluster_id);
   }
 
-  static MMFullEdge Create(const MMCluster& mc, uint32_t from_node_idx,
-                           uint32_t edge_idx) {
+  static inline MMFullEdge CreateWithEdgeIdx(const MMCluster& mc,
+                                             uint32_t from_node_idx,
+                                             uint32_t edge_idx) {
     uint32_t offset = edge_idx - mc.edge_start_idx(from_node_idx);
     CHECK_LT_S(offset, 256);
     return {.from_node_idx = from_node_idx,
@@ -351,6 +367,26 @@ struct MMFullEdge {
             .edge_offset = offset};
   }
 };
+
+// Returns the edges incoming at 'target_node_idx'.
+inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(
+    const MMCluster& mc, uint32_t target_node_idx) {
+  std::vector<MMFullEdge> res;
+  uint32_t node_idx = 0;
+  for (uint32_t edge_idx = 0; edge_idx < mc.edges.size(); ++edge_idx) {
+    if (MM_EDGE(mc.edges.at(edge_idx)).target_idx() == target_node_idx) {
+      // We found and edge, now fast forward the node array to find the node.
+      while (node_idx + 1 < mc.nodes.size() &&
+             mc.edge_start_idx(node_idx + 1) <= edge_idx) {
+        node_idx++;
+      }
+      CHECK_GE_S(edge_idx, mc.edge_start_idx(node_idx));
+      CHECK_LT_S(edge_idx, mc.edge_stop_idx(node_idx));
+      res.push_back(MMFullEdge::CreateWithEdgeIdx(mc, node_idx, edge_idx));
+    }
+  }
+  return res;
+}
 
 // TODO: add scope.
 constexpr uint64_t kMagic = 7715514337782280064ull;
@@ -363,10 +399,13 @@ struct MMClusterWrapper {
   const uint8_t* const base_ptr;
 
   // Pre-compute all edge weights for the edges of the cluster.
-  void FillEdgeWeights(VEHICLE vt, const RoutingMetric& metric) {
+  void FillEdgeWeights(VEHICLE vt, const RoutingMetric& metric,
+                       bool include_dead_ends = true) {
+    size_t num =
+        include_dead_ends ? mc.edges.size() : mc.num_non_dead_end_edges();
     edge_weights.clear();
-    edge_weights.reserve(mc.edges.size());
-    for (uint32_t edge_idx = 0; edge_idx < mc.edges.size(); ++edge_idx) {
+    edge_weights.reserve(num);
+    for (uint32_t edge_idx = 0; edge_idx < num; ++edge_idx) {
       const WaySharedAttrs& wsa = mc.get_wsa(mc.edge_to_way.at(edge_idx));
       const DIRECTION direction =
           ((DIRECTION)MM_EDGE(mc.edges.at(edge_idx)).contra_way());

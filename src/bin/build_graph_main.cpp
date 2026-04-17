@@ -551,7 +551,8 @@ void ComputeShortestMMPathsForCluster(MMGraph* mmgptr, uint32_t cluster_id) {
 
   MMClusterWrapper mcw = {.mc = mmg.clusters.at(cluster_id)};
   // LOG_S(INFO) << "Fill Edge weights " << cluster_id;
-  mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
+  mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime(),
+                      /*include_dead_ends=*/false);
 
   // LOG_S(INFO) << "Compute shortest paths in cluster " << cluster_id;
   MMClusterShortestPaths sp =
@@ -815,7 +816,7 @@ int main(int argc, char* argv[]) {
           uint32_t mb = mmc.path_metrics.at(idx1 * mmc.out_edges.size() + idx2);
           /*
           LOG_S(INFO) << absl::StrFormat(
-              "Compare cl:%u idx1:%2u idx2:%2u ma:%8u mb:%8u%s", cluster_id,
+              "Compare cl:%u idx1:%2u idx2:%2u ma:%8u mb:%8u%s", mmc.cluster_id,
               idx1, idx2, ma, mb, ma != mb ? " DIFF" : "");
           */
           CHECK_EQ_S(ma, mb)
@@ -830,7 +831,8 @@ int main(int argc, char* argv[]) {
       MMClusterWrapper mcw = {.mc = mmg.clusters.at(fn1.cluster_id)};
       mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
       if (fn1.cluster_id == fn2.cluster_id) {
-        RouteOnMMGraph(mcw, fn1.node_idx, fn2.node_idx, Verbosity::Verbose);
+        RouteOnMMClusterFromNodes(mcw, fn1.node_idx, fn2.node_idx,
+                                  Verbosity::Verbose);
       }
     }
 
