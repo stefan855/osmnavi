@@ -50,8 +50,8 @@ struct TmpClusterInfo {
   // Bounding rectangle for the nodes in the cluster, including shape nodes.
   MMBoundingRect mm_bounding_rect;
 
-  std::vector<MMInEdge> mm_in_edges;
-  std::vector<MMOutEdge> mm_out_edges;
+  std::vector<MMIncomingEdge> mm_in_edges;
+  std::vector<MMOutgoingEdge> mm_out_edges;
 
   // Dim #nodes
   std::vector<uint64_t> mm_nodes;
@@ -258,24 +258,30 @@ void ClusterAddTurnCosts(const Graph& g, TmpClusterInfo* ci) {
   for (uint32_t cn0_idx = 0; cn0_idx < ci->mm_nodes.size(); ++cn0_idx) {
     for (uint32_t ce0_idx : cnode_edge_indices(*ci, cn0_idx)) {
       TurnCostData tcd;
-      // const uint32_t cn1_idx = ci->mm_edges.at(ce0_idx).target_idx;
       const uint32_t cn1_idx = MM_EDGE(ci->mm_edges.at(ce0_idx)).target_idx();
       for (uint32_t ce1_idx : cnode_edge_indices(*ci, cn1_idx)) {
         // Now we have two edges representing a turn:
         //   (cn0_idx, ce0_idx) and (cn1_idx, ce1_idx).
-        //  Get the turn cost for this turn that were computed in 'graph'.
+        // Get the turn cost for this turn that were computed in 'graph'.
         const uint32_t gn0_idx = ci->cnode_to_gnode.at(cn0_idx);
         const uint32_t ge0_off = ci->cedge_to_gedge_offset.at(ce0_idx);
         const uint32_t gn1_idx = ci->cnode_to_gnode.at(cn1_idx);
         const uint32_t ge1_off = ci->cedge_to_gedge_offset.at(ce1_idx);
-        const N3Path n3p =
-            N3Path::Create(g, {gn0_idx, ge0_off}, {gn1_idx, ge1_off});
-        tcd.turn_costs.push_back(n3p.get_compressed_turn_cost_0to1(g));
+        const FullEdge fe0(gn0_idx, ge0_off);
+        const FullEdge fe1(gn1_idx, ge1_off);
+        if (fe0.start_idx() == fe1.target_idx(g) &&
+            fe1.start_node(g).cluster_id != ci->cluster_id) {
+          // U-turn og_edge -> ic_edge is always disallowed, because this should
+          // be evaluated on the target cluster, i.e. incoming to outgoing edge.
+          tcd.turn_costs.push_back(TURN_COST_INFINITY_COMPRESSED);
+        } else {
+          const N3Path n3p = N3Path::Create(g, fe0, fe1);
+          tcd.turn_costs.push_back(n3p.get_compressed_turn_cost_0to1(g));
+        }
       }
       // Check we're iterating all edges from 0 to size.
       CHECK_EQ_S(ci->cedge_to_turn_cost_idx.size(), ce0_idx);
       ci->cedge_to_turn_cost_idx.push_back(deduper.Add(tcd));
-      // ci->mm_edges.at(ce0_idx).turn_cost_idx = deduper.Add(tcd);
     }
   }
   ci->turn_costs = deduper.GetObjVector();
@@ -376,12 +382,16 @@ void ClusterAddInEdges(const Graph& g, TmpClusterInfo* ci) {
         found = true;
         CHECK_LT_S(ci->mm_in_edges.size(),
                    std::numeric_limits<uint16_t>::max());
-        ci->mm_in_edges.push_back(
-            {.from_cluster_id = g.nodes.at(gi.g_from_idx).cluster_id,
-             .from_node_idx = cfrom_idx,
-             .to_node_idx = cto_idx,
-             .edge_idx = c_edge_idx,
-             .in_edge_idx = static_cast<uint16_t>(ci->mm_in_edges.size())});
+        ci->mm_in_edges.push_back({
+            .from_cluster_id = g.nodes.at(gi.g_from_idx).cluster_id,
+            .from_node_idx = cfrom_idx,
+            .to_node_idx = cto_idx,
+            .edge_idx = c_edge_idx,
+            .in_edge_pos = static_cast<uint16_t>(ci->mm_in_edges.size()),
+            .from_node_id = g.nodes.at(gi.g_from_idx).node_id,
+            .to_node_id = g.nodes.at(g_edge.target_idx).node_id,
+            .way_id = g.ways.at(g_way_idx).id,
+        });
         break;
       }
     }
@@ -416,12 +426,16 @@ void ClusterAddOutEdges(const Graph& g, TmpClusterInfo* ci) {
         found = true;
         CHECK_LT_S(ci->mm_out_edges.size(),
                    std::numeric_limits<uint16_t>::max());
-        ci->mm_out_edges.push_back(
-            {.from_node_idx = cfrom_idx,
-             .to_node_idx = cto_idx,
-             .edge_idx = c_edge_idx,
-             .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
-             .out_edge_idx = static_cast<uint16_t>(ci->mm_out_edges.size())});
+        ci->mm_out_edges.push_back({
+            .from_node_idx = cfrom_idx,
+            .to_node_idx = cto_idx,
+            .edge_idx = c_edge_idx,
+            .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
+            .out_edge_pos = static_cast<uint16_t>(ci->mm_out_edges.size()),
+            .from_node_id = g.nodes.at(gi.g_from_idx).node_id,
+            .to_node_id = g.nodes.at(g_edge.target_idx).node_id,
+            .way_id = g.ways.at(g_way_idx).id,
+        });
         break;
       }
     }
@@ -728,8 +742,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
       CHECK_EQ_S(mmc.in_edges.at(i).to_node_idx,
                  tci.mm_in_edges.at(i).to_node_idx);
       CHECK_EQ_S(mmc.in_edges.at(i).edge_idx, tci.mm_in_edges.at(i).edge_idx);
-      CHECK_EQ_S(mmc.in_edges.at(i).in_edge_idx,
-                 tci.mm_in_edges.at(i).in_edge_idx);
+      CHECK_EQ_S(mmc.in_edges.at(i).in_edge_pos,
+                 tci.mm_in_edges.at(i).in_edge_pos);
     }
 
     // out_edges
@@ -743,8 +757,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
       CHECK_EQ_S(mmc.out_edges.at(i).edge_idx, tci.mm_out_edges.at(i).edge_idx);
       CHECK_EQ_S(mmc.out_edges.at(i).to_cluster_id,
                  tci.mm_out_edges.at(i).to_cluster_id);
-      CHECK_EQ_S(mmc.out_edges.at(i).out_edge_idx,
-                 tci.mm_out_edges.at(i).out_edge_idx);
+      CHECK_EQ_S(mmc.out_edges.at(i).out_edge_pos,
+                 tci.mm_out_edges.at(i).out_edge_pos);
     }
 
     // nodes
@@ -1057,11 +1071,13 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
                    // global file offset of this MMCluster object.
                    clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)),
                    fd);
+    sorted_bounding_rects.at(tci.cluster_id) = {
+        .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
+    LOG_S(INFO) << "TT0:" << tci.cluster_id;
+    LOG_S(INFO) << "TT1:" << sorted_bounding_rects.at(tci.cluster_id).cluster_id;
     if (!check_mmgraph) {
       tci = {};  // Clear all data, release memory.
     }
-    sorted_bounding_rects.at(tci.cluster_id) = {
-        .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
   }
 
   std::sort(sorted_bounding_rects.begin(), sorted_bounding_rects.end(),

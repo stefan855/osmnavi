@@ -85,7 +85,13 @@ template <typename T>
 class MMVec64 {
  public:
   // A view on the vector data, allowing iteration.
-  std::span<const T> span() const { return std::span<const T>(&at(0), num__); }
+  std::span<const T> span() const {
+    if (num__ > 0) {
+      return std::span<const T>(&at(0), num__);
+    } else {
+      return std::span<const T>();  // empty span.
+    }
+  }
 
   // Access to a single element, check-fails when pos is out of bounds.
   const T& at(size_t pos) const {
@@ -308,6 +314,8 @@ class MMTurnCostsTable {
  public:
   std::span<const uint8_t> at(uint32_t pos) const {
     const uint8_t* ptr = &arr__.at(pos);
+    // ptr points to the number of elements.
+    // ptr + 1 points to the start of the array.
     return std::span<const uint8_t>(ptr + 1, *ptr);
   }
 

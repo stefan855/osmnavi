@@ -29,16 +29,6 @@ struct ClosestEdge {
   MMFullEdge fe;
   bool valid = false;
 
-  std::string DebugString(const MMGraph& mg, uint32_t origin_lat,
-                          uint32_t origin_lon) const {
-    const MMCluster& mc = mg.clusters.at(fe.cluster_id);
-    return absl::StrFormat(
-        "Closest Edge for (%.7f, %.7f) dist:%.2fm n0:%lli n1:%lli fc:%.2f",
-        origin_lat, origin_lon, dts.distance_cm / 100.0,
-        mc.get_node_id(fe.from_node_idx),
-        mc.get_node_id(fe.edge(mc).target_idx()), dts.fraction_closest);
-  }
-
   // "spaceship" operator, automatically defines ==, !=, <, <=, >, >=.
   // auto operator<=>(const ClosestEdge&) const = default;
   auto operator<=>(const ClosestEdge& other) const { return dts <=> other.dts; }
@@ -50,8 +40,17 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
             .fe = {.from_node_idx = MAXU32},
             .valid = false});
 
+  LOG_S(INFO) << "AA0 clusters: " << mg.clusters.size();
+  for (const auto& c : mg.clusters.span()) {
+    LOG_S(INFO) << "AA0b " << c.cluster_id;
+  }
+  for (const auto& br : mg.sorted_bounding_rects.span()) {
+    LOG_S(INFO) << "AA0c " << br.cluster_id;
+  }
+  LOG_S(INFO) << "AA0 brs: " << mg.sorted_bounding_rects.size();
   for (const MMClusterBoundingRect& br : mg.sorted_bounding_rects.span()) {
     const MMCluster& mc = mg.clusters.at(br.cluster_id);
+    LOG_S(INFO) << "Cluster " << mc.cluster_id;
     for (uint32_t n0_idx = 0; n0_idx < mc.nodes.size(); ++n0_idx) {
       const MMLatLon& n0_coord = mc.node_to_latlon.at(n0_idx);
       for (uint32_t e_idx : mc.edge_indices(n0_idx)) {
@@ -60,6 +59,7 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
         const DistanceToSegment d = FastPointToSegmentDistance(
             lat, lon, n0_coord.lat, n0_coord.lon, n1_coord.lat, n1_coord.lon);
         if (!topn.filled() || d.distance_cm < topn.bottom().dts.distance_cm) {
+          LOG_S(INFO) << mc.cluster_id << " new dist:" << (d.distance_cm / 100);
           topn.Add({.dts = d,
                     .fe = {.from_node_idx = n0_idx,
                            .cluster_id = mc.cluster_id,
@@ -73,11 +73,12 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
   MMGeoAnchor a = {.point = {.lat = lat, .lon = lon}};
   for (const ClosestEdge& ce : topn.span()) {
     if (ce.valid) {
-      a.edge_points.push_back({.distance_cm = ce.dts.distance_cm,
-                               .fraction = ce.dts.fraction_closest,
-                               .lat_at_fraction = ce.dts.lat_closest,
-                               .lon_at_fraction = ce.dts.lon_closest,
-                               .fe = ce.fe});
+      a.edge_points.push_back(
+          {.distance_cm = static_cast<uint32_t>(ce.dts.distance_cm),
+           .fraction = static_cast<float>(ce.dts.fraction_closest),
+           .lat_at_fraction = ce.dts.lat_closest,
+           .lon_at_fraction = ce.dts.lon_closest,
+           .fe = ce.fe});
       LOG_S(INFO) << absl::StrFormat("fraction_closest:%.3f",
                                      ce.dts.fraction_closest);
     }
@@ -247,73 +248,33 @@ double Round1(double val) { return std::round(val * 10.0) / 10.0; }
 
 class StepsData {
  public:
-  StepsData(const MMCluster& mc, const MMEdgePoint& start,
-            const MMEdgePoint& target, const MMClusterRouter& router,
-            const std::vector<uint32_t>& route_v_idx)
-      : start_(start), target_(target) {
-    CHECK_S(!route_v_idx.empty());
-    uint32_t prev_weight = 0;
-    for (uint32_t pos = 0; pos < route_v_idx.size(); ++pos) {
-      const uint32_t v_idx = route_v_idx.at(pos);
-      if (pos == 0) {
-        fes_.push_back(start_.fe);
-        CHECK_EQ_S(start_.fe.edge_idx(mc), router.GetGraphEdgeIdx(v_idx));
-      } else {
-        uint32_t from_node_idx = fes_.back().target_idx(mc);
-        fes_.push_back(MMFullEdge::CreateWithEdgeIdx(
-            mc, from_node_idx, router.GetGraphEdgeIdx(v_idx)));
-      }
-      // This is not in the else branch above because it can be that the path
-      // has length 1.
-      if (pos == route_v_idx.size() - 1) {
-        CHECK_EQ_S(target_.fe.edge_idx(mc), fes_.back().edge_idx(mc));
-      }
-      const MMClusterRouter::VisitedEdge& ve = router.GetVEdge(v_idx);
-      weights_.push_back(ve.min_weight - prev_weight);
-      prev_weight = ve.min_weight;
-    }
-    CHECK_EQ_S(route_v_idx.size(), fes_.size());
-    CHECK_EQ_S(weights_.size(), fes_.size());
+  StepsData(const MMCluster& mc, const MMRoutingResult2& res) : res_(res) {
   }
 
-  size_t num_steps() const { return fes_.size(); }
-
-  // Length in meters of the edge at 'pos'. This handles the special cases of
-  // the first and last edge.
-  float dist_meter(const MMCluster& mc, uint32_t pos) const {
-    uint32_t dist = mc.edge_to_distance.at(fes_.at(pos).edge_idx(mc));
-    if (pos > 0 && pos + 1 < fes_.size()) {
-      // Not first and/or last edge.
-      return dist / 100.0;
-    }
-    float del_frac_start = (pos == 0 ? start_.fraction : 0.0);
-    float del_frac_target =
-        (pos == fes_.size() - 1 ? 1.0 - target_.fraction : 0.0);
-    return dist * (1 - del_frac_start - del_frac_target) / 100.0;
-  }
+  size_t num_steps() const { return res_.full_edges.size(); }
 
   JsonResult CreateOneStep(const MMCluster& mc, uint32_t pos) const {
-    MMFullEdge fe = fes_.at(pos);
+    const MMFullEdge& fe = res_.full_edges.at(pos);
 
     float from_lon = GetLon(mc, fe.from_node_idx);
     float from_lat = GetLat(mc, fe.from_node_idx);
     float to_lon = GetLon(mc, fe.target_idx(mc));
     float to_lat = GetLat(mc, fe.target_idx(mc));
     if (pos == 0) {
-      from_lon = start_.lon_at_fraction / TEN_POW_7_DBL;
-      from_lat = start_.lat_at_fraction / TEN_POW_7_DBL;
+      from_lon = res_.start.lon_at_fraction / TEN_POW_7_DBL;
+      from_lat = res_.start.lat_at_fraction / TEN_POW_7_DBL;
     }
     if (pos + 1 == num_steps()) {
-      to_lon = target_.lon_at_fraction / TEN_POW_7_DBL;
-      to_lat = target_.lat_at_fraction / TEN_POW_7_DBL;
+      to_lon = res_.target.lon_at_fraction / TEN_POW_7_DBL;
+      to_lat = res_.target.lat_at_fraction / TEN_POW_7_DBL;
     }
 
     std::vector<CoordinatePair> coords;
     coords.push_back({.lat = from_lat, .lon = from_lon});
     coords.push_back({.lat = to_lat, .lon = to_lon});
     // convert to seconds.
-    const double duration = weights_.at(pos) / 1000.0;
-    const double dist = dist_meter(mc, pos);
+    const double duration = res_.edge_weights.at(pos) / 1000.0;
+    const double dist = res_.distance_cm(mc, pos) / 100.0;
 
     nlohmann::json maneuver = {{"bearing_after", 0},
                                {"bearing_before", 0},
@@ -333,10 +294,10 @@ class StepsData {
   }
 
   JsonResult CreateArrivalStep(const MMCluster& mc) const {
-    MMFullEdge fe = fes_.back();
+    MMFullEdge fe = res_.full_edges.back();
 
-    float to_lon = target_.lon_at_fraction / TEN_POW_7_DBL;
-    float to_lat = target_.lat_at_fraction / TEN_POW_7_DBL;
+    float to_lon = res_.target.lon_at_fraction / TEN_POW_7_DBL;
+    float to_lat = res_.target.lat_at_fraction / TEN_POW_7_DBL;
 
     std::vector<CoordinatePair> coords;
     coords.push_back({.lat = to_lat, .lon = to_lon});
@@ -355,10 +316,7 @@ class StepsData {
   }
 
  private:
-  const MMEdgePoint start_;
-  const MMEdgePoint target_;
-  std::vector<MMFullEdge> fes_;
-  std::vector<uint32_t> weights_;
+  const MMRoutingResult2& res_;
 };
 
 JsonResult CreateSteps(const MMCluster& mc, const StepsData& steps_data) {
@@ -376,34 +334,29 @@ JsonResult CreateSteps(const MMCluster& mc, const StepsData& steps_data) {
   return result;
 }
 
-nlohmann::json RouteToJson(const MMCluster& mc, const MMEdgePoint& start,
-                           const MMEdgePoint& target,
-                           const MMClusterRouter& router,
-                           const MMRoutingResult& res) {
-  if (res.route_v_idx.empty()) {
-    return {{"code", "NoRoute"}};
-  }
+nlohmann::json RouteToJson(const MMCluster& mc, const MMRoutingResult2& res) {
+  CHECK_S(!res.full_edges.empty());
 
   nlohmann::json waypoints = nlohmann::json::array();
   {
     waypoints.push_back(
-        {{"distance", std::roundf(start.distance_cm / 10.0) / 10.0},
-         {"name", GetEdgeName(mc, start.fe)},
+        {{"distance", std::roundf(res.start.distance_cm / 10.0) / 10.0},
+         {"name", GetEdgeName(mc, res.start.fe)},
          {"location",
-          {start.lon_at_fraction / TEN_POW_7_DBL,
-           start.lat_at_fraction / TEN_POW_7_DBL}}});
+          {res.start.lon_at_fraction / TEN_POW_7_DBL,
+           res.start.lat_at_fraction / TEN_POW_7_DBL}}});
   }
   {
     waypoints.push_back(
-        {{"distance", std::roundf(target.distance_cm / 10.0) / 10.0},
-         {"name", GetEdgeName(mc, target.fe)},
+        {{"distance", std::roundf(res.target.distance_cm / 10.0) / 10.0},
+         {"name", GetEdgeName(mc, res.target.fe)},
          {"location",
-          {target.lon_at_fraction / TEN_POW_7_DBL,
-           target.lat_at_fraction / TEN_POW_7_DBL}}});
+          {res.target.lon_at_fraction / TEN_POW_7_DBL,
+           res.target.lat_at_fraction / TEN_POW_7_DBL}}});
   }
 
   // We currently support only one leg, so the only thing to fill are the steps.
-  StepsData steps_data(mc, start, target, router, res.route_v_idx);
+  StepsData steps_data(mc, res);
 
   JsonResult res_steps = CreateSteps(mc, steps_data);
   nlohmann::json leg = {{"steps", res_steps.j},
@@ -423,6 +376,7 @@ nlohmann::json ComputeRoute(const MMGraph& mmg, bool hybrid, double lon1,
   FUNC_TIMER();
 
   absl::Time start_time = absl::Now();
+  LOG_S(INFO) << "Search " << lon1 << " " << lat1;
   const MMGeoAnchor start =
       FindClosestEdges(mmg, std::llround(lat1 * TEN_POW_7_DBL),
                        std::llround(lon1 * TEN_POW_7_DBL));
@@ -450,42 +404,30 @@ nlohmann::json ComputeRoute(const MMGraph& mmg, bool hybrid, double lon1,
   CHECK_EQ_S(start.edge_points.front().fe.cluster_id,
              target.edge_points.front().fe.cluster_id);
   start_time = absl::Now();
-  MMClusterWrapper mcw = {.mc = start.edge_points.front().fe.mc(mmg)};
-  mcw.FillEdgeWeights(VH_MOTORCAR, RoutingMetricTime());
+  MMClusterWrapper mcw(start.edge_points.front().fe.mc(mmg), VH_MOTORCAR,
+                       RoutingMetricTime(),
+                       /*include_dead_ends=*/true);
   LOG_S(INFO) << absl::StrFormat("**** Create cluster wrapper: %.2f secs",
                                  ToDoubleSeconds(absl::Now() - start_time));
 
   start_time = absl::Now();
-  MMClusterRouter router(mcw);
-  router.Route(start,
-               {.handle_restricted_access = true, .include_dead_end = true},
-               target);
+  MMClusterRouter router(
+      mcw, {.handle_restricted_access = true, .include_dead_end = true});
+  RouterStatus status = router.Route(start, target);
   LOG_S(INFO) << "Finished routing";
   LOG_S(INFO) << absl::StrFormat("**** Route(): %.2f secs",
                                  ToDoubleSeconds(absl::Now() - start_time));
 
-  MMRoutingResult res = router.GetRoutingResult();
-
-  if (res.route_v_idx.empty()) {
+  if (!status.found) {
     return {{"code", "NoRoute"}};
   }
 
+  MMRoutingResult2 res = router.GetRoutingResult2(status.last_v_idx);
+
   // const double elapsed = ToDoubleSeconds(absl::Now() - start_time);
 
-  int start_edge_pos = -1;
-  int target_edge_pos = -1;
-  CHECK_S(!res.route_v_idx.empty());
-  start_edge_pos = start.FindPosByEdgeIdx(
-      mcw.mc, router.GetGraphEdgeIdx(res.route_v_idx.front()));
-  target_edge_pos = target.FindPosByEdgeIdx(
-      mcw.mc, router.GetGraphEdgeIdx(res.route_v_idx.back()));
-
-  CHECK_GE_S(start_edge_pos, 0);
-  CHECK_GE_S(target_edge_pos, 0);
-
-  nlohmann::json jres =
-      RouteToJson(mcw.mc, start.edge_points.at(start_edge_pos),
-                  target.edge_points.at(target_edge_pos), router, res);
+  CHECK_S(!res.full_edges.empty());
+  nlohmann::json jres = RouteToJson(mcw.mc, res);
   LOG_S(INFO) << absl::StrFormat("**** create json result(): %.2f secs",
                                  ToDoubleSeconds(absl::Now() - start_time));
   return jres;

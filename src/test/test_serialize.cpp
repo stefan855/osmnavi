@@ -392,12 +392,6 @@ void TestComponents() {
   CHECK_EQ_S(ptr, wb.base_ptr() + wb.used());
 }
 
-void TestRead() {
-  FUNC_TIMER();
-  Graph g =
-      ReadSerializedGraph("/home/stefan/src/osm/osmnavi/release/graph.ser");
-}
-
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -412,8 +406,6 @@ int main(int argc, char* argv[]) {
   TestWaySharedAttrs();
   TestTurnRestrictions();
   TestComponents();
-
-  // TestRead();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

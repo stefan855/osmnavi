@@ -82,7 +82,7 @@ inline double RelativeDifference(double a, double b) {
 
 // Object that measures time execution time of a function and prints information
 // about start, end and elapsed time.
-// Just put the macro FUNC_TIME() on the first line of you function.
+// Just put the macro FUNC_TIMER() on the first line of you function.
 #define FUNC_TIMER() \
   FuncTimer __func_timer(std::string(__func__) + "()", __FILE__, __LINE__);
 class FuncTimer {

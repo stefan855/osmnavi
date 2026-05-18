@@ -29,6 +29,17 @@ add_definitions(-D_LARGEFILE_SOURCE -D_FILE_OFFSET_BITS=64 -D LOGURU_DEBUG_CHECK
 # print file paths
 # add_compile_options(-H)
 add_compile_options(-O3)
+
+# How to DEBUG a unreadable stack trace:
+#   Recompile with -ggdb option
+#   Run in gdb:
+#     > gdb ./build_graph_main
+#     > run <args>
+#     > when program halts with error, enter 'bt'
+#
+# add_compile_options(-O0)
+# add_compile_options(-ggdb)
+
 # add_compile_options(-mno-avx2)
 add_compile_options(-Wall)
 add_compile_options(-Wclobbered -Wcast-function-type -Wdangling-reference
