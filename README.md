@@ -39,18 +39,20 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Compute turn costs and use them in routing.
 1. Store the routing graph in a file, see [graph_serialize.h](./src/graph/graph_serialize.h). With this, the serialized graph for a country such as Switzerland is ~70Mb.
 1. Ported the code to Raspberry Pi, i.e. to another architecture more similar to phone hardware. The port was actually very easy. Only one test started to fail due to comparing double values that were marginally different.
+1. Replace the serialized graph that is loaded fully into memory by the memory mapped file containing the routing graph.
   
 ## Current Tasks
-* Design and implement a memory mapped file containing the routing graph. To be used in the routing engine. 
+* Implement routing engine using the memory mapped file. Prototype up and running, working on edge cases.
+* Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
+* Remove the serialized graph, it is replaced by the memory mapped graph. 
 
 ## Tasks ahead
-1. Extend config for car routing and cover more central European countries.
+1. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
 2. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
 1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 2. Make the routing server use https instead of http.
 3. Experiment and potentially replace the Louvain clustering algorithm with a MaximumFlow/MinCut based algorithm, which should provide better clusters. See [Schild, Aaron, and Christian Sommer. "On balanced separators in road networks.", 2015](https://aschild.github.io/papers/roadseparator.pdf)
-1. Add routing configs for more countries (see [routing.cfg](config/routing.cfg)).
 1. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
 1. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
 1. Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are only useful for the user experience during navigation.
@@ -106,8 +108,8 @@ mv /tmp/admin ../../data/admin
 # Run tile server for visualization data
 ./tile_server
 # Run routing server to answer interactive queries
-./routing_server ../../data/switzerland-latest.osm.pbf
+./mm_routing_server /tmp/mmgraph.file (starts a server on http://localhost:8081/)
 
 # Browse information in both servers.
-file://<path_to_repo>/osmnavi/src/html/leaflet.html
+http://localhost:8081/
 ```
