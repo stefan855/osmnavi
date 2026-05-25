@@ -14,6 +14,7 @@
 #include "absl/strings/str_split.h"
 #include "algos/complex_turn_restriction.h"
 #include "algos/mm_cluster_router.h"
+#include "algos/mm_hybrid_router.h"
 #include "base/argli.h"
 #include "base/thread_pool.h"
 #include "base/top_n.h"
@@ -34,23 +35,49 @@ struct ClosestEdge {
   auto operator<=>(const ClosestEdge& other) const { return dts <=> other.dts; }
 };
 
+// At latitude 'lat', how many degrees (in 10^-7 degrees units) do we travel for
+// 10 km?
+int64_t Get10kmLongitudeAtLatitude(int32_t lat) {
+  // Compute an estimate of how long one kilometer of longitude is (in 10^-7
+  // degrees) at a specific latitude.
+  // Compute length for one degree longitude at 'lat'.
+  double length_one_deg_in_km =
+      calculate_distance(lat, 0, lat, TEN_POW_7) / (100.0 * 1000.0);
+  return 1'000'00000 / length_one_deg_in_km;
+}
+
 MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
   TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;
   topn.Add({.dts = {.distance_cm = MAXU31},
             .fe = {.from_node_idx = MAXU32},
             .valid = false});
 
-  LOG_S(INFO) << "AA0 clusters: " << mg.clusters.size();
-  for (const auto& c : mg.clusters.span()) {
-    LOG_S(INFO) << "AA0b " << c.cluster_id;
-  }
-  for (const auto& br : mg.sorted_bounding_rects.span()) {
-    LOG_S(INFO) << "AA0c " << br.cluster_id;
-  }
-  LOG_S(INFO) << "AA0 brs: " << mg.sorted_bounding_rects.size();
-  for (const MMClusterBoundingRect& br : mg.sorted_bounding_rects.span()) {
-    const MMCluster& mc = mg.clusters.at(br.cluster_id);
-    LOG_S(INFO) << "Cluster " << mc.cluster_id;
+  // Roughly one kilometer in lat direction.
+  constexpr int64_t lat_10km = 111'1111;
+  // Roughly one kilometer in lon direction.
+  const int64_t lon_10km = Get10kmLongitudeAtLatitude(lat);
+  LOG_S(INFO) << "lon_10km:" << lon_10km;
+
+  LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%u, %u)", lat,
+                                 lon);
+  for (const MMClusterBoundingRect& cl_br : mg.sorted_bounding_rects.span()) {
+    const MMBoundingRect& br = cl_br.bounding_rect;
+    /*
+    LOG_S(INFO) << absl::StrFormat("cl %u min:(%u,%u) max:(%u,%u)",
+                                   cl_br.cluster_id, br.min.lat, br.min.lon,
+                                   br.max.lat, br.max.lon);
+                                   */
+    if ((int64_t)lat < (int64_t)br.min.lat - lat_10km ||
+        (int64_t)lat > (int64_t)br.max.lat + lat_10km) {
+      continue;
+    }
+    if (std::abs(lat) < 85ll * TEN_POW_7 &&
+        ((int64_t)lon < (int64_t)br.min.lon - lon_10km ||
+         (int64_t)lon > (int64_t)br.max.lon + lon_10km)) {
+      continue;
+    }
+
+    const MMCluster& mc = mg.clusters.at(cl_br.cluster_id);
     for (uint32_t n0_idx = 0; n0_idx < mc.nodes.size(); ++n0_idx) {
       const MMLatLon& n0_coord = mc.node_to_latlon.at(n0_idx);
       for (uint32_t e_idx : mc.edge_indices(n0_idx)) {
@@ -59,7 +86,6 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
         const DistanceToSegment d = FastPointToSegmentDistance(
             lat, lon, n0_coord.lat, n0_coord.lon, n1_coord.lat, n1_coord.lon);
         if (!topn.filled() || d.distance_cm < topn.bottom().dts.distance_cm) {
-          LOG_S(INFO) << mc.cluster_id << " new dist:" << (d.distance_cm / 100);
           topn.Add({.dts = d,
                     .fe = {.from_node_idx = n0_idx,
                            .cluster_id = mc.cluster_id,
@@ -248,13 +274,13 @@ double Round1(double val) { return std::round(val * 10.0) / 10.0; }
 
 class StepsData {
  public:
-  StepsData(const MMCluster& mc, const MMRoutingResult2& res) : res_(res) {
-  }
+  StepsData(const MMGraph& mg, const MMRoutingResult& res) : res_(res) {}
 
   size_t num_steps() const { return res_.full_edges.size(); }
 
-  JsonResult CreateOneStep(const MMCluster& mc, uint32_t pos) const {
+  JsonResult CreateOneStep(const MMGraph& mg, uint32_t pos) const {
     const MMFullEdge& fe = res_.full_edges.at(pos);
+    const MMCluster& mc = fe.mc(mg);
 
     float from_lon = GetLon(mc, fe.from_node_idx);
     float from_lat = GetLat(mc, fe.from_node_idx);
@@ -274,7 +300,7 @@ class StepsData {
     coords.push_back({.lat = to_lat, .lon = to_lon});
     // convert to seconds.
     const double duration = res_.edge_weights.at(pos) / 1000.0;
-    const double dist = res_.distance_cm(mc, pos) / 100.0;
+    const double dist = res_.distance_cm(mg, pos) / 100.0;
 
     nlohmann::json maneuver = {{"bearing_after", 0},
                                {"bearing_before", 0},
@@ -293,7 +319,7 @@ class StepsData {
             .last_name = GetEdgeName(mc, fe)};
   }
 
-  JsonResult CreateArrivalStep(const MMCluster& mc) const {
+  JsonResult CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
     float to_lon = res_.target.lon_at_fraction / TEN_POW_7_DBL;
@@ -309,39 +335,39 @@ class StepsData {
 
     nlohmann::json step = {{"geometry", EncodePolyline(coords)},
                            {"maneuver", maneuver},
-                           {"name", GetEdgeName(mc, fe)},
+                           {"name", GetEdgeName(fe.mc(mg), fe)},
                            {"duration", 0},
                            {"distance", 0}};
     return {.j = step};
   }
 
  private:
-  const MMRoutingResult2& res_;
+  const MMRoutingResult& res_;
 };
 
-JsonResult CreateSteps(const MMCluster& mc, const StepsData& steps_data) {
+JsonResult CreateSteps(const MMGraph& mg, const StepsData& steps_data) {
   JsonResult result;
   result.j = nlohmann::json::array();
 
   for (uint32_t pos = 0; pos < steps_data.num_steps(); ++pos) {
-    JsonResult tmp = steps_data.CreateOneStep(mc, pos);
+    JsonResult tmp = steps_data.CreateOneStep(mg, pos);
     result.sum_dist += tmp.sum_dist;
     result.sum_duration += tmp.sum_duration;
     // TODO: Collapse if name is same.
     result.j.push_back(tmp.j);
   }
-  result.j.push_back(steps_data.CreateArrivalStep(mc).j);
+  result.j.push_back(steps_data.CreateArrivalStep(mg).j);
   return result;
 }
 
-nlohmann::json RouteToJson(const MMCluster& mc, const MMRoutingResult2& res) {
+nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   CHECK_S(!res.full_edges.empty());
 
   nlohmann::json waypoints = nlohmann::json::array();
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.start.distance_cm / 10.0) / 10.0},
-         {"name", GetEdgeName(mc, res.start.fe)},
+         {"name", GetEdgeName(res.start.fe.mc(mg), res.start.fe)},
          {"location",
           {res.start.lon_at_fraction / TEN_POW_7_DBL,
            res.start.lat_at_fraction / TEN_POW_7_DBL}}});
@@ -349,16 +375,16 @@ nlohmann::json RouteToJson(const MMCluster& mc, const MMRoutingResult2& res) {
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.target.distance_cm / 10.0) / 10.0},
-         {"name", GetEdgeName(mc, res.target.fe)},
+         {"name", GetEdgeName(res.target.fe.mc(mg), res.target.fe)},
          {"location",
           {res.target.lon_at_fraction / TEN_POW_7_DBL,
            res.target.lat_at_fraction / TEN_POW_7_DBL}}});
   }
 
   // We currently support only one leg, so the only thing to fill are the steps.
-  StepsData steps_data(mc, res);
+  StepsData steps_data(mg, res);
 
-  JsonResult res_steps = CreateSteps(mc, steps_data);
+  JsonResult res_steps = CreateSteps(mg, steps_data);
   nlohmann::json leg = {{"steps", res_steps.j},
                         {"summary", "step_summary"},
                         {"duration", Round1(res_steps.sum_duration)},
@@ -371,66 +397,101 @@ nlohmann::json RouteToJson(const MMCluster& mc, const MMRoutingResult2& res) {
   return {{"code", "Ok"}, {"waypoints", waypoints}, {"routes", routes}};
 }
 
-nlohmann::json ComputeRoute(const MMGraph& mmg, bool hybrid, double lon1,
+nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
                             double lat1, double lon2, double lat2) {
   FUNC_TIMER();
 
-  absl::Time start_time = absl::Now();
   LOG_S(INFO) << "Search " << lon1 << " " << lat1;
-  const MMGeoAnchor start =
-      FindClosestEdges(mmg, std::llround(lat1 * TEN_POW_7_DBL),
-                       std::llround(lon1 * TEN_POW_7_DBL));
-  const MMGeoAnchor target =
-      FindClosestEdges(mmg, std::llround(lat2 * TEN_POW_7_DBL),
-                       std::llround(lon2 * TEN_POW_7_DBL));
+  MMGeoAnchor start;
+  MMGeoAnchor target;
+  double find_closest_time;
+  {
+    absl::Time start_time = absl::Now();
+    start = FindClosestEdges(mg, std::llround(lat1 * TEN_POW_7_DBL),
+                             std::llround(lon1 * TEN_POW_7_DBL));
+    target = FindClosestEdges(mg, std::llround(lat2 * TEN_POW_7_DBL),
+                              std::llround(lon2 * TEN_POW_7_DBL));
+    find_closest_time = ToDoubleSeconds(absl::Now() - start_time);
+  }
   LOG_S(INFO) << absl::StrFormat("**** Find closest edges: %.2f secs",
-                                 ToDoubleSeconds(absl::Now() - start_time));
+                                 find_closest_time);
 
   for (const auto& e : start.edge_points) {
-    LOG_S(INFO) << e.DebugString(mmg, std::llround(lat1 * TEN_POW_7_DBL),
+    LOG_S(INFO) << e.DebugString(mg, std::llround(lat1 * TEN_POW_7_DBL),
                                  std::llround(lon1 * TEN_POW_7_DBL));
   }
   for (const auto& e : target.edge_points) {
-    LOG_S(INFO) << e.DebugString(mmg, std::llround(lat2 * TEN_POW_7_DBL),
+    LOG_S(INFO) << e.DebugString(mg, std::llround(lat2 * TEN_POW_7_DBL),
                                  std::llround(lon2 * TEN_POW_7_DBL));
   }
 
-  if (!start.valid() || !target.valid() ||
-      start.edge_points.front().fe.cluster_id !=
-          target.edge_points.front().fe.cluster_id) {
+  if (!start.valid() || !target.valid()) {
     return {{"code", "NoRoute"}};
   }
 
-  CHECK_EQ_S(start.edge_points.front().fe.cluster_id,
-             target.edge_points.front().fe.cluster_id);
-  start_time = absl::Now();
-  MMClusterWrapper mcw(start.edge_points.front().fe.mc(mmg), VH_MOTORCAR,
+#if 0
+  MMClusterWrapper mcw(start.edge_points.front().fe.mc(mg), VH_MOTORCAR,
                        RoutingMetricTime(),
                        /*include_dead_ends=*/true);
   LOG_S(INFO) << absl::StrFormat("**** Create cluster wrapper: %.2f secs",
                                  ToDoubleSeconds(absl::Now() - start_time));
 
-  start_time = absl::Now();
   MMClusterRouter router(
       mcw, {.handle_restricted_access = true, .include_dead_end = true});
-  RouterStatus status = router.Route(start, target);
+  MMClusterRouterStatus status = router.Route(start, target);
+#endif
+  MMRoutingResult res;
+  double routing_time;
+  {
+    absl::Time start_time = absl::Now();
+    MMHybridRouter router;
+    res = router.Route(mg, start, target);
+    routing_time = ToDoubleSeconds(absl::Now() - start_time);
+  }
   LOG_S(INFO) << "Finished routing";
-  LOG_S(INFO) << absl::StrFormat("**** Route(): %.2f secs",
-                                 ToDoubleSeconds(absl::Now() - start_time));
+  LOG_S(INFO) << absl::StrFormat("**** Route(): %.2f secs", routing_time);
 
-  if (!status.found) {
+  if (res.full_edges.empty()) {
     return {{"code", "NoRoute"}};
   }
 
-  MMRoutingResult2 res = router.GetRoutingResult2(status.last_v_idx);
+  // MMRoutingResult res = router.GetRoutingResult(status.last_v_idx);
 
   // const double elapsed = ToDoubleSeconds(absl::Now() - start_time);
 
   CHECK_S(!res.full_edges.empty());
-  nlohmann::json jres = RouteToJson(mcw.mc, res);
-  LOG_S(INFO) << absl::StrFormat("**** create json result(): %.2f secs",
-                                 ToDoubleSeconds(absl::Now() - start_time));
+  nlohmann::json jres;
+  double json_time;
+  {
+    absl::Time start_time = absl::Now();
+    jres = RouteToJson(mg, res);
+    json_time = ToDoubleSeconds(absl::Now() - start_time);
+  }
+  LOG_S(INFO) << absl::StrFormat("**** Find closest edges:       %.3f secs",
+                                 find_closest_time);
+  LOG_S(INFO) << absl::StrFormat("**** Route:                    %.3f secs",
+                                 routing_time);
+  LOG_S(INFO) << absl::StrFormat("       Expand Hybrid Clusters: %.3f secs",
+                                 res.time_for_expand_hybrid_clusters);
+  LOG_S(INFO) << absl::StrFormat("**** Create Json:              %.3f secs",
+                                 json_time);
   return jres;
+}
+
+void HandleFileRequest(const httplib::Request& req, httplib::Response& res,
+                       const std::string& filename,
+                       const std::string& content_type) {
+  std::ifstream file(filename);
+  if (!file.is_open()) {
+    res.status = 404;
+    res.set_content("File not found", "text/plain");
+    return;
+  }
+
+  std::ostringstream content;
+  content << file.rdbuf();
+  file.close();
+  res.set_content(content.str(), content_type);
 }
 
 }  // namespace
@@ -466,16 +527,48 @@ int main(int argc, char* argv[]) {
     ABORT_S();
   }
   ::close(fd);
-  const MMGraph& mmg = *((MMGraph*)ptr);
+  const MMGraph& mg = *((MMGraph*)ptr);
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");
   });
 
+  svr.Get("/", [](const httplib::Request& req, httplib::Response& res) {
+    HandleFileRequest(req, res, "../src/html/leaflet.html", "text/html");
+  });
+
+  svr.Get("/favicon.ico", [](const httplib::Request& req,
+                                httplib::Response& res) {
+    HandleFileRequest(req, res, "../src/html/favicon.ico", "image/x-icon");
+  });
+
+  svr.Get("/start_icon.png", [](const httplib::Request& req,
+                                httplib::Response& res) {
+    HandleFileRequest(req, res, "../src/html/start_icon.png", "image/png");
+  });
+
+  svr.Get("/target_icon.png", [](const httplib::Request& req,
+                                 httplib::Response& res) {
+    HandleFileRequest(req, res, "../src/html/target_icon.png", "image/png");
+  });
+
   svr.Get(
-      "/route/(v1[hybrid]*)/driving/([0-9.]+),([0-9.]+);([0-9.]+),([0-9.]+)",
-      [&mmg](const httplib::Request& req, httplib::Response& res) {
+      "/route/(v1[hybrid]*)/driving/"
+      "(-?[0-9.]+),(-?[0-9.]+);(-?[0-9.]+),(-?[0-9.]+)",
+      [&mg](const httplib::Request& req, httplib::Response& res) {
         const absl::Time start = absl::Now();
+
+#if 0
+        LOG_S(INFO) << "=== Request Dump ===";
+        LOG_S(INFO) << "Method: " << req.method;
+        LOG_S(INFO) << "Path: " << req.path;
+        LOG_S(INFO) << "Headers:";
+        for (const auto& h : req.headers) {
+          LOG_S(INFO) << "  " << h.first << ": " << h.second;
+        }
+        LOG_S(INFO) << "Body: " << req.body;
+        LOG_S(INFO) << "====================";
+#endif
 
         nlohmann::json result;
         std::string_view comp = req.matches.str(1);
@@ -495,19 +588,20 @@ int main(int argc, char* argv[]) {
               !absl::SimpleAtod(req.matches.str(5), &lat2)) {
             result = {{"code", "InvalidQuery"}};
           } else {
-            result = ComputeRoute(mmg, hybrid, lon1, lat1, lon2, lat2);
+            result = ComputeRoute(mg, hybrid, lon1, lat1, lon2, lat2);
           }
         }
         res.set_header("Access-Control-Allow-Origin", "*");
         res.set_content(result.dump(), "application/json");
-        LOG_S(INFO) << result.dump(2);
+        // LOG_S(INFO) << result.dump(2);
+        LogMemoryUsage();
         LOG_S(INFO) << absl::StrFormat("**** elapsed: %.2f secs",
                                        ToDoubleSeconds(absl::Now() - start));
       });
 
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
-  LOG_S(INFO) << ComputeRoute(mmg, /*hybrid=*/false, 8.720121, 47.3476881,
+  LOG_S(INFO) << ComputeRoute(mg, /*hybrid=*/false, 8.720121, 47.3476881,
                               8.7204095, 47.3476057)
                      .dump(2);
 

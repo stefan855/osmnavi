@@ -76,10 +76,14 @@ CHECK_IS_MM_OK(MMEdge);
 #define MM_EDGE(x) ((const MMEdge)(x))
 #define MM_EDGE_RW(x) ((MMEdge&)(x))
 
+struct MMGraph;
+struct MMFullEdge;
+
 // An edge with start node in another cluster.
 struct MMIncomingEdge {
   uint32_t from_cluster_id;  // The cluster id of the other cluster.
   uint32_t from_node_idx;
+  uint32_t to_cluster_id;
   uint32_t to_node_idx;
   uint32_t edge_idx;     // Index of this edge in the edge array.
   uint16_t in_edge_pos;  // Position of this entry in the containing vector.
@@ -89,28 +93,34 @@ struct MMIncomingEdge {
   int64_t way_id;
 
   std::string DebugString() const {
-    return absl::StrFormat(
-        "incoming edge from-cluster:%u from:%lld to:%lld way:%lld",
-        from_cluster_id, from_node_id, to_node_id, way_id);
+    return absl::StrFormat("Edge %lld->%lld cl-id:%u->%u way:%lld incoming",
+                           from_node_id, to_node_id, from_cluster_id,
+                           to_cluster_id, way_id);
   }
+
+  inline MMFullEdge ToFullEdge(const MMGraph& mg) const;
 };
 
 // An edge with target node in another cluster.
 struct MMOutgoingEdge {
+  uint32_t from_cluster_id;  // The cluster id of the other cluster.
   uint32_t from_node_idx;
+  uint32_t to_cluster_id;
   uint32_t to_node_idx;
-  uint32_t edge_idx;
-  uint32_t to_cluster_id;  // Id of the other cluster.
-  uint16_t out_edge_pos;   // Position of this entry in the containing vector.
+  uint32_t edge_idx;      // Index of this edge in the edge array.
+  uint16_t out_edge_pos;  // Position of this entry in the containing vector.
   // OSM ids to help connecting clusters.
   int64_t from_node_id;
   int64_t to_node_id;
   int64_t way_id;
+
   std::string DebugString() const {
-    return absl::StrFormat(
-        "outgoing edge to-cluster:%u from:%lld to:%lld way:%lld", to_cluster_id,
-        from_node_id, to_node_id, way_id);
+    return absl::StrFormat("Edge %lld->%lld cl-id:%u->%u way:%lld outgoing",
+                           from_node_id, to_node_id, from_cluster_id,
+                           to_cluster_id, way_id);
   }
+
+  inline MMFullEdge ToFullEdge(const MMGraph& mg) const;
 };
 
 struct MMComplexTurnRestriction {
@@ -338,7 +348,13 @@ struct MMCluster {
     }
     return INFU32;
   }
-  
+
+  const MMIncomingEdge& find_incoming_edge(uint32_t edge_idx) const {
+    uint32_t pos = find_incoming_edge_pos(edge_idx);
+    CHECK_NE_S(pos, INFU32);
+    return in_edges.at(pos);
+  }
+
   // Find the position of an outgoing edge in the array of outgoing edges.
   // Returns the position or INFU32 if the edge wasn't found.
   uint32_t find_outgoing_edge_pos(uint32_t edge_idx) const {
@@ -355,7 +371,6 @@ struct MMCluster {
     CHECK_NE_S(pos, INFU32);
     return out_edges.at(pos);
   }
-
 };
 CHECK_IS_MM_OK(MMCluster);
 
@@ -381,7 +396,9 @@ struct MMGraph {
   MMVec64<MMClusterBoundingRect> sorted_bounding_rects;
   MMVec64<MMCluster> clusters;
 
-  // Debugging
+  const MMCluster& mc(uint32_t cluster_id) const {
+    return clusters.at(cluster_id);
+  }
 
   // Find node by OSM id.
   bool find_node_by_id(int64_t id, MMFullNode* fn) const {
@@ -399,7 +416,7 @@ struct MMGraph {
 
   // Given an outgoing edge of some cluster, find the corresponding incoming
   // edge at the target cluster.
-  const MMIncomingEdge& find_incoming_edge(
+  const MMIncomingEdge& out_edge_to_in_edge(
       const MMOutgoingEdge& out_edge) const {
     const MMCluster& to_mc = clusters.at(out_edge.to_cluster_id);
     for (const MMIncomingEdge& in_edge : to_mc.in_edges.span()) {
@@ -415,7 +432,7 @@ struct MMGraph {
 
   // Given an incoming edge of some cluster, find the corresponding outgoing
   // edge at the source cluster.
-  const MMOutgoingEdge& find_outgoing_edge(
+  const MMOutgoingEdge& in_edge_to_out_edge(
       const MMIncomingEdge& in_edge) const {
     const MMCluster& from_mc = clusters.at(in_edge.from_cluster_id);
     for (const MMOutgoingEdge& out_edge : from_mc.out_edges.span()) {
@@ -457,6 +474,24 @@ struct MMFullEdge {
     return mg.clusters.at(cluster_id);
   }
 
+  // Return MMOutgoingEdge for a full edge that represents an outgoing edge.
+  // Fails if it is not an outgoing edge.
+  const MMOutgoingEdge& AsOutgoingEdge(const MMCluster& mc) const {
+    return mc.find_outgoing_edge(edge_idx(mc));
+  }
+  const MMOutgoingEdge& AsOutgoingEdge(const MMGraph& mg) const {
+    return mc(mg).find_outgoing_edge(edge_idx(mc(mg)));
+  }
+
+  // Return MMIncomingEdge for a full edge that represents an incoming edge.
+  // Fails if it is not an incoming edge.
+  const MMIncomingEdge& AsIncomingEdge(const MMCluster& mc) const {
+    return mc.find_incoming_edge(edge_idx(mc));
+  }
+  const MMIncomingEdge& AsIncomingEdge(const MMGraph& mg) const {
+    return mc(mg).find_incoming_edge(edge_idx(mc(mg)));
+  }
+
   static inline MMFullEdge CreateWithEdgeIdx(const MMCluster& mc,
                                              uint32_t from_node_idx,
                                              uint32_t edge_idx) {
@@ -469,15 +504,39 @@ struct MMFullEdge {
 
   std::string DebugString(const MMCluster& mc) const {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
-    return absl::StrFormat("Edge %lld->%lld cl-id:%u cross:%u",
-                           mc.get_node_id(from_node_idx),
-                           mc.get_node_id(target_idx(mc)), cluster_id,
-                           edge(mc).cluster_border_edge());
+    // Find the from/to clusters.
+    uint32_t cluster_id_from = cluster_id;
+    uint32_t cluster_id_to = cluster_id;
+    if (edge(mc).cluster_border_edge()) {
+      if (mc.get_node(from_node_idx).off_cluster_node()) {
+        // incoming edge.
+        cluster_id_from = mc.find_incoming_edge(edge_idx(mc)).from_cluster_id;
+      } else {
+        // outgoing edge.
+        cluster_id_to = mc.find_outgoing_edge(edge_idx(mc)).to_cluster_id;
+      }
+    }
+    return absl::StrFormat(
+        "Edge %lld->%lld cl-id:%u->%u", mc.get_node_id(from_node_idx),
+        mc.get_node_id(target_idx(mc)), cluster_id_from, cluster_id_to);
   }
   std::string DebugString(const MMGraph& mg) const {
     return DebugString(mc(mg));
   }
+
+  // Spaceship operator, implements all comparison functions at once.
+  auto operator<=>(const MMFullEdge& other) const = default;
 };
+
+inline MMFullEdge MMOutgoingEdge::ToFullEdge(const MMGraph& mg) const {
+  const MMCluster& mc = mg.mc(from_cluster_id);
+  return MMFullEdge::CreateWithEdgeIdx(mc, from_node_idx, edge_idx);
+}
+
+inline MMFullEdge MMIncomingEdge::ToFullEdge(const MMGraph& mg) const {
+  const MMCluster& mc = mg.mc(to_cluster_id);
+  return MMFullEdge::CreateWithEdgeIdx(mc, from_node_idx, edge_idx);
+}
 
 // Returns the edges incoming at 'target_node_idx'.
 inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(

@@ -67,7 +67,7 @@ class MMClusterRouter final {
     }
   }
 
-  void PushStartEdges() {
+  void PushStartEdges(uint32_t start_metric) {
     for (const MMEdgePoint& ep : start_anchor_.edge_points) {
       const uint32_t edge_idx = ep.fe.edge_idx(mc_);
       const MMEdge edge(mc_.edges.at(edge_idx));
@@ -94,7 +94,7 @@ class MMClusterRouter final {
 
       // We're just starting, so we should be at base index i.
       CHECK_EQ_S(edge_idx, v_idx);
-      vis_.at(edge_idx).min_metric =
+      vis_.at(edge_idx).min_metric = start_metric + 
           mcw_.edge_weights.at(edge_idx) * ep.GetWeightFractionWhenStarting();
       pq_.emplace(vis_.at(edge_idx).min_metric,
                   edge_idx /*, ep.fe.from_node_idx*/);
@@ -132,7 +132,7 @@ class MMClusterRouter final {
     vis.min_metric = min_metric;
     // Implicit linkage because this is an incoming edge and can't be reached
     // from within a cluster.
-    CHECK_EQ_S(vis.from_v_idx, INFU32);
+    // CHECK_EQ_S(vis.from_v_idx, INFU32);
     CHECK_EQ_S(vis.active_ctr_id, NO_ACTIVE_CTR_ID);
     CHECK_EQ_S(vis.in_target_restricted_access_area, 0);
     // This should go top in the queue.
@@ -141,7 +141,7 @@ class MMClusterRouter final {
 
   // Route one step and return the status of the router, i.e if we need to
   // continue routing or if we finished (successfully or not).
-  inline RouterStatus RouteOneStep() {
+  inline MMClusterRouterStatus RouteOneStep() {
     // Remove the minimal node from the priority queue.
     if (pq_.empty()) {
       return {.finished = true, .found = false, .last_v_idx = INFU32};
@@ -164,7 +164,8 @@ class MMClusterRouter final {
 #endif
 
     if (prev_v.done == 1) {
-      return {.finished = false, .found=false};  // "old" entry in priority queue.
+      return {.finished = false,
+              .found = false};  // "old" entry in priority queue.
     }
     CHECK_EQ_S(qedge.min_metric, prev_v.min_metric);
     vis_.at(qedge.ve_idx).done = 1;
@@ -197,12 +198,6 @@ class MMClusterRouter final {
           "Examine edge from_idx:%u to_idx:%u way_idx:%u",
           prev_edge.target_idx(), e.target_idx(), e.way_idx);
 #endif
-
-      /*
-      LOG_S(INFO) << absl::StrFormat(
-          "BB5 nodes:%u->%u->%u  cost:%d", qedge.from_node_idx,
-          prev_edge.target_idx(), e.target_idx(), (int)tcd.turn_costs.at(off));
-          */
 
       if ((turn_costs[off] == TURN_COST_INFINITY_COMPRESSED) ||
           (opt_.handle_restricted_access &&
@@ -262,13 +257,13 @@ class MMClusterRouter final {
         pq_.emplace(new_metric, new_v_idx /*, prev_edge.target_idx()*/);
       }
     }
-    return {.finished = false, .found=false};
+    return {.finished = false, .found = false};
   }
 
   // Execute edge based single source Dijkstra (from start edges to *all*
   // reachable edge).
   void RouteInit(const MMGeoAnchor& start_anchor,
-                 const MMGeoAnchor& target_anchor = {}) {
+                 const MMGeoAnchor& target_anchor = {}, uint32_t start_metric = 0) {
     Clear();
     start_anchor_ = start_anchor;
     target_anchor_ = target_anchor;
@@ -292,19 +287,19 @@ class MMClusterRouter final {
                  .next = INFU32});
 
     LabelTargetEdges();
-    PushStartEdges();
+    PushStartEdges(start_metric);
   }
 
-  // Execute edge based single source Dijkstra (from start edges to *all*
-  // reachable edge).
-  RouterStatus Route(const MMGeoAnchor& start_anchor,
-                     const MMGeoAnchor& target_anchor = {}) {
-    RouteInit(start_anchor, target_anchor);
+  // Execute edge based Dijkstra.
+  MMClusterRouterStatus Route(const MMGeoAnchor& start_anchor,
+                              const MMGeoAnchor& target_anchor = {},
+                              uint32_t start_metric = 0) {
+    RouteInit(start_anchor, target_anchor, start_metric);
 
     // ====================================================================
     // Loop until the priority queue is empty or a target edge was reached.
     // ====================================================================
-    RouterStatus st;
+    MMClusterRouterStatus st;
     do {
       st = RouteOneStep();
     } while (!st.finished);
@@ -312,8 +307,8 @@ class MMClusterRouter final {
   }
 
   // Compute the resulting route.
-  MMRoutingResult2 GetRoutingResult2(const uint32_t last_v_idx) const {
-    MMRoutingResult2 res;
+  MMRoutingResult GetRoutingResult(const uint32_t last_v_idx) const {
+    MMRoutingResult res;
 
     // Array of v_idx from start to end.
     const std::vector<uint32_t> v_arr = GetForwardPath(last_v_idx);
@@ -325,7 +320,8 @@ class MMClusterRouter final {
       const uint32_t graph_edge_idx = GetGraphEdgeIdx(v_arr.at(0));
       const uint32_t start_edge_pos =
           start_anchor_.FindPosByEdgeIdx(mc_, graph_edge_idx);
-      if (start_edge_pos != INFU32) {
+      res.start_is_anchor = (start_edge_pos != INFU32);
+      if (res.start_is_anchor) {
         // We have a start edge!
         res.start = start_anchor_.edge_points.at(start_edge_pos);
       } else {
@@ -345,9 +341,10 @@ class MMClusterRouter final {
 
     // Fill path information.
     res.full_edges.reserve(v_arr.size());
+    res.min_metrics.reserve(v_arr.size());
     res.edge_weights.reserve(v_arr.size());
     {
-      uint32_t prev_weight = 0;  // TODO: wrong when starting on in_edge.
+      uint32_t prev_metric = 0;  // TODO: wrong when starting on in_edge.
       for (uint32_t pos = 0; pos < v_arr.size(); ++pos) {
         const uint32_t v_idx = v_arr.at(pos);
         if (pos == 0) {
@@ -359,8 +356,14 @@ class MMClusterRouter final {
               mc_, from_node_idx, GetGraphEdgeIdx(v_idx)));
         }
         const MMClusterRouter::VisitedEdge& ve = GetVEdge(v_idx);
-        res.edge_weights.push_back(ve.min_metric - prev_weight);
-        prev_weight = ve.min_metric;
+        res.min_metrics.push_back(ve.min_metric);
+        res.edge_weights.push_back(ve.min_metric - prev_metric);
+        prev_metric = ve.min_metric;
+        /*
+        LOG_S(INFO) << "Fill path edge "
+                    << res.full_edges.back().DebugString(mc_)
+                    << " metric:" << res.edge_weights.back();
+                    */
       }
     }
 
@@ -369,7 +372,8 @@ class MMClusterRouter final {
       const uint32_t graph_edge_idx = GetGraphEdgeIdx(v_arr.back());
       const uint32_t target_edge_pos =
           target_anchor_.FindPosByEdgeIdx(mc_, graph_edge_idx);
-      if (target_edge_pos != INFU32) {
+      res.target_is_anchor = (target_edge_pos != INFU32);
+      if (res.target_is_anchor) {
         // We have a target edge!
         res.target = target_anchor_.edge_points.at(target_edge_pos);
         CHECK_EQ_S(res.target.fe.edge_idx(mc_),
@@ -380,43 +384,11 @@ class MMClusterRouter final {
             mc_.edge_to_distance.at(res.target.fe.edge_idx(mc_));
         res.target.fraction = 1.0;
       }
+      LOG_S(INFO) << "target_is_anchor=" << res.target_is_anchor << " "
+                  << res.target.DebugString(mc_, 0, 0);
     }
 
     res.final_metric = GetVEdge(last_v_idx).min_metric;
-    return res;
-  }
-
-  // Compute the resulting route.
-  MMRoutingResult GetRoutingResult() const {
-    MMRoutingResult res;
-    res.route_v_idx = GetShortestPathToGeoAnchor(target_anchor_);
-    res.found = !res.route_v_idx.empty();
-    res.found_distance = res.route_v_idx.empty()
-                             ? INFU32
-                             : vis_.at(res.route_v_idx.back()).min_metric;
-    res.num_shortest_route_nodes =
-        res.route_v_idx.empty() ? 0 : res.route_v_idx.size() + 1;
-    res.num_visited = vis_.size();
-    res.start_edge.from_node_idx = INFU32;
-    res.target_edge.from_node_idx = INFU32;
-    if (!res.route_v_idx.empty()) {
-      // Find the full edges for the first and last edge in the found path.
-      // This might be complicated, because we need the from_node_idx of the
-      // first edge.
-      {
-        uint32_t pos = start_anchor_.FindPosByEdgeIdx(
-            mc_, GetGraphEdgeIdx(res.route_v_idx.front()));
-        CHECK_NE_S(pos, INFU32);
-        res.start_edge = start_anchor_.edge_points.at(pos).fe;
-      }
-      {
-        uint32_t pos = target_anchor_.FindPosByEdgeIdx(
-            mc_, GetGraphEdgeIdx(res.route_v_idx.back()));
-        CHECK_NE_S(pos, INFU32);
-        res.target_edge = target_anchor_.edge_points.at(pos).fe;
-      }
-    }
-    LOG_S(INFO) << "Result metric:" << res.found_distance;
     return res;
   }
 
@@ -438,6 +410,7 @@ class MMClusterRouter final {
     return v;
   }
 
+#if 0
   // Return the v_idx of the entry with the lowest min_metric.
   uint32_t GetLowestMetricIdxAt(const uint32_t base_v_idx) const {
     if (vis_.at(base_v_idx).next == INFU32) {
@@ -473,6 +446,7 @@ class MMClusterRouter final {
 
     return GetForwardPath(best_idx);
   }
+#endif
 
   inline uint32_t GetGraphEdgeIdx(uint32_t v_idx) const {
     return GetBaseIdx(v_idx);
@@ -823,10 +797,9 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
   return res;
 }
 
-inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
-                                        const MMGeoAnchor& start_anchor,
-                                        const MMGeoAnchor& target_anchor,
-                                        Verbosity verb = Verbosity::Brief) {
+inline MMRoutingResult RouteOnMMCluster(
+    const MMClusterWrapper& mcw, const MMGeoAnchor& start_anchor,
+    const MMGeoAnchor& target_anchor, Verbosity verb = Verbosity::Brief) {
   const MMCluster& mc = mcw.mc;
   if (verb >= Verbosity::Brief) {
     LOG_S(INFO) << "Route using mmcluster routing data";
@@ -834,35 +807,30 @@ inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
 
   MMClusterRouter router(
       mcw, {.handle_restricted_access = true, .include_dead_end = true});
-  router.Route(start_anchor, target_anchor);
+  MMClusterRouterStatus status = router.Route(start_anchor, target_anchor);
   if (verb >= Verbosity::Brief) {
     LOG_S(INFO) << "Finished routing";
   }
 
-  MMRoutingResult res = router.GetRoutingResult();
-  if (verb >= Verbosity::Brief) {
-    LOG_S(INFO) << "Result metric:" << res.found_distance;
-  }
+  MMRoutingResult res;
 
-  // Print path.
-  if (verb >= Verbosity::Verbose) {
-    uint32_t from_idx = res.start_edge.from_node_idx;
-    uint32_t pos = 1;
-    const auto& vis = router.GetVisitedEdges();
-    LOG_S(INFO) << "MMClusterRouter shortest path #edges:"
-                << res.route_v_idx.size();
-    for (uint32_t v_idx : res.route_v_idx) {
-      const MMClusterRouter::VisitedEdge& ve = vis.at(v_idx);
-      uint32_t edge_idx = router.GetGraphEdgeIdx(v_idx);
-      const MMEdge e(mc.edges.at(edge_idx));
-      int64_t way_id = mc.grouped_way_to_osm_id.at(mc.edge_to_way.at(edge_idx));
-      LOG_S(INFO) << absl::StrFormat(
-          "  %u. Edge %lld to %lld way:%lld minw:%u ctrid:%llu target_ra:%u "
-          "done:%u",
-          pos++, mc.get_node_id(from_idx), mc.get_node_id(e.target_idx()),
-          way_id, ve.min_metric, ve.active_ctr_id,
-          ve.in_target_restricted_access_area, ve.done);
-      from_idx = e.target_idx();
+  if (status.found) {
+    res = router.GetRoutingResult(status.last_v_idx);
+    if (verb >= Verbosity::Brief) {
+      LOG_S(INFO) << "Result metric:" << res.final_metric;
+    }
+
+    // Print path.
+    if (verb >= Verbosity::Verbose) {
+      LOG_S(INFO) << "MMClusterRouter shortest path #edges:"
+                  << res.full_edges.size();
+      uint32_t metric = 0;
+      for (uint32_t i = 0; i < res.full_edges.size(); ++i) {
+        const MMFullEdge& fe = res.full_edges.at(i);
+        metric += res.edge_weights.at(i);
+        LOG_S(INFO) << (i + 1) << ". " << fe.DebugString(mc)
+                    << " metric:" << metric;
+      }
     }
   }
 

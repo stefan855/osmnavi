@@ -1,17 +1,17 @@
 <!DOCTYPE HTML>
 <html lang="en">
   <head>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <meta charset="utf-8" />
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    <link rel="stylesheet" href="../../../leaflet-routing-machine-3.2.12/dist/leaflet-routing-machine.css" />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.90.0/dist/L.Control.Locate.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css" integrity="sha384-n6BdBD4Ahcb9IGZDgjgv0hV2a/y2WOCf1n0kEMZDpZySy/Hv1QMAtLIrC3y9oIZD" crossorigin="">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.90.0/dist/L.Control.Locate.min.css" integrity="sha384-RF1CbDOI1h4P3AQN0FkoXIcyq9v8YJU+M1jC986xV1IQERsqSWFTPqcL4d3dH6wA" crossorigin="">
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-    <script src="../../../leaflet-routing-machine-3.2.12/dist/leaflet-routing-machine.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.90.0/dist/L.Control.Locate.min.js" charset="utf-8"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js" integrity="sha384-Le/Ab4WG5Ezkdf4RS5P5eZrpmvNgcZ4QcTozVDXGoOsTxGroBLM4e9OSqeh6V26n" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol@0.90.0/dist/L.Control.Locate.min.js" integrity="sha384-wWlBjSC6Ni8Cl/NWZdZk3Uu6ObpqIz7suMSzOoDKoHjID5NN15oPdCMJDi3q0xRK" crossorigin=""></script>
 
     <style>
       html, body {
@@ -33,6 +33,7 @@
 
       var osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 21,
+        referrerPolicy: 'strict-origin-when-cross-origin',
         attribution: '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap contributors</a>'
       });
 
@@ -305,7 +306,7 @@
         position: 'bottomleft',
         serviceUrl: 'http://localhost:8081/route/v1',
         lineOptions: {
-          styles: [{ color: 'magenta', weight: 5, dashArray: '5, 10' }]
+          styles: [{ color: 'red', weight: 5, dashArray: '5, 10' }]
         }
       }).addTo(map);
 
@@ -324,7 +325,6 @@
           clearBtn = createButton('Clear', container);
           OSRMBtn = createButton('OSRM', container);
           DIYBtn = createButton('DIY', container);
-          DIYHYBBtn = createButton('DIYHYB', container);
 
         L.popup()
             .setContent(container)
@@ -367,14 +367,6 @@
           var opt = routingControl.getRouter().options;
           opt.serviceUrl = 'http://localhost:8081/route/v1';
           opt.lineOptions.styles[0].color = 'red';
-          routingControl.route();
-          map.closePopup();
-        });
-
-        L.DomEvent.on(DIYHYBBtn, 'click', function() {
-          var opt = routingControl.getRouter().options;
-          opt.serviceUrl = 'http://localhost:8081/route/v1hybrid';
-          opt.lineOptions.styles[0].color = 'magenta';
           routingControl.route();
           map.closePopup();
         });

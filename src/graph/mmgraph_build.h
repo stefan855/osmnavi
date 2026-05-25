@@ -385,6 +385,7 @@ void ClusterAddInEdges(const Graph& g, TmpClusterInfo* ci) {
         ci->mm_in_edges.push_back({
             .from_cluster_id = g.nodes.at(gi.g_from_idx).cluster_id,
             .from_node_idx = cfrom_idx,
+            .to_cluster_id = ci->cluster_id,
             .to_node_idx = cto_idx,
             .edge_idx = c_edge_idx,
             .in_edge_pos = static_cast<uint16_t>(ci->mm_in_edges.size()),
@@ -427,10 +428,11 @@ void ClusterAddOutEdges(const Graph& g, TmpClusterInfo* ci) {
         CHECK_LT_S(ci->mm_out_edges.size(),
                    std::numeric_limits<uint16_t>::max());
         ci->mm_out_edges.push_back({
+            .from_cluster_id = ci->cluster_id,
             .from_node_idx = cfrom_idx,
+            .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
             .to_node_idx = cto_idx,
             .edge_idx = c_edge_idx,
-            .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
             .out_edge_pos = static_cast<uint16_t>(ci->mm_out_edges.size()),
             .from_node_id = g.nodes.at(gi.g_from_idx).node_id,
             .to_node_id = g.nodes.at(g_edge.target_idx).node_id,
@@ -1073,8 +1075,6 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
                    fd);
     sorted_bounding_rects.at(tci.cluster_id) = {
         .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
-    LOG_S(INFO) << "TT0:" << tci.cluster_id;
-    LOG_S(INFO) << "TT1:" << sorted_bounding_rects.at(tci.cluster_id).cluster_id;
     if (!check_mmgraph) {
       tci = {};  // Clear all data, release memory.
     }

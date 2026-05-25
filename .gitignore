@@ -46,6 +46,7 @@ _deps
 build/
 debug/
 release/
+release.ninja*
 opt/
 logs/
 hack/

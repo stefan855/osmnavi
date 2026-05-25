@@ -25,14 +25,19 @@ struct MMEdgePoint {
     return std::max(0.0f, std::min(1.0f, fraction));
   }
 
-  std::string DebugString(const MMGraph& mg, uint32_t origin_lat,
+  std::string DebugString(const MMCluster& mc, uint32_t origin_lat,
                           uint32_t origin_lon) const {
-    const MMCluster& mc = mg.clusters.at(fe.cluster_id);
+    CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
     return absl::StrFormat(
         "Closest Edge for (%.7f, %.7f) dist:%.2fm n0:%lli n1:%lli fc:%.2f",
         origin_lat / TEN_POW_7_DBL, origin_lon / TEN_POW_7_DBL,
         distance_cm / 100.0, mc.get_node_id(fe.from_node_idx),
         mc.get_node_id(fe.edge(mc).target_idx()), fraction);
+  }
+
+  std::string DebugString(const MMGraph& mg, uint32_t origin_lat,
+                          uint32_t origin_lon) const {
+    return DebugString(mg.clusters.at(fe.cluster_id), origin_lat, origin_lon);
   }
 };
 
@@ -47,6 +52,9 @@ struct MMGeoAnchor {
   void AddEdge(const MMCluster& mc, float fraction, const MMFullEdge& fe) {
     // LOG_S(INFO) << "Add edge with fraction: " << fraction;
     edge_points.push_back({.fraction = fraction, .fe = fe});
+  }
+  void AddEdge(const MMGraph& mg, float fraction, const MMFullEdge& fe) {
+    AddEdge(fe.mc(mg), fraction, fe);
   }
 
   void AddEdge(const MMCluster& mc, float fraction, uint32_t from_node_idx,
@@ -108,18 +116,50 @@ struct MMGeoAnchor {
   }
 };
 
-struct RouterStatus {
+struct MMClusterRouterStatus {
   bool finished = false;
   bool found = false;
   uint32_t last_v_idx = INFU32;
 };
 
-struct MMRoutingResult2 {
+struct MMRoutingResult {
+  MMEdgePoint start;
+  MMEdgePoint target;
+  std::vector<MMFullEdge> full_edges;
+  std::vector<uint32_t> min_metrics;
+  std::vector<uint32_t> edge_weights;
+  uint32_t final_metric = 0;  // Metric after travelling the last edge.
+  // Indicates if the first/last edge are part of the given anchors.
+  bool start_is_anchor = false;
+  bool target_is_anchor = false;
+  double time_for_expand_hybrid_clusters = 0.0;
+
+  uint32_t distance_cm(const MMGraph& mg, uint32_t fe_pos) const {
+    const MMFullEdge& fe = full_edges.at(fe_pos);
+    const MMCluster& mc = fe.mc(mg);
+    uint32_t dist = mc.edge_to_distance.at(fe.edge_idx(mc));
+    if (fe_pos > 0 && fe_pos + 1 < full_edges.size()) {
+      // Not first and/or last edge.
+      return dist;
+    }
+    // Handle also the case when there is only one edge, i.e. start is equal to
+    // target.
+    float del_frac_start = (fe_pos == 0 ? start.fraction : 0.0);
+    float del_frac_target =
+        (fe_pos == full_edges.size() - 1 ? 1.0 - target.fraction : 0.0);
+    return std::lround(dist * (1.0 - del_frac_start - del_frac_target));
+  }
+};
+
+#if 0
+struct MMRoutingResult {
   MMEdgePoint start;
   MMEdgePoint target;
   std::vector<MMFullEdge> full_edges;
   std::vector<uint32_t> edge_weights;
-  uint32_t final_metric;  // Metric after travelling the last edge.
+  std::vector<bool> gaps;
+
+  uint32_t final_metric = 0;  // Metric after travelling the last edge.
 
   uint32_t distance_cm(const MMCluster& mc, uint32_t fe_pos) const {
     uint32_t dist = mc.edge_to_distance.at(full_edges.at(fe_pos).edge_idx(mc));
@@ -134,19 +174,10 @@ struct MMRoutingResult2 {
         (fe_pos == full_edges.size() - 1 ? 1.0 - target.fraction : 0.0);
     return std::lround(dist * (1.0 - del_frac_start - del_frac_target));
   }
+
+  uint32_t distance_cm(const MMGraph& mg, uint32_t fe_pos) const {
+    return distance_cm(full_edges.at(fe_pos).mc(mg), fe_pos);
+  }
 };
 
-struct MMRoutingResult {
-  bool found = false;
-  // If a route was found, the distance from start to target node.
-  uint32_t found_distance = 0;
-  MMFullEdge start_edge;
-  MMFullEdge target_edge;
-  uint32_t num_shortest_route_nodes = 0;
-  std::vector<uint32_t> route_v_idx;  // Filled iff found == true.
-
-  // Internal stats.
-  uint32_t num_visited = 0;  // edges or nodes, depending on router type.
-  uint32_t num_complex_turn_restriction_keys = 0;
-  float complex_turn_restriction_keys_reduction_factor = 0;
-};
+#endif
