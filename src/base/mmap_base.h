@@ -101,6 +101,7 @@ class MMVec64 {
   }
 
   uint64_t size() const { return num__; }
+  uint64_t num_data_bytes() const { return num__ * sizeof(T); };
 
  private:
   friend void TestMMVec64();
@@ -109,8 +110,6 @@ class MMVec64 {
   uint64_t num__;
   // Data starts at this + relative_blob_offset__
   int64_t relative_blob_offset__;
-
-  uint64_t num_data_bytes() const { return num__ * sizeof(T); };
 
   DISALLOW_COPY_ASSIGN_MOVE(MMVec64);
 
@@ -149,6 +148,9 @@ class MMBitset {
     return (data[pos / 64] & (1ull << (pos % 64))) != 0;
   }
   uint64_t size() const { return num__; }
+  uint64_t num_data_bytes() const {
+    return ((num__ + 63) / 64) * sizeof(uint64_t);
+  };
 
  private:
   friend void TestMMBitset();
@@ -157,10 +159,6 @@ class MMBitset {
   uint64_t num__;
   // Data starts at this + relative_blob_offset__
   int64_t relative_blob_offset__;
-
-  uint64_t num_data_bytes() const {
-    return ((num__ + 63) / 64) * sizeof(uint64_t);
-  };
 
   DISALLOW_COPY_ASSIGN_MOVE(MMBitset);
 
@@ -228,6 +226,13 @@ class MMCompressedUIntVec {
   uint32_t size() const { return num__; }
   uint32_t bit_width() const { return bit_width__; }
 
+  // The size of data blob in bytes. Note that this is always a multiple of
+  // sizeof(uint64_t), i.e. 8.
+  size_t num_data_bytes() const {
+    return bit_width__ == 0 ? sizeof(uint64_t)
+                            : ((num__ * bit_width__ + 63ull) / 64ull) * 8ull;
+  }
+
  private:
   friend void TestMMCompressedUIntVec();
 
@@ -270,13 +275,6 @@ class MMCompressedUIntVec {
     }
   }
 
-  // The size of data blob in bytes. Note that this is always a multiple of
-  // sizeof(uint64_t), i.e. 8.
-  size_t num_data_bytes() const {
-    return bit_width__ == 0 ? sizeof(uint64_t)
-                            : ((num__ * bit_width__ + 63ull) / 64ull) * 8ull;
-  }
-
   DISALLOW_COPY_ASSIGN_MOVE(MMCompressedUIntVec);
 
  public:
@@ -310,6 +308,11 @@ class MMCompressedUIntVec {
 };
 CHECK_IS_MM_OK(MMCompressedUIntVec);
 
+// Each entry in the turn cost table is an array of turn costs, one for each
+// outgoing edge of the node referencing the entry. The complete turn cost table
+// is stored in a contiguous array of uint8_t. Each individual entry is stored
+// as "<len><turn cost_1>...<turn_cost_n>". WriteDataBlob() return a vector that
+// for each entry contains the start position in the array.
 class MMTurnCostsTable {
  public:
   std::span<const uint8_t> at(uint32_t pos) const {
@@ -318,6 +321,8 @@ class MMTurnCostsTable {
     // ptr + 1 points to the start of the array.
     return std::span<const uint8_t>(ptr + 1, *ptr);
   }
+
+  uint64_t num_data_bytes() const { return arr__.num_data_bytes(); }
 
  private:
   MMVec64<std::uint8_t> arr__;
@@ -354,6 +359,9 @@ class MMTurnCostsTable {
 };
 CHECK_IS_MM_OK(MMTurnCostsTable);
 
+// All strings are stored as in one contiguous array of characters, using 0 to
+// terminate a strings. WriteDataBlob() returns a vector containing the starting
+// position for every string.
 class MMStringsTable {
  public:
   std::string_view at(uint32_t pos) const {
@@ -361,6 +369,8 @@ class MMStringsTable {
     const size_t len = strlen(ptr);
     return std::string_view(ptr, len);
   }
+
+  uint64_t num_data_bytes() const { return arr__.num_data_bytes(); }
 
  private:
   MMVec64<char> arr__;
@@ -460,6 +470,9 @@ struct MMGroupedOSMIds {
 
   // The number of ids.
   uint64_t size() const { return num__; }
+  uint64_t num_data_bytes() const {
+    return mmgroups__.num_data_bytes() + blob_size_in_bytes__;
+  }
 
  private:
   struct IdGroup {
@@ -471,6 +484,7 @@ struct MMGroupedOSMIds {
 
   // Number of Ids stored in total.
   uint32_t num__;
+  uint32_t blob_size_in_bytes__;
   MMVec64<IdGroup> mmgroups__;
   DISALLOW_COPY_ASSIGN_MOVE(MMGroupedOSMIds);
 
@@ -514,6 +528,7 @@ struct MMGroupedOSMIds {
     // Write blob containing the deltas
     CHECK_EQ_S(abs_blobs_offset, GetFileSize(fd));
     AppendData(name + ":blob", fd, buff.base_ptr(), buff.used());
+    blob_size_in_bytes__ = buff.used();
 
     // Write groups vector.
     mmgroups__.WriteDataBlob(

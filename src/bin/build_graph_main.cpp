@@ -862,6 +862,8 @@ int main(int argc, char* argv[]) {
       router.Route(mmg, start_anchor, target_anchor);
     }
 
+    mmg.PrintInfo();
+
     munmap((void*)ptr, file_size);
   }
 

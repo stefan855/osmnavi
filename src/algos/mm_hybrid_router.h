@@ -14,13 +14,13 @@
 //
 // If routing finalizes an outgoing edge of an expanded cluster, then there are
 // two cases:
-//   (1) The target cluster of the edge is expanded. In this case, an incoming
-//   edge (which is a duplicate of the outgoing edge) is added to the queue of
-//   target cluster router.
-//   (2) The target cluster is not expanded, i.e. the outgoing edge of the
-//   expanded cluster corresponds to an incoming edge at a non-expanded cluster.
-//   In this case, all outgoing edges which are reachable through a shortcut
-//   edge from the incoming edge are added to the queue of the hybrid router.
+//   (1) The cluster of the target of the edge is expanded. In this case, an
+//   incoming edge (which is a duplicate of the outgoing edge) is added to the
+//   queue of expanded cluster router.
+//   (2) The cluster is not expanded, i.e. the outgoing edge of the expanded
+//   cluster corresponds to an incoming edge at a non-expanded cluster. In this
+//   case, all outgoing edges which are reachable through a shortcut edge from
+//   the incoming edge are added to the queue of the hybrid router.
 //
 // If routing finalizes a hybrid edge, and the target cluster of the edge is
 // expanded, then an incoming edge is added to the target cluster router (same a
@@ -90,6 +90,9 @@ class MMHybridRouter final {
     return iter.first->second;
   }
 
+  // All data needed for a specific routing request.
+  // The MMHybridRouter object itself acctually doesn't store any data,
+  // therefore all methods are 'static'.
   struct RouterData {
     // Only entries 0 and 1 are used.
     std::shared_ptr<MMClusterWrapper> mcw[ROUTER_TYPE_MAX];
@@ -100,8 +103,13 @@ class MMHybridRouter final {
         hybrid_queue;
     absl::flat_hash_map<uint32_t, VisitedEdge> hybrid_map;
 
+    absl::Time start_time_routing = absl::UnixEpoch();
+    absl::Time start_time_assemble_segments = absl::UnixEpoch();
+    absl::Time start_time_expand_clusters = absl::UnixEpoch();
+
     void Init(const MMGraph& mg, const MMGeoAnchor& start_anchor,
               const MMGeoAnchor& target_anchor) {
+      start_time_routing = absl::Now();
       const MMClusterRouter::Options opt = {.handle_restricted_access = true,
                                             .include_dead_end = true};
       // Anchors should follow this scheme:
@@ -206,12 +214,14 @@ class MMHybridRouter final {
     LOG_S(INFO) << "start anchor has " << start_anchor.edge_points.size()
                 << " edges";
     for (const auto& ep : start_anchor.edge_points) {
-      LOG_S(INFO) << "  " << ep.fe.DebugString(mg) << " frac: " << ep.fraction;
+      LOG_S(INFO) << "  " << ep.fe.DebugString(mg)
+                  << " frac: " << ep.to_fraction;
     }
     LOG_S(INFO) << "target anchor has " << target_anchor.edge_points.size()
                 << " edges";
     for (const auto& ep : target_anchor.edge_points) {
-      LOG_S(INFO) << "  " << ep.fe.DebugString(mg) << " frac: " << ep.fraction;
+      LOG_S(INFO) << "  " << ep.fe.DebugString(mg)
+                  << " frac: " << ep.to_fraction;
     }
 
     RouterData d;
@@ -362,34 +372,68 @@ class MMHybridRouter final {
     return segments->back().res.start_is_anchor;
   }
 
-  static MMRoutingResult AssembleSegments(const MMGraph& mg,
-                                          const RouterData& d,
+  static void AddStatistics(const MMGraph& mg, const RouterData& d,
+                            MMRoutingResult* res) {
+    res->num_path_full_clusters =
+        d.router[START].get() == d.router[TARGET].get() ? 1 : 2;
+    res->num_vis_start = d.router[START]->GetVisitedEdges().size();
+    res->num_vis_target = d.router[TARGET]->GetVisitedEdges().size();
+    res->num_vis_hybrid = d.hybrid_map.size();
+
+    auto now = absl::Now();
+    if (d.start_time_expand_clusters != absl::UnixEpoch()) {
+      // We have all three times
+      res->time_for_expand_hybrid_clusters =
+          ToDoubleSeconds(now - d.start_time_expand_clusters);
+      res->time_for_assemble = ToDoubleSeconds(d.start_time_expand_clusters -
+                                               d.start_time_assemble_segments);
+      res->time_for_route_algorithm = ToDoubleSeconds(
+          d.start_time_assemble_segments - d.start_time_routing);
+    } else if (d.start_time_assemble_segments != absl::UnixEpoch()) {
+      res->time_for_assemble =
+          ToDoubleSeconds(now - d.start_time_assemble_segments);
+      res->time_for_route_algorithm = ToDoubleSeconds(
+          d.start_time_assemble_segments - d.start_time_routing);
+    } else {
+      res->time_for_route_algorithm =
+          ToDoubleSeconds(now - d.start_time_routing);
+    }
+  }
+
+  static MMRoutingResult AssembleSegments(const MMGraph& mg, RouterData& d,
                                           const RouterType last_source,
                                           const MMClusterRouterStatus& rs) {
+    d.start_time_assemble_segments = absl::Now();
     if (!rs.finished || !rs.found) {
-      return {};
-    }
-
-    CHECK_S(last_source == START || last_source == TARGET) << (int)last_source;
-    MMRoutingResult res =
-        d.router[last_source]->GetRoutingResult(rs.last_v_idx);
-    CHECK_S(res.target_is_anchor);
-    if (res.start_is_anchor) {
-      // We have the full path in one cluster, without any visits to the hybrid
-      // router.
-      // CHECK_EQ_S(d.hybrid_map.size(), 0);
+      MMRoutingResult res = {};
+      AddStatistics(mg, d, &res);
       return res;
     }
 
-    // We go *backward* and collect the route segments in 'segments'.
-    // The predecessor segment is found in two ways:
-    //   * If a segment is in an expanded cluster, then the first edge in the
-    //   route is an incoming edge. To go backward, We find the corresponding
-    //   outgoing edge in another router.
-    //   * If a segment is in the hybrid router, then the previous router is
-    //   stored explicitly in the "HybridEdge'.
+    CHECK_S(last_source == START || last_source == TARGET) << (int)last_source;
     std::vector<Segment> segments;
-    segments.push_back({last_source, res, {}});
+    {
+      MMRoutingResult res =
+          d.router[last_source]->GetRoutingResult(rs.last_v_idx);
+      CHECK_S(res.target_is_anchor);
+      if (res.start_is_anchor) {
+        // We have the full path in one cluster, without any visits to the
+        // hybrid router. CHECK_EQ_S(d.hybrid_map.size(), 0);
+        LogPath(mg, res);
+        AddStatistics(mg, d, &res);
+        return res;
+      }
+
+      // We go *backward* and collect the route segments in 'segments'.
+      // The predecessor segment is found in two ways:
+      //   * If a segment is in an expanded cluster, then the first edge in the
+      //   route is an incoming edge. To go backward, We find the corresponding
+      //   outgoing edge in another router.
+      //   * If a segment is in the hybrid router, then the previous router is
+      //   stored explicitly in the "HybridEdge'.
+      segments.push_back({last_source, res, {}});
+    }
+
     while (true) {
       const Segment& segment = segments.back();
       if (segment.source == HYBRID) {
@@ -445,7 +489,9 @@ class MMHybridRouter final {
     }
     std::reverse(segments.begin(), segments.end());
     PrintSegments(mg, segments);
-    return ExpandHybridClusters(mg, segments);
+    MMRoutingResult res = ExpandHybridClusters(mg, segments, d);
+    AddStatistics(mg, d, &res);
+    return res;
   }
 
   static void PrintSegments(const MMGraph& mg,
@@ -478,8 +524,8 @@ class MMHybridRouter final {
   }
 
   static MMRoutingResult ExpandHybridClusters(
-      const MMGraph& mg, const std::vector<Segment>& segments) {
-    absl::Time start_time = absl::Now();
+      const MMGraph& mg, const std::vector<Segment>& segments, RouterData& d) {
+    d.start_time_expand_clusters = absl::Now();
     MMRoutingResult res;
     for (size_t seg_pos = 0; seg_pos < segments.size(); ++seg_pos) {
       const Segment& seg = segments.at(seg_pos);
@@ -490,8 +536,14 @@ class MMHybridRouter final {
         if (seg_pos == 0) {
           res = seg.res;
         } else {
+#if 0
           // If previous segment was HYBRID, then the first edge is a dup.
           size_t off = (segments.at(seg_pos - 1).source == HYBRID) ? 1 : 0;
+#endif
+
+          LOG_S(INFO) << "Ignore duplicate edge "
+                      << seg.res.full_edges.front().DebugString(mg);
+          constexpr uint32_t off = 1;  // First edge is a dup.
           AppendVector(seg.res.full_edges, off, &res.full_edges);
           AppendVector(seg.res.min_metrics, off, &res.min_metrics);
           AppendVector(seg.res.edge_weights, off, &res.edge_weights);
@@ -542,17 +594,23 @@ class MMHybridRouter final {
         }
       }
     }
-#if 0
-    LOG_S(INFO) << "**************** PATH ***************";
-    for (size_t i = 0; i < res.full_edges.size(); ++i) {
-      LOG_S(INFO) << res.min_metrics.at(i) << " " << res.edge_weights.at(i)
-                  << ": " << res.full_edges.at(i).DebugString(mg);
-    }
     CHECK_EQ_S(res.full_edges.size(), res.min_metrics.size());
     CHECK_EQ_S(res.full_edges.size(), res.edge_weights.size());
-#endif
-    res.time_for_expand_hybrid_clusters =
-        ToDoubleSeconds(absl::Now() - start_time);
+    LogPath(mg, res);
     return res;
+  }
+
+  static void LogPath(const MMGraph& mg, const MMRoutingResult& res) {
+    LOG_S(INFO) << "**************** PATH ***************";
+    for (size_t i = 0; i < res.full_edges.size(); ++i) {
+      if (i == 5 && res.full_edges.size() > 10) {
+        LOG_S(INFO) << "... (" << res.full_edges.size() - 10 << " omitted)";
+        i = res.full_edges.size() - 5;
+      }
+      LOG_S(INFO) << i << ". " << res.min_metrics.at(i) << " "
+                  << res.edge_weights.at(i) << ": "
+                  << res.full_edges.at(i).DebugString(mg);
+    }
+    LOG_S(INFO) << "*************************************";
   }
 };

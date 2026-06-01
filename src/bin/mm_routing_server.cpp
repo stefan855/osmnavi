@@ -79,10 +79,10 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
 
     const MMCluster& mc = mg.clusters.at(cl_br.cluster_id);
     for (uint32_t n0_idx = 0; n0_idx < mc.nodes.size(); ++n0_idx) {
-      const MMLatLon& n0_coord = mc.node_to_latlon.at(n0_idx);
+      const MMLatLon& n0_coord = mc.node_to_latlon(n0_idx);
       for (uint32_t e_idx : mc.edge_indices(n0_idx)) {
         uint32_t n1_idx = mc.get_edge(e_idx).target_idx();
-        const MMLatLon& n1_coord = mc.node_to_latlon.at(n1_idx);
+        const MMLatLon& n1_coord = mc.node_to_latlon(n1_idx);
         const DistanceToSegment d = FastPointToSegmentDistance(
             lat, lon, n0_coord.lat, n0_coord.lon, n1_coord.lat, n1_coord.lon);
         if (!topn.filled() || d.distance_cm < topn.bottom().dts.distance_cm) {
@@ -101,7 +101,7 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
     if (ce.valid) {
       a.edge_points.push_back(
           {.distance_cm = static_cast<uint32_t>(ce.dts.distance_cm),
-           .fraction = static_cast<float>(ce.dts.fraction_closest),
+           .to_fraction = static_cast<float>(ce.dts.fraction_closest),
            .lat_at_fraction = ce.dts.lat_closest,
            .lon_at_fraction = ce.dts.lon_closest,
            .fe = ce.fe});
@@ -118,7 +118,7 @@ MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
         ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
     if (backward_idx != INFU32) {
       a.edge_points.push_back({.distance_cm = ep.distance_cm,
-                               .fraction = 1.0f - ep.fraction,
+                               .to_fraction = 1.0f - ep.to_fraction,
                                .lat_at_fraction = ep.lat_at_fraction,
                                .lon_at_fraction = ep.lon_at_fraction,
                                .fe = MMFullEdge::CreateWithEdgeIdx(
@@ -251,13 +251,11 @@ struct JsonResult {
 };
 
 float GetLon(const MMCluster& mc, uint32_t n_idx) {
-  const MMLatLon& c = mc.node_to_latlon.at(n_idx);
-  return c.lon / static_cast<float>(TEN_POW_7);
+  return mc.node_to_lon(n_idx) / static_cast<float>(TEN_POW_7);
 }
 
 float GetLat(const MMCluster& mc, uint32_t n_idx) {
-  const MMLatLon& c = mc.node_to_latlon.at(n_idx);
-  return c.lat / static_cast<float>(TEN_POW_7);
+  return mc.node_to_lat(n_idx) / static_cast<float>(TEN_POW_7);
 }
 
 std::string GetEdgeName(const MMCluster& mc, const MMFullEdge& fe) {
@@ -449,7 +447,16 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
     routing_time = ToDoubleSeconds(absl::Now() - start_time);
   }
   LOG_S(INFO) << "Finished routing";
-  LOG_S(INFO) << absl::StrFormat("**** Route(): %.2f secs", routing_time);
+  LOG_S(INFO) << absl::StrFormat("**** Start/End Cl: %9llu",
+                                 res.num_path_full_clusters);
+  LOG_S(INFO) << absl::StrFormat("**** Result edges: %9llu",
+                                 res.full_edges.size());
+  LOG_S(INFO) << absl::StrFormat("**** Final metric: %9u", res.final_metric);
+  LOG_S(INFO) << absl::StrFormat("**** Start  vis:   %9llu", res.num_vis_start);
+  LOG_S(INFO) << absl::StrFormat("**** Target vis:   %9llu",
+                                 res.num_vis_target);
+  LOG_S(INFO) << absl::StrFormat("**** Hybrid vis:   %9llu",
+                                 res.num_vis_hybrid);
 
   if (res.full_edges.empty()) {
     return {{"code", "NoRoute"}};
@@ -471,7 +478,11 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
                                  find_closest_time);
   LOG_S(INFO) << absl::StrFormat("**** Route:                    %.3f secs",
                                  routing_time);
-  LOG_S(INFO) << absl::StrFormat("       Expand Hybrid Clusters: %.3f secs",
+  LOG_S(INFO) << absl::StrFormat("       Routing algorithms:     %.3f secs",
+                                 res.time_for_route_algorithm);
+  LOG_S(INFO) << absl::StrFormat("       Path assemble:          %.3f secs",
+                                 res.time_for_assemble);
+  LOG_S(INFO) << absl::StrFormat("       Expand hybrid clusters: %.3f secs",
                                  res.time_for_expand_hybrid_clusters);
   LOG_S(INFO) << absl::StrFormat("**** Create Json:              %.3f secs",
                                  json_time);
@@ -528,6 +539,9 @@ int main(int argc, char* argv[]) {
   }
   ::close(fd);
   const MMGraph& mg = *((MMGraph*)ptr);
+  CHECK_EQ_S(mg.magic, kMagic);
+  CHECK_EQ_S(mg.version_major, kVersionMajor);
+  CHECK_EQ_S(mg.version_minor, kVersionMinor);
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");
@@ -537,10 +551,10 @@ int main(int argc, char* argv[]) {
     HandleFileRequest(req, res, "../src/html/leaflet.html", "text/html");
   });
 
-  svr.Get("/favicon.ico", [](const httplib::Request& req,
-                                httplib::Response& res) {
-    HandleFileRequest(req, res, "../src/html/favicon.ico", "image/x-icon");
-  });
+  svr.Get(
+      "/favicon.ico", [](const httplib::Request& req, httplib::Response& res) {
+        HandleFileRequest(req, res, "../src/html/favicon.ico", "image/x-icon");
+      });
 
   svr.Get("/start_icon.png", [](const httplib::Request& req,
                                 httplib::Response& res) {
@@ -556,7 +570,7 @@ int main(int argc, char* argv[]) {
       "/route/(v1[hybrid]*)/driving/"
       "(-?[0-9.]+),(-?[0-9.]+);(-?[0-9.]+),(-?[0-9.]+)",
       [&mg](const httplib::Request& req, httplib::Response& res) {
-        const absl::Time start = absl::Now();
+        const absl::Time overall_start = absl::Now();
 
 #if 0
         LOG_S(INFO) << "=== Request Dump ===";
@@ -591,20 +605,29 @@ int main(int argc, char* argv[]) {
             result = ComputeRoute(mg, hybrid, lon1, lat1, lon2, lat2);
           }
         }
-        res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_content(result.dump(), "application/json");
+        {
+          auto result_start = absl::Now();
+          res.set_header("Access-Control-Allow-Origin", "*");
+          res.set_content(result.dump(), "application/json");
+          LOG_S(INFO) << absl::StrFormat(
+              "**** Web result creation:      %.3f secs",
+              ToDoubleSeconds(absl::Now() - result_start));
+        }
         // LOG_S(INFO) << result.dump(2);
         LogMemoryUsage();
-        LOG_S(INFO) << absl::StrFormat("**** elapsed: %.2f secs",
-                                       ToDoubleSeconds(absl::Now() - start));
+        LOG_S(INFO) << absl::StrFormat(
+            "**** elapsed: %.2f secs",
+            ToDoubleSeconds(absl::Now() - overall_start));
       });
 
+  // Try something on startup:
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
   LOG_S(INFO) << ComputeRoute(mg, /*hybrid=*/false, 8.720121, 47.3476881,
                               8.7204095, 47.3476057)
                      .dump(2);
 
+  mg.PrintInfo();
   LOG_S(INFO) << "Listening...";
   svr.listen("0.0.0.0", 8081);
 }

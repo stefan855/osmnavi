@@ -138,5 +138,5 @@ target_link_libraries(routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_
 
 add_executable(mm_routing_server src/bin/mm_routing_server.cpp)
 target_include_directories(mm_routing_server SYSTEM PRIVATE)
-target_link_libraries(mm_routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_format loguru_lib absl::time absl::time build_graph_lib)
+target_link_libraries(mm_routing_server PRIVATE ZLIB::ZLIB absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time absl::time)
 

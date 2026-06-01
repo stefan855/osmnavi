@@ -556,7 +556,7 @@ void CheckGNodePlausible(const Graph& g, const TmpClusterInfo& tci,
   CHECK_S(n.cluster_id == mmc.cluster_id || n.cluster_border_node)
       << mmc.cluster_id;
 
-  MMLatLon latlon = mmc.node_to_latlon.at(node_idx);
+  MMLatLon latlon = mmc.node_to_latlon(node_idx);
   CHECK_EQ_S(latlon.lat, n.lat);
   CHECK_EQ_S(latlon.lon, n.lon);
 }
@@ -626,7 +626,21 @@ void CheckTurnCosts(const Graph& g, const TmpClusterInfo& tci,
     CHECK_GE_S(edge2_idx, mmc.edge_start_idx(ctarget_idx));
     uint32_t off = edge2_idx - mmc.edge_start_idx(ctarget_idx);
     auto cturn_cost = tcarr[off];
-    CHECK_EQ_S(gturn_cost, cturn_cost);
+    if (gturn_cost != cturn_cost) {
+      LOG_S(INFO) << "edge1: " << mmc.DebugStringEdge(cfrom_idx, cedge_idx);
+      LOG_S(INFO) << "edge2: " << mmc.DebugStringEdge(ctarget_idx, edge2_idx);
+      if (fe1.start_idx() == fe2.target_idx(g) &&
+          fe2.start_idx() == fe1.target_idx(g) &&
+          fe1.start_node(g).cluster_id != fe2.start_node(g).cluster_id &&
+          gturn_cost != TURN_COST_INFINITY_COMPRESSED &&
+          cturn_cost == TURN_COST_INFINITY_COMPRESSED) {
+        // Known case, see ClusterAddTurnCosts(). We set the uturn for outgoing
+        // edges.
+        ;
+      } else {
+        CHECK_EQ_S((int)gturn_cost, (int)cturn_cost);
+      }
+    }
   }
 }
 
@@ -844,17 +858,12 @@ void CheckMMGraph(const std::string& path, const Graph& g,
       }
     }
 
-    // TODO: complex_turn_restrictions
-    // TODO: complex_turn_restriction_legs
-    // Check that all complex turn restrictions can be back-translated into
-    // the g graph and that all the referenced nodes and edges exist in both
-    // graphs.
-
     // node_to_latlon
-    LOG_S(INFO) << "  Check node_to_latlon:" << mmc.node_to_latlon.size();
-    CHECK_EQ_S(mmc.node_to_latlon.size(), tci.mm_node_to_latlon.size());
-    for (uint32_t i = 0; i < mmc.node_to_latlon.size(); ++i) {
-      const auto latlon1 = mmc.node_to_latlon.at(i);
+    LOG_S(INFO) << "  Check node_to_lat/lon:" << mmc.node_to_rel_lat.size();
+    CHECK_EQ_S(mmc.node_to_rel_lat.size(), tci.mm_node_to_latlon.size());
+    CHECK_EQ_S(mmc.node_to_rel_lon.size(), tci.mm_node_to_latlon.size());
+    for (uint32_t i = 0; i < mmc.node_to_rel_lat.size(); ++i) {
+      const auto latlon1 = mmc.node_to_latlon(i);
       const auto latlon2 = tci.mm_node_to_latlon.at(i);
       CHECK_EQ_S(latlon1.lat, latlon2.lat);
       CHECK_EQ_S(latlon1.lon, latlon2.lon);
@@ -884,8 +893,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
 
 }  // namespace
 
-void WriteMMCluster(const TmpClusterInfo& tci, MMCluster* mmcluster,
-                    int64_t global_object_offset, int fd) {
+void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
+                              int64_t global_object_offset, int fd) {
   mmcluster->cluster_id = tci.cluster_id;
   ComputeClusterNodeNumbers(tci, mmcluster);
   mmcluster->bounding_rect = tci.mm_bounding_rect;
@@ -911,6 +920,7 @@ void WriteMMCluster(const TmpClusterInfo& tci, MMCluster* mmcluster,
       tci.mm_out_edges);
 
   {
+    // Write zeroes, will be filled in later.
     std::vector<uint32_t> empty_metrics(
         tci.mm_in_edges.size() * tci.mm_out_edges.size(), 0);
     mmcluster->path_metrics.WriteDataBlob(
@@ -918,6 +928,47 @@ void WriteMMCluster(const TmpClusterInfo& tci, MMCluster* mmcluster,
         global_object_offset + offsetof(MMCluster, path_metrics), fd,
         empty_metrics);
   }
+}
+
+void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
+                                int64_t global_object_offset, int fd) {
+  /*
+  mmcluster->cluster_id = tci.cluster_id;
+  ComputeClusterNodeNumbers(tci, mmcluster);
+  mmcluster->bounding_rect = tci.mm_bounding_rect;
+  */
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Write cl:%u ic:%llu og:%llu n:%llu e:%llu w:%llu wsa:%llu tc:%llu "
+      "ctrs:%llu",
+      tci.cluster_id, tci.mm_in_edges.size(), tci.mm_out_edges.size(),
+      tci.mm_nodes.size(), tci.mm_edges.size(), tci.gway_to_cway.size(),
+      tci.mm_way_shared_attrs.size(), tci.turn_costs.size(),
+      tci.complex_tr.size());
+  LOG_S(INFO) << absl::StrFormat(
+      "  nodes: border:%u off_cluster:%u inner:%u dead_end:%u",
+      mmcluster->num_border_nodes, mmcluster->num_off_cluster_nodes,
+      mmcluster->num_inner_nodes, mmcluster->num_dead_end_nodes);
+
+#if 0
+  mmcluster->in_edges.WriteDataBlob(
+      "in_edges", global_object_offset + offsetof(MMCluster, in_edges), fd,
+      tci.mm_in_edges);
+
+  mmcluster->out_edges.WriteDataBlob(
+      "out_edges", global_object_offset + offsetof(MMCluster, out_edges), fd,
+      tci.mm_out_edges);
+
+  {
+    // Write zeroes, will be filled in later.
+    std::vector<uint32_t> empty_metrics(
+        tci.mm_in_edges.size() * tci.mm_out_edges.size(), 0);
+    mmcluster->path_metrics.WriteDataBlob(
+        "path_metrics",
+        global_object_offset + offsetof(MMCluster, path_metrics), fd,
+        empty_metrics);
+  }
+#endif
 
   mmcluster->nodes.WriteDataBlob(
       "nodes", global_object_offset + offsetof(MMCluster, nodes), fd,
@@ -945,10 +996,38 @@ void WriteMMCluster(const TmpClusterInfo& tci, MMCluster* mmcluster,
       global_object_offset + offsetof(MMCluster, way_shared_attrs), fd,
       tci.mm_way_shared_attrs);
 
+#if 0
   mmcluster->node_to_latlon.WriteDataBlob(
       "node_to_latlon",
       global_object_offset + offsetof(MMCluster, node_to_latlon), fd,
       tci.mm_node_to_latlon);
+#endif
+
+  {
+    std::vector<uint32_t> rel_lat;
+    rel_lat.reserve(tci.mm_node_to_latlon.size());
+    for (const auto& latlon : tci.mm_node_to_latlon) {
+      CHECK_LE_S(tci.mm_bounding_rect.min.lat, latlon.lat);
+      rel_lat.push_back(latlon.lat - tci.mm_bounding_rect.min.lat);
+    }
+    mmcluster->node_to_rel_lat.WriteDataBlob(
+        "node_to_rel_lat",
+        global_object_offset + offsetof(MMCluster, node_to_rel_lat), fd,
+        rel_lat);
+  }
+
+  {
+    std::vector<uint32_t> rel_lon;
+    rel_lon.reserve(tci.mm_node_to_latlon.size());
+    for (const auto& latlon : tci.mm_node_to_latlon) {
+      CHECK_LE_S(tci.mm_bounding_rect.min.lon, latlon.lon);
+      rel_lon.push_back(latlon.lon - tci.mm_bounding_rect.min.lon);
+    }
+    mmcluster->node_to_rel_lon.WriteDataBlob(
+        "node_to_rel_lon",
+        global_object_offset + offsetof(MMCluster, node_to_rel_lon), fd,
+        rel_lon);
+  }
 
   mmcluster->grouped_node_to_osm_id.WriteDataBlob(
       "node-id-groups",
@@ -1055,7 +1134,7 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
   const uint64_t clusters_data_offset = mmheader.clusters.WriteDataBlob(
       "clusters", offsetof(MMGraph, clusters), fd, clusters);
 
-  // Start fillimng data.
+  // Start filling data.
   mmheader.magic = kMagic;
   mmheader.version_major = kVersionMajor;
   mmheader.version_minor = kVersionMinor;
@@ -1067,17 +1146,33 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
 
   LogMemoryUsage();
 
+  // Hybrid Cluster Data
+  LOG_S(INFO) << "Start WriteMMClusterHybridPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
     FillTmpClusterInfo(g, &tci);
-    WriteMMCluster(tci, &clusters.at(tci.cluster_id),
-                   // global file offset of this MMCluster object.
-                   clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)),
-                   fd);
+    WriteMMClusterHybridPart(
+        tci, &clusters.at(tci.cluster_id),
+        // global file offset of this MMCluster object.
+        clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)), fd);
+    sorted_bounding_rects.at(tci.cluster_id) = {
+        .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
+  }
+
+  // Expanded Cluster Data.
+  LOG_S(INFO) << "Start WriteMMClusterExpandedPart";
+  for (TmpClusterInfo& tci : tmp_cluster_infos) {
+    // FillTmpClusterInfo(g, &tci);
+    WriteMMClusterExpandedPart(
+        tci, &clusters.at(tci.cluster_id),
+        // global file offset of this MMCluster object.
+        clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)), fd);
+#if 0
     sorted_bounding_rects.at(tci.cluster_id) = {
         .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
     if (!check_mmgraph) {
       tci = {};  // Clear all data, release memory.
     }
+#endif
   }
 
   std::sort(sorted_bounding_rects.begin(), sorted_bounding_rects.end(),

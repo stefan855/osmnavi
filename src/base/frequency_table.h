@@ -61,19 +61,17 @@ class FrequencyTable {
 
   // Total number of added elements, i.e. the sum of all frequencies in the
   // table.
-  uint64_t Total() const {
-    return added_; }
+  uint64_t Total() const { return added_; }
 
   // Total number of added elements.
-  uint64_t TotalUnique() const {
-    return freq_table_.size(); }
+  uint64_t TotalUnique() const { return freq_table_.size(); }
 
  private:
   struct InternalEntry {
     int64_t ref_count = 0;
     int64_t example_id = 0;
   };
-  
+
   // Add an element with reference count 'num' to the table.
   void AddNum(std::string_view str, int64_t num, int64_t example_id) {
     added_ += num;
@@ -97,4 +95,41 @@ class FrequencyTable {
   bool sorted_ = false;
   uint64_t added_ = 0;
   absl::flat_hash_map<std::string, InternalEntry> freq_table_;
+};
+
+template <typename T>
+class MinMaxAvg {
+ public:
+  MinMaxAvg() { Clear(); };
+  void Add(T value) {
+    if (count_++ > 0) {
+      min_ = std::min(min_, value);
+      max_ = std::max(max_, value);
+      sum_ += value;
+      return;
+    }
+    // Initialisation.
+    min_ = value;
+    max_ = value;
+    sum_ = value;
+  }
+
+  int64_t Count() const { return count_; }
+  T Min() const { return min_; }
+  T Max() const { return max_; }
+  T Avg() const { return sum_ / count_; }
+  T Sum() const { return sum_; }
+
+  void Clear() {
+    count_ = 0;
+    sum_ = 0;
+    min_ = 0;
+    max_ = 0;
+  }
+
+ private:
+  uint64_t count_;
+  T sum_;
+  T min_;
+  T max_;
 };

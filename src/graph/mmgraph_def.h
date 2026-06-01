@@ -8,6 +8,7 @@
 
 #include "algos/routing_metric.h"
 #include "base/deduper_with_ids.h"
+#include "base/frequency_table.h"
 #include "base/mmap_base.h"
 #include "geometry/geometry.h"
 #include "graph/graph_def.h"
@@ -184,7 +185,10 @@ struct MMCluster {
   // Array referenced by entries in complex_turn_restrictions.
   MMVec64<uint32_t> complex_turn_restriction_legs;
 
-  MMVec64<MMLatLon> node_to_latlon;
+  // MMVec64<MMLatLon> node_to_latlon;
+  // Store coordinates relative to bounding_rect.min
+  MMCompressedUIntVec node_to_rel_lat;
+  MMCompressedUIntVec node_to_rel_lon;
 
   // *** Way description generation.
   MMCompressedUIntVec way_to_streetname_pos;
@@ -291,6 +295,22 @@ struct MMCluster {
     return way_shared_attrs.at(way_to_wsa.at(way_idx));
   }
 
+  MMLatLon node_to_latlon(uint32_t node_idx) const {
+    return {.lat = node_to_lat(node_idx), .lon = node_to_lon(node_idx)};
+  }
+
+  int32_t node_to_lat(uint32_t node_idx) const {
+    return static_cast<int32_t>(
+        bounding_rect.min.lat +
+        static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
+  }
+
+  int32_t node_to_lon(uint32_t node_idx) const {
+    return static_cast<int32_t>(
+        bounding_rect.min.lon +
+        static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
+  }
+
   const std::string_view get_streetname(uint32_t way_idx) const {
     return streetnames_table.at(way_to_streetname_pos.at(way_idx));
   }
@@ -371,6 +391,9 @@ struct MMCluster {
     CHECK_NE_S(pos, INFU32);
     return out_edges.at(pos);
   }
+
+  // Return the "FullEdge" debug string for this edge.
+  std::string DebugStringEdge(uint32_t from_idx, uint32_t edge_idx) const;
 };
 CHECK_IS_MM_OK(MMCluster);
 
@@ -444,6 +467,71 @@ struct MMGraph {
     }
     ABORT_S() << "could not find outgoing edge " << in_edge.from_node_id << " "
               << in_edge.to_node_id << " " << in_edge.way_id;
+  }
+
+ private:
+  void LogLine(const char name[], const MinMaxAvg<uint64_t>& stat) const {
+    LOG_S(INFO) << absl::StrFormat(
+        "%-29s %7llu %8llu %8llu %11llu (%5.2f%%)", name, stat.Min(),
+        stat.Max(), stat.Avg(), stat.Sum(), (100.0 * stat.Sum()) / file_size);
+  }
+
+#define DO_STATS_FOR_CLUSTER_ATTR(attr_name, total_bytes) \
+  {                                                       \
+    MinMaxAvg<uint64_t> stat;                             \
+    for (const auto& mc : clusters.span()) {              \
+      stat.Add(mc.attr_name.num_data_bytes());            \
+    }                                                     \
+    LogLine(#attr_name, stat);                            \
+    total_bytes += stat.Sum();                            \
+  }
+
+ public:
+  void PrintInfo() const {
+    LOG_S(INFO) << absl::StrFormat("File size:           %12llu", file_size);
+    LOG_S(INFO) << absl::StrFormat("Size MMGraph struct:   %10llu",
+                                   sizeof(MMGraph));
+    LOG_S(INFO) << absl::StrFormat("  Size bounding rects: %10llu",
+                                   sorted_bounding_rects.num_data_bytes());
+    LOG_S(INFO) << absl::StrFormat("  Size clusters vector:%10llu",
+                                   clusters.num_data_bytes());
+
+    LOG_S(INFO) << "==========================================================="
+                   "=================";
+    LOG_S(INFO) << "Cluster Disk Usage Stats (bytes)";
+    LOG_S(INFO) << "                                        per cluster        "
+                   "   total";
+    LOG_S(INFO) << "What                              min      max      avg    "
+                   "     sum";
+    LOG_S(INFO) << "==========================================================="
+                   "=================";
+    uint64_t total = 0;
+    DO_STATS_FOR_CLUSTER_ATTR(in_edges, total);
+    DO_STATS_FOR_CLUSTER_ATTR(out_edges, total);
+    DO_STATS_FOR_CLUSTER_ATTR(path_metrics, total);
+    DO_STATS_FOR_CLUSTER_ATTR(nodes, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edges, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edge_to_distance, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edge_to_way, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edge_to_turn_costs_pos, total);
+    DO_STATS_FOR_CLUSTER_ATTR(way_to_wsa, total);
+    DO_STATS_FOR_CLUSTER_ATTR(way_shared_attrs, total);
+    DO_STATS_FOR_CLUSTER_ATTR(turn_costs_table, total);
+    DO_STATS_FOR_CLUSTER_ATTR(complex_turn_restrictions, total);
+    DO_STATS_FOR_CLUSTER_ATTR(complex_turn_restriction_legs, total);
+    DO_STATS_FOR_CLUSTER_ATTR(node_to_rel_lat, total);
+    DO_STATS_FOR_CLUSTER_ATTR(node_to_rel_lon, total);
+    DO_STATS_FOR_CLUSTER_ATTR(way_to_streetname_pos, total);
+    DO_STATS_FOR_CLUSTER_ATTR(streetnames_table, total);
+    DO_STATS_FOR_CLUSTER_ATTR(grouped_node_to_osm_id, total);
+    DO_STATS_FOR_CLUSTER_ATTR(grouped_way_to_osm_id, total);
+    LOG_S(INFO) << "-----------------------------------------------------------"
+                   "-----------------";
+    LOG_S(INFO) << absl::StrFormat("Total %u clusters %34llu %11llu (%5.2f%%)",
+                                   clusters.size(), total / clusters.size(),
+                                   total, (100.0 * total) / file_size);
+    LOG_S(INFO) << "==========================================================="
+                   "=================";
   }
 };
 CHECK_IS_MM_OK(MMGraph);
@@ -528,6 +616,12 @@ struct MMFullEdge {
   auto operator<=>(const MMFullEdge& other) const = default;
 };
 
+inline std::string MMCluster::DebugStringEdge(uint32_t from_idx,
+                                              uint32_t edge_idx) const {
+  return MMFullEdge::CreateWithEdgeIdx(*this, from_idx, edge_idx)
+      .DebugString(*this);
+}
+
 inline MMFullEdge MMOutgoingEdge::ToFullEdge(const MMGraph& mg) const {
   const MMCluster& mc = mg.mc(from_cluster_id);
   return MMFullEdge::CreateWithEdgeIdx(mc, from_node_idx, edge_idx);
@@ -561,7 +655,7 @@ inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(
 // TODO: add scope.
 constexpr uint64_t kMagic = 7715514337782280064ull;
 constexpr uint32_t kVersionMajor = 0;
-constexpr uint32_t kVersionMinor = 1;
+constexpr uint32_t kVersionMinor = 2;
 
 struct MMClusterWrapper {
   const MMCluster& mc;

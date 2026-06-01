@@ -32,9 +32,19 @@ class MMClusterRouter final {
     std::uint32_t min_metric;
     // Previous edge entry. INFU32 if prevous entry does not exist.
     std::uint32_t from_v_idx;
-    std::uint32_t active_ctr_id : 28;
+    std::uint32_t active_ctr_id : 27;
     // True iff the edge is one of the target edges for routing.
-    std::uint32_t target_edge : 1;
+    // This is statically set to 1 for all target edges, 0 for all other edges.
+    std::uint32_t is_target_edge : 1;
+    // True iff it should be ignored that this is a target edge. This is
+    // set during routing when a pushed start edge is also a target edge and the
+    // starting point is after the target point on the edge.
+    // Background: In order to reach the target point, we have to re-enter the
+    // edge from the beginning. Imagine a cycle of one-way edges and we start on
+    // the same edge as we finish, but the start point is after the target
+    // point. 'ignore_target_edge' needs to be part of the "key" of the edge,
+    // because we want to travel the edge twice..
+    std::uint32_t ignore_target_edge : 1;
     std::uint32_t in_target_restricted_access_area : 1;
     std::uint32_t done : 1;  // 1 <=> node has been finalized.
     // Is INFU32 if the slot is empty. Otherwise, it points to the next entry
@@ -63,11 +73,11 @@ class MMClusterRouter final {
  private:
   void LabelTargetEdges() {
     for (const MMEdgePoint& ep : target_anchor_.edge_points) {
-      vis_.at(ep.fe.edge_idx(mc_)).target_edge = 1;
+      vis_.at(ep.fe.edge_idx(mc_)).is_target_edge = 1;
     }
   }
 
-  void PushStartEdges(uint32_t start_metric) {
+  void PushStartEdges(uint32_t start_metric_offset) {
     for (const MMEdgePoint& ep : start_anchor_.edge_points) {
       const uint32_t edge_idx = ep.fe.edge_idx(mc_);
       const MMEdge edge(mc_.edges.at(edge_idx));
@@ -94,10 +104,30 @@ class MMClusterRouter final {
 
       // We're just starting, so we should be at base index i.
       CHECK_EQ_S(edge_idx, v_idx);
-      vis_.at(edge_idx).min_metric = start_metric + 
-          mcw_.edge_weights.at(edge_idx) * ep.GetWeightFractionWhenStarting();
-      pq_.emplace(vis_.at(edge_idx).min_metric,
-                  edge_idx /*, ep.fe.from_node_idx*/);
+
+      VisitedEdge& vis = vis_.at(edge_idx);
+
+      // The fraction of the edge that we have to travel.
+      float use_fraction = ep.GetFromFraction();
+
+      if (vis.is_target_edge) {
+        // Special case where the start edge is also a target edge.
+        // We only can finish on this edge if start point <= target point.
+        const uint32_t pos = target_anchor_.FindPosByEdgeIdx(mc_, edge_idx);
+        CHECK_NE_S(pos, INFU32);
+        const auto target_fraction =
+            target_anchor_.edge_points.at(pos).to_fraction;
+        if (target_fraction < ep.to_fraction) {
+          vis.ignore_target_edge = true;
+        } else {
+          // Special case, we start and stop on the same edge.
+          use_fraction = std::max(0.0f, target_fraction - ep.to_fraction);
+        }
+      }
+      vis.min_metric =
+          start_metric_offset +
+          static_cast<uint32_t>(use_fraction * mcw_.edge_weights.at(edge_idx));
+      pq_.emplace(vis.min_metric, edge_idx);
     }
   }
 
@@ -111,6 +141,38 @@ class MMClusterRouter final {
   uint32_t QueueMinVIdx() { return !pq_.empty() ? pq_.top().ve_idx : INFU32; }
 
   uint32_t QueueSize() { return pq_.size(); }
+
+  // Execute edge based single source Dijkstra (from start edges to *all*
+  // reachable edge).
+  void RouteInit(const MMGeoAnchor& start_anchor,
+                 const MMGeoAnchor& target_anchor = {},
+                 uint32_t start_metric_offset = 0) {
+    Clear();
+    start_anchor_ = start_anchor;
+    target_anchor_ = target_anchor;
+    num_base_edges_ =
+        opt_.include_dead_end ? mc_.edges.size() : mc_.num_non_dead_end_edges();
+    CHECK_LE_S(num_base_edges_, mcw_.edge_weights.size());
+
+#if DEBUG_PRINT
+    LOG_S(INFO) << absl::StrFormat("MMClusterRouter: Start routing at %u",
+                                   start_idx);
+#endif
+
+    CHECK_LT_S(num_base_edges_, 1 << 31) << "currently not supported";
+    vis_.assign(num_base_edges_ + num_base_edges_ / 50,  // Add 2%.
+                {.min_metric = INFU32,
+                 .from_v_idx = INFU32,
+                 .active_ctr_id = NO_ACTIVE_CTR_ID,
+                 .is_target_edge = 0,
+                 .ignore_target_edge = 0,
+                 .in_target_restricted_access_area = 0,
+                 .done = 0,
+                 .next = INFU32});
+
+    LabelTargetEdges();
+    PushStartEdges(start_metric_offset);
+  }
 
   void AddIncomingEdge(const MMIncomingEdge& in_edge, uint32_t min_metric) {
     const MMEdge edge(mc_.edges.at(in_edge.edge_idx));
@@ -169,7 +231,7 @@ class MMClusterRouter final {
     }
     CHECK_EQ_S(qedge.min_metric, prev_v.min_metric);
     vis_.at(qedge.ve_idx).done = 1;
-    if (prev_v.target_edge) {
+    if (prev_v.is_target_edge && !prev_v.ignore_target_edge) {
       return {.finished = true, .found = true, .last_v_idx = qedge.ve_idx};
     }
 
@@ -224,10 +286,10 @@ class MMClusterRouter final {
       }
 
       uint32_t new_metric;
-      if (vis_.at(edge_idx).target_edge) {
+      if (vis_.at(edge_idx).is_target_edge) {
         const uint32_t pos = target_anchor_.FindPosByEdgeIdx(mc_, edge_idx);
         CHECK_NE_S(pos, INFU32);
-        const auto fraction = target_anchor_.edge_points.at(pos).fraction;
+        const auto fraction = target_anchor_.edge_points.at(pos).to_fraction;
         new_metric = prev_v.min_metric + decompress_turn_cost(turn_costs[off]) +
                      static_cast<uint32_t>(
                          mcw_.edge_weights.at(edge_idx) * fraction + 0.5);
@@ -260,41 +322,11 @@ class MMClusterRouter final {
     return {.finished = false, .found = false};
   }
 
-  // Execute edge based single source Dijkstra (from start edges to *all*
-  // reachable edge).
-  void RouteInit(const MMGeoAnchor& start_anchor,
-                 const MMGeoAnchor& target_anchor = {}, uint32_t start_metric = 0) {
-    Clear();
-    start_anchor_ = start_anchor;
-    target_anchor_ = target_anchor;
-    num_base_edges_ =
-        opt_.include_dead_end ? mc_.edges.size() : mc_.num_non_dead_end_edges();
-    CHECK_LE_S(num_base_edges_, mcw_.edge_weights.size());
-
-#if DEBUG_PRINT
-    LOG_S(INFO) << absl::StrFormat("MMClusterRouter: Start routing at %u",
-                                   start_idx);
-#endif
-
-    CHECK_LT_S(num_base_edges_, 1 << 31) << "currently not supported";
-    vis_.assign(num_base_edges_ + num_base_edges_ / 50,  // Add 2%.
-                {.min_metric = INFU32,
-                 .from_v_idx = INFU32,
-                 .active_ctr_id = NO_ACTIVE_CTR_ID,
-                 .target_edge = 0,
-                 .in_target_restricted_access_area = 0,
-                 .done = 0,
-                 .next = INFU32});
-
-    LabelTargetEdges();
-    PushStartEdges(start_metric);
-  }
-
   // Execute edge based Dijkstra.
   MMClusterRouterStatus Route(const MMGeoAnchor& start_anchor,
                               const MMGeoAnchor& target_anchor = {},
-                              uint32_t start_metric = 0) {
-    RouteInit(start_anchor, target_anchor, start_metric);
+                              uint32_t start_metric_offset = 0) {
+    RouteInit(start_anchor, target_anchor, start_metric_offset);
 
     // ====================================================================
     // Loop until the priority queue is empty or a target edge was reached.
@@ -335,7 +367,7 @@ class MMClusterRouter final {
         // therefore it should not count against the metric, i.e. we skip it
         // 100%.
         res.start.distance_cm = 0;
-        res.start.fraction = 1.0;
+        res.start.to_fraction = 1.0;
       }
     }
 
@@ -382,7 +414,7 @@ class MMClusterRouter final {
         res.target.fe = res.full_edges.back();
         res.target.distance_cm =
             mc_.edge_to_distance.at(res.target.fe.edge_idx(mc_));
-        res.target.fraction = 1.0;
+        res.target.to_fraction = 1.0;
       }
       LOG_S(INFO) << "target_is_anchor=" << res.target_is_anchor << " "
                   << res.target.DebugString(mc_, 0, 0);
@@ -534,6 +566,10 @@ class MMClusterRouter final {
     uint32_t v_curr_idx = v_base_idx;
     do {
       const VisitedEdge& v_curr = vis_.at(v_curr_idx);
+      if (v_curr.ignore_target_edge) {
+        // Never return an edge with 'ignore_target_edge' set.
+        continue;
+      }
       if (v_curr.in_target_restricted_access_area ==
               in_target_restricted_access_area &&
           ((v_curr.active_ctr_id == NO_ACTIVE_CTR_ID && ctrs.empty()) ||
@@ -551,17 +587,20 @@ class MMClusterRouter final {
       active_ctr_id = active_ctrs_vec_.size();
       active_ctrs_vec_.push_back(ctrs);
     }
-    // Note, that this might invalidate reference v_base.
     const uint32_t v_base_next_val = v_base.next;
+    // Note: this potentially invalidates reference 'v_base' above, so don't use
+    // it afterwards.
     vis_.push_back(
         {.min_metric = INFU32,
          .from_v_idx = INFU32,
          .active_ctr_id = active_ctr_id,
-         .target_edge = vis_.at(v_base_idx).target_edge,
+         .is_target_edge = vis_.at(v_base_idx).is_target_edge,
+         .ignore_target_edge = 0,
          .in_target_restricted_access_area = in_target_restricted_access_area,
          .done = 0,
          .next = v_base_next_val});
-    // Do not use v_base, pushing to vector might invalidated the reference.
+    // Do not use v_base, pushing to vector above  might have invalidated the
+    // reference.
     vis_.at(v_base_idx).next = v_curr_idx;
     return v_curr_idx;
   }
@@ -797,9 +836,10 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
   return res;
 }
 
-inline MMRoutingResult RouteOnMMCluster(
-    const MMClusterWrapper& mcw, const MMGeoAnchor& start_anchor,
-    const MMGeoAnchor& target_anchor, Verbosity verb = Verbosity::Brief) {
+inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
+                                        const MMGeoAnchor& start_anchor,
+                                        const MMGeoAnchor& target_anchor,
+                                        Verbosity verb = Verbosity::Brief) {
   const MMCluster& mc = mcw.mc;
   if (verb >= Verbosity::Brief) {
     LOG_S(INFO) << "Route using mmcluster routing data";
