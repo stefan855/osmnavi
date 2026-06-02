@@ -149,12 +149,16 @@ class MMHybridRouter final {
     }
   };
 
-  // template <RouterType source>
-  static inline void HandleOutgoingEdge(const MMGraph& mg,
-                                        const uint32_t source_min_metric,
-                                        const MMOutgoingEdge& out_edge,
-                                        RouterType source, uint32_t source_key,
-                                        RouterData& d) {
+  // This function handles the next step after a outgoing edge has been
+  // finalized in any of the routers.
+  // It creates an incoming edge in the corresponding router if the target
+  // cluster is expanded.
+  // If the target is hybrid, then it expands all shortcuts in the hybrid
+  // cluster and adds them to the hybrid router queue.
+  static inline void HandleOutgoingEdgeTransition(
+      const MMGraph& mg, const uint32_t source_min_metric,
+      const MMOutgoingEdge& out_edge, RouterType source, uint32_t source_key,
+      RouterData& d) {
     const MMIncomingEdge& in_edge = mg.out_edge_to_in_edge(out_edge);
 
     // Some checks:
@@ -247,12 +251,13 @@ class MMHybridRouter final {
           min_metric[START] <= min_metric[TARGET] &&
           min_metric[START] <= min_metric[HYBRID]) {
         // LOG_S(INFO) << "Route START";
+        // Inspect the minimal element in the start cluster.
         const uint32_t v_idx = d.router[START]->QueueMinVIdx();
         if (d.router[START]->IsOutgoingEdge(v_idx)) {
           const MMOutgoingEdge& out_edge = d.mcw[START]->mc.find_outgoing_edge(
               d.router[START]->GetGraphEdgeIdx(v_idx));
-          HandleOutgoingEdge(mg, min_metric[START], out_edge, START,
-                             /*source_key=*/v_idx, d);
+          HandleOutgoingEdgeTransition(mg, min_metric[START], out_edge, START,
+                                       /*source_key=*/v_idx, d);
         }
         // Finalize the edge.
         MMClusterRouterStatus rs = d.router[START]->RouteOneStep();
@@ -270,13 +275,13 @@ class MMHybridRouter final {
                  min_metric[TARGET] <= min_metric[START] &&
                  min_metric[TARGET] <= min_metric[HYBRID]) {
         // LOG_S(INFO) << "Route TARGET";
-        // Target cluster routing.
+        // Inspect the minimal element in the target cluster.
         const uint32_t v_idx = d.router[TARGET]->QueueMinVIdx();
         if (d.router[TARGET]->IsOutgoingEdge(v_idx)) {
           const MMOutgoingEdge& out_edge = d.mcw[TARGET]->mc.find_outgoing_edge(
               d.router[TARGET]->GetGraphEdgeIdx(v_idx));
-          HandleOutgoingEdge(mg, min_metric[TARGET], out_edge, TARGET,
-                             /*source_key=*/v_idx, d);
+          HandleOutgoingEdgeTransition(mg, min_metric[TARGET], out_edge, TARGET,
+                                       /*source_key=*/v_idx, d);
         }
         // Finalize the edge.
         MMClusterRouterStatus rs = d.router[TARGET]->RouteOneStep();
@@ -318,8 +323,8 @@ class MMHybridRouter final {
             mc.out_edges.at(og_edge_idx_from_hybrid_key(e.key));
         */
         const MMOutgoingEdge& out_edge = out_edge_from_hybrid_key(mg, e.key);
-        HandleOutgoingEdge(mg, e.min_metric, out_edge, HYBRID,
-                           /*source_key=*/e.key, d);
+        HandleOutgoingEdgeTransition(mg, e.min_metric, out_edge, HYBRID,
+                                     /*source_key=*/e.key, d);
 
       } else {
         // All queues empty, stop without finding target.
@@ -536,13 +541,8 @@ class MMHybridRouter final {
         if (seg_pos == 0) {
           res = seg.res;
         } else {
-#if 0
-          // If previous segment was HYBRID, then the first edge is a dup.
-          size_t off = (segments.at(seg_pos - 1).source == HYBRID) ? 1 : 0;
-#endif
-
-          LOG_S(INFO) << "Ignore duplicate edge "
-                      << seg.res.full_edges.front().DebugString(mg);
+          // LOG_S(INFO) << "Ignore duplicate edge "
+          //             << seg.res.full_edges.front().DebugString(mg);
           constexpr uint32_t off = 1;  // First edge is a dup.
           AppendVector(seg.res.full_edges, off, &res.full_edges);
           AppendVector(seg.res.min_metrics, off, &res.min_metrics);

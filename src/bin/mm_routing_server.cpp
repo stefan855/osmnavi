@@ -17,118 +17,10 @@
 #include "algos/mm_hybrid_router.h"
 #include "base/argli.h"
 #include "base/thread_pool.h"
-#include "base/top_n.h"
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
-#include "geometry/distance_from_segment.h"
+#include "geometry/closest_edge.h"
 #include "graph/mmgraph_def.h"
-
-namespace {
-
-struct ClosestEdge {
-  DistanceToSegment dts;
-  MMFullEdge fe;
-  bool valid = false;
-
-  // "spaceship" operator, automatically defines ==, !=, <, <=, >, >=.
-  // auto operator<=>(const ClosestEdge&) const = default;
-  auto operator<=>(const ClosestEdge& other) const { return dts <=> other.dts; }
-};
-
-// At latitude 'lat', how many degrees (in 10^-7 degrees units) do we travel for
-// 10 km?
-int64_t Get10kmLongitudeAtLatitude(int32_t lat) {
-  // Compute an estimate of how long one kilometer of longitude is (in 10^-7
-  // degrees) at a specific latitude.
-  // Compute length for one degree longitude at 'lat'.
-  double length_one_deg_in_km =
-      calculate_distance(lat, 0, lat, TEN_POW_7) / (100.0 * 1000.0);
-  return 1'000'00000 / length_one_deg_in_km;
-}
-
-MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
-  TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;
-  topn.Add({.dts = {.distance_cm = MAXU31},
-            .fe = {.from_node_idx = MAXU32},
-            .valid = false});
-
-  // Roughly one kilometer in lat direction.
-  constexpr int64_t lat_10km = 111'1111;
-  // Roughly one kilometer in lon direction.
-  const int64_t lon_10km = Get10kmLongitudeAtLatitude(lat);
-  LOG_S(INFO) << "lon_10km:" << lon_10km;
-
-  LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%u, %u)", lat,
-                                 lon);
-  for (const MMClusterBoundingRect& cl_br : mg.sorted_bounding_rects.span()) {
-    const MMBoundingRect& br = cl_br.bounding_rect;
-    /*
-    LOG_S(INFO) << absl::StrFormat("cl %u min:(%u,%u) max:(%u,%u)",
-                                   cl_br.cluster_id, br.min.lat, br.min.lon,
-                                   br.max.lat, br.max.lon);
-                                   */
-    if ((int64_t)lat < (int64_t)br.min.lat - lat_10km ||
-        (int64_t)lat > (int64_t)br.max.lat + lat_10km) {
-      continue;
-    }
-    if (std::abs(lat) < 85ll * TEN_POW_7 &&
-        ((int64_t)lon < (int64_t)br.min.lon - lon_10km ||
-         (int64_t)lon > (int64_t)br.max.lon + lon_10km)) {
-      continue;
-    }
-
-    const MMCluster& mc = mg.clusters.at(cl_br.cluster_id);
-    for (uint32_t n0_idx = 0; n0_idx < mc.nodes.size(); ++n0_idx) {
-      const MMLatLon& n0_coord = mc.node_to_latlon(n0_idx);
-      for (uint32_t e_idx : mc.edge_indices(n0_idx)) {
-        uint32_t n1_idx = mc.get_edge(e_idx).target_idx();
-        const MMLatLon& n1_coord = mc.node_to_latlon(n1_idx);
-        const DistanceToSegment d = FastPointToSegmentDistance(
-            lat, lon, n0_coord.lat, n0_coord.lon, n1_coord.lat, n1_coord.lon);
-        if (!topn.filled() || d.distance_cm < topn.bottom().dts.distance_cm) {
-          topn.Add({.dts = d,
-                    .fe = {.from_node_idx = n0_idx,
-                           .cluster_id = mc.cluster_id,
-                           .edge_offset = e_idx - mc.edge_start_idx(n0_idx)},
-                    .valid = true});
-        }
-      }
-    }
-  }
-
-  MMGeoAnchor a = {.point = {.lat = lat, .lon = lon}};
-  for (const ClosestEdge& ce : topn.span()) {
-    if (ce.valid) {
-      a.edge_points.push_back(
-          {.distance_cm = static_cast<uint32_t>(ce.dts.distance_cm),
-           .to_fraction = static_cast<float>(ce.dts.fraction_closest),
-           .lat_at_fraction = ce.dts.lat_closest,
-           .lon_at_fraction = ce.dts.lon_closest,
-           .fe = ce.fe});
-      LOG_S(INFO) << absl::StrFormat("fraction_closest:%.3f",
-                                     ce.dts.fraction_closest);
-    }
-  }
-
-  if (a.edge_points.size() == 1) {
-    // Find backward edge
-    const MMEdgePoint& ep = a.edge_points.front();
-    const MMCluster& mc = ep.fe.mc(mg);
-    uint32_t backward_idx = mc.find_edge_idx(
-        ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
-    if (backward_idx != INFU32) {
-      a.edge_points.push_back({.distance_cm = ep.distance_cm,
-                               .to_fraction = 1.0f - ep.to_fraction,
-                               .lat_at_fraction = ep.lat_at_fraction,
-                               .lon_at_fraction = ep.lon_at_fraction,
-                               .fe = MMFullEdge::CreateWithEdgeIdx(
-                                   mc, ep.fe.target_idx(mc), backward_idx)});
-    }
-  }
-
-  // This returns an entry with valid=false in case there are no results.
-  return a;
-}
 
 #if 0
 // Function to calculate the bearing between two points.
@@ -157,6 +49,8 @@ double CalculateAngle(double lat1, double lon1, double lat2, double lon2) {
   return bearing_deg;
 }
 #endif
+
+namespace {
 
 using CoordinatePair = struct {
   double lat;
@@ -427,17 +321,6 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
     return {{"code", "NoRoute"}};
   }
 
-#if 0
-  MMClusterWrapper mcw(start.edge_points.front().fe.mc(mg), VH_MOTORCAR,
-                       RoutingMetricTime(),
-                       /*include_dead_ends=*/true);
-  LOG_S(INFO) << absl::StrFormat("**** Create cluster wrapper: %.2f secs",
-                                 ToDoubleSeconds(absl::Now() - start_time));
-
-  MMClusterRouter router(
-      mcw, {.handle_restricted_access = true, .include_dead_end = true});
-  MMClusterRouterStatus status = router.Route(start, target);
-#endif
   MMRoutingResult res;
   double routing_time;
   {
@@ -461,10 +344,6 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
   if (res.full_edges.empty()) {
     return {{"code", "NoRoute"}};
   }
-
-  // MMRoutingResult res = router.GetRoutingResult(status.last_v_idx);
-
-  // const double elapsed = ToDoubleSeconds(absl::Now() - start_time);
 
   CHECK_S(!res.full_edges.empty());
   nlohmann::json jres;
@@ -518,14 +397,9 @@ int main(int argc, char* argv[]) {
                          .required = true,
                          .desc = "Input <graph>.ser or OSM <name>.pbf file "
                                  "(such as planet file)."},
-                        {.name = "n_threads",
-                         .type = "int",
-                         .dflt = "12",
-                         .desc = "Number of threads to use"},
                     });
 
   const std::string filename = argli.GetString("inputfile");
-  // const int n_threads = argli.GetInt("n_threads");
 
   int fd = ::open(filename.c_str(), O_RDONLY | O_CLOEXEC, 0644);
   if (fd < 0) FileAbortOnError("open");
