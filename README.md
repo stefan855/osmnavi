@@ -42,13 +42,14 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Replace the serialized graph that is loaded fully into memory by the memory mapped file containing the routing graph.
   
 ## Current Tasks
-* Implement routing engine using the memory mapped file. Prototype up and running, working on edge cases.
+* Implement a routing engine using the memory mapped file. Prototype up and running, working on edge cases.
 * Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
 * Remove the serialized graph, it is replaced by the memory mapped graph. 
 
 ## Tasks ahead
-1. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
-2. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
+1. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
+2. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
+3. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
 1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 2. Make the routing server use https instead of http.
