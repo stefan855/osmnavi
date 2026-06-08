@@ -134,9 +134,6 @@ void decode_polyline(const std::string& encoded) {
   }
 }
 
-// HTTP
-httplib::Server svr;
-
 struct JsonResult {
   nlohmann::json j;
   double sum_dist = 0.0;
@@ -191,7 +188,7 @@ class StepsData {
     coords.push_back({.lat = from_lat, .lon = from_lon});
     coords.push_back({.lat = to_lat, .lon = to_lon});
     // convert to seconds.
-    const double duration = res_.edge_weights.at(pos) / 1000.0;
+    const double duration = res_.edge_metric(pos) / 1000.0;
     const double dist = res_.distance_cm(mg, pos) / 100.0;
 
     nlohmann::json maneuver = {{"bearing_after", 0},
@@ -294,8 +291,8 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
   FUNC_TIMER();
 
   LOG_S(INFO) << "Search " << lon1 << " " << lat1;
-  MMGeoAnchor start;
-  MMGeoAnchor target;
+  GeoAnchor start;
+  GeoAnchor target;
   double find_closest_time;
   {
     absl::Time start_time = absl::Now();
@@ -308,16 +305,19 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
   LOG_S(INFO) << absl::StrFormat("**** Find closest edges: %.2f secs",
                                  find_closest_time);
 
-  for (const auto& e : start.edge_points) {
+  for (const auto& e : start.edge_points()) {
     LOG_S(INFO) << e.DebugString(mg, std::llround(lat1 * TEN_POW_7_DBL),
                                  std::llround(lon1 * TEN_POW_7_DBL));
   }
-  for (const auto& e : target.edge_points) {
+  for (const auto& e : target.edge_points()) {
     LOG_S(INFO) << e.DebugString(mg, std::llround(lat2 * TEN_POW_7_DBL),
                                  std::llround(lon2 * TEN_POW_7_DBL));
   }
+  LOG_S(INFO) << absl::StrFormat("Found: start:%d  target:%d",
+                                 !start.edge_points().empty(),
+                                 !target.edge_points().empty());
 
-  if (!start.valid() || !target.valid()) {
+  if (start.edge_points().empty() || target.edge_points().empty()) {
     return {{"code", "NoRoute"}};
   }
 
@@ -389,17 +389,33 @@ void HandleFileRequest(const httplib::Request& req, httplib::Response& res,
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
 
-  const Argli argli(argc, argv,
-                    {
-                        {.name = "inputfile",
-                         .type = "string",
-                         .positional = true,
-                         .required = true,
-                         .desc = "Input <graph>.ser or OSM <name>.pbf file "
-                                 "(such as planet file)."},
-                    });
+  const Argli argli(
+      argc, argv,
+      {
+          {.name = "inputfile",
+           .type = "string",
+           .positional = true,
+           .required = true,
+           .desc = "Input <graph>.ser or OSM <name>.pbf file "
+                   "(such as planet file)."},
+          {.name = "cert_dir",
+           .type = "string",
+           .dflt = "cert",
+           .desc = "location of the cert file, only used when using https"},
+      });
 
   const std::string filename = argli.GetString("inputfile");
+  const std::string cert_dir = argli.GetString("cert_dir");
+
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+  std::string cert_path = cert_dir + "/cert.pem";
+  std::string key_path = cert_dir + "/key.pem";
+  CheckFileExists(cert_path);
+  CheckFileExists(key_path);
+  httplib::SSLServer svr(cert_path.c_str(), key_path.c_str());
+#else
+  httplib::Server svr;
+#endif
 
   int fd = ::open(filename.c_str(), O_RDONLY | O_CLOEXEC, 0644);
   if (fd < 0) FileAbortOnError("open");

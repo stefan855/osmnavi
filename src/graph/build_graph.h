@@ -110,7 +110,7 @@ struct BuildGraphStats {
   int64_t num_cluster_inside_nodes = 0;
   int64_t num_cluster_outside_nodes = 0;
 
-  int64_t num_cluster_border_edges = 0;
+  int64_t num_cross_cluster_edges = 0;
   int64_t num_cluster_inside_edges = 0;
   int64_t num_cluster_outside_edges = 0;
   int64_t num_cluster_border_in_edges = 0;
@@ -118,7 +118,7 @@ struct BuildGraphStats {
   int64_t num_cluster_valid_paths = 0;
   int64_t sum_cluster_valid_path_nodes = 0;
 
-  int64_t num_cluster_border_edges_restr = 0;
+  int64_t num_cross_cluster_edges_restr = 0;
 
   int64_t num_nodes_in_small_component = 0;
   int64_t num_nodes_no_country = 0;
@@ -201,7 +201,7 @@ struct BuildGraphStats {
     num_cluster_inside_nodes += other.num_cluster_inside_nodes;
     num_cluster_outside_nodes += other.num_cluster_outside_nodes;
 
-    num_cluster_border_edges += other.num_cluster_border_edges;
+    num_cross_cluster_edges += other.num_cross_cluster_edges;
     num_cluster_inside_edges += other.num_cluster_inside_edges;
     num_cluster_outside_edges += other.num_cluster_outside_edges;
 
@@ -211,7 +211,7 @@ struct BuildGraphStats {
     num_cluster_valid_paths += other.num_cluster_valid_paths;
     sum_cluster_valid_path_nodes += other.sum_cluster_valid_path_nodes;
 
-    num_cluster_border_edges_restr += other.num_cluster_border_edges_restr;
+    num_cross_cluster_edges_restr += other.num_cross_cluster_edges_restr;
 
     num_nodes_in_small_component += other.num_nodes_in_small_component;
     num_nodes_no_country += other.num_nodes_no_country;

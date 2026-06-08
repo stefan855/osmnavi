@@ -165,6 +165,10 @@ inline std::string PadString(std::string_view str, size_t width,
   return res;
 }
 
+inline void CheckFileExists(const std::string path) {
+  CHECK_S(std::filesystem::exists(path)) << "file missing <" << path << ">";
+}
+
 inline std::string WildCardToRegex(const std::string& wildcard) {
   static const std::string escape_chars = "\\$()*+.?[]^{|}";
   std::string result;

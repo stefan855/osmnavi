@@ -51,6 +51,7 @@ class MMHybridRouter final {
 
   struct VisitedEdge {
     uint32_t min_metric;
+    // True if this is a target edge in the TARGET router.
     uint32_t target_edge : 1;
     uint32_t done : 1;
     RouterType prev_source : 2;
@@ -76,9 +77,11 @@ class MMHybridRouter final {
     }
   };
 
+  using THybridMap = absl::flat_hash_map<uint32_t, VisitedEdge>;
+
   // Find or allocate a visited edge for 'key'.
-  static inline VisitedEdge& FindOrAllocEdge(
-      uint32_t key, absl::flat_hash_map<uint32_t, VisitedEdge>* hybrid_map) {
+  static inline VisitedEdge& FindOrAllocEdge(uint32_t key,
+                                             THybridMap* hybrid_map) {
     // Prevent doing two lookups by following
     // https://stackoverflow.com/questions/1409454
     const auto iter = hybrid_map->insert(
@@ -95,31 +98,63 @@ class MMHybridRouter final {
   // therefore all methods are 'static'.
   struct RouterData {
     // Only entries 0 and 1 are used.
+    // The pointer is shared so we can have identical START and TARGET.
     std::shared_ptr<MMClusterWrapper> mcw[ROUTER_TYPE_MAX];
     // Only entries 0 and 1 are used.
+    // The pointer is shared so we can have identical START and TARGET.
     std::shared_ptr<MMClusterRouter> router[ROUTER_TYPE_MAX];
     std::priority_queue<MMHybridRouter::QueuedEdge,
                         std::vector<MMHybridRouter::QueuedEdge>, MetricCmpEdge>
         hybrid_queue;
-    absl::flat_hash_map<uint32_t, VisitedEdge> hybrid_map;
+    THybridMap hybrid_map;
 
     absl::Time start_time_routing = absl::UnixEpoch();
     absl::Time start_time_assemble_segments = absl::UnixEpoch();
     absl::Time start_time_expand_clusters = absl::UnixEpoch();
 
-    void Init(const MMGraph& mg, const MMGeoAnchor& start_anchor,
-              const MMGeoAnchor& target_anchor) {
+    // Given the edges in 'target_anchor', add them to the hybrid routing table
+    // if they are outgoing edges from some cluster.
+    // Note that this touches only the 'hybrid' part of non-target clusters.
+    void MarkTargetEdgesForHybrid(const MMGraph& mg,
+                                  const GeoAnchor& target_anchor) {
+      for (const EdgePoint& ep : target_anchor.edge_points()) {
+        // The target cluster must contain these edges and we expand it anyways,
+        // so access it there. We're interested in incoming/outgoing edges only.
+        const MMFullEdge& fe = ep.fe;
+        CHECK_EQ_S(fe.cluster_id, mcw[TARGET]->mc.cluster_id);
+        const MMCluster& mc = mg.clusters.at(fe.cluster_id);
+        if (fe.edge(mc).cross_cluster_edge()) {  // Between clusters?
+          const MMOutgoingEdge* out_edge = nullptr;
+          uint32_t pos = mc.find_outgoing_edge_pos(fe.edge_idx(mc));
+          if (pos != INFU32) {
+            out_edge = &mc.out_edges.at(pos);
+          } else {
+            // It must be incoming, so check fail if we can't find it.
+            const MMIncomingEdge& in_e = mc.find_incoming_edge(fe.edge_idx(mc));
+            out_edge = &mg.in_edge_to_out_edge(in_e);
+          }
+          CHECK_NE_S(out_edge, nullptr);
+          const uint32_t key =
+              hybrid_key(out_edge->from_cluster_id, out_edge->out_edge_pos);
+          FindOrAllocEdge(key, &hybrid_map).target_edge = 1;
+          LOG_S(INFO) << "Mark outgoing edge as hybrid target edge: "
+                      << out_edge->DebugString();
+        }
+      }
+    }
+
+    void Init(const MMGraph& mg, const GeoAnchor& start_anchor,
+              const GeoAnchor& target_anchor) {
       start_time_routing = absl::Now();
       const MMClusterRouter::Options opt = {.handle_restricted_access = true,
                                             .include_dead_end = true};
       // Anchors should follow this scheme:
       //   All edges have to belong to the same cluster
       //   The start node of the first edge dictates the cluster.
-      const MMGeoAnchor::Info start_info = start_anchor.GetInfo(mg);
-      const MMGeoAnchor::Info target_info = target_anchor.GetInfo(mg);
-      CHECK_S(
-          !start_anchor.edge_points.empty() && start_info.all_same_cluster &&
-          !target_anchor.edge_points.empty() && target_info.all_same_cluster);
+      CHECK_S(!start_anchor.edge_points().empty() &&
+              !target_anchor.edge_points().empty());
+      const GeoAnchor::Info start_info = start_anchor.GetInfo(mg);
+      const GeoAnchor::Info target_info = target_anchor.GetInfo(mg);
 
       // Create a start router.
       mcw[START].reset(
@@ -142,10 +177,12 @@ class MMHybridRouter final {
                                  VH_MOTORCAR, RoutingMetricTime(),
                                  /*include_dead_ends=*/true));
         router[TARGET].reset(new MMClusterRouter(*mcw[TARGET], opt));
-        router[START]->RouteInit(start_anchor, {});
+        router[START]->RouteInit(start_anchor, target_anchor.AdaptToCluster(
+                                                   mg, start_info.cluster_id));
         router[TARGET]->RouteInit({}, target_anchor);
         LOG_S(INFO) << "start and target cluster different";
       }
+      MarkTargetEdgesForHybrid(mg, target_anchor);
     }
   };
 
@@ -175,12 +212,12 @@ class MMHybridRouter final {
 
     if (source != TARGET &&
         out_edge.to_cluster_id == d.mcw[TARGET]->mc.cluster_id) {
-      // Copy edge to TARGET.
+      // Add a copy edge to TARGET.
       d.router[TARGET]->AddIncomingEdge(in_edge, source_min_metric);
       // CHECK_EQ_S(min_metric[TARGET], source_min_metric);
     } else if (source != START &&
                out_edge.to_cluster_id == d.mcw[START]->mc.cluster_id) {
-      // Copy edge to START.
+      // Add a copy edge to START.
       d.router[START]->AddIncomingEdge(in_edge, source_min_metric);
       // CHECK_EQ_S(min_metric[START], source_min_metric);
     } else {
@@ -188,20 +225,52 @@ class MMHybridRouter final {
       const MMCluster& mc = mg.clusters.at(out_edge.to_cluster_id);
       for (uint32_t og_edge_idx = 0; og_edge_idx < mc.out_edges.size();
            ++og_edge_idx) {
-        const MMOutgoingEdge& outleg = mc.out_edges.at(og_edge_idx);
-        const uint32_t cross_metric = mc.get_path_metric(in_edge, outleg);
+        const MMOutgoingEdge& new_edge = mc.out_edges.at(og_edge_idx);
+        uint32_t cross_metric = mc.get_path_metric(in_edge, new_edge);
+        if (cross_metric == INFU32) {
+          continue;
+        }
         const uint32_t key = hybrid_key(mc.cluster_id, og_edge_idx);
         VisitedEdge& vis = FindOrAllocEdge(key, &d.hybrid_map);
-        if (cross_metric != INFU32 &&
-            source_min_metric + cross_metric < vis.min_metric) {
-          CHECK_S(!vis.done) << source_min_metric << " " << cross_metric << " "
-                             << vis.min_metric;
+        if (vis.done) {
+          CHECK_GE_S(source_min_metric + cross_metric, vis.min_metric);
+          continue;
+        }
+
+        if (vis.target_edge) {
+          // 'cross_metric' can be too large, because it spans the full edge,
+          // but the target edge may be used only partially. To fix the metric,
+          // use the edge data in the target cluster.
+          LOG_S(INFO) << "AA Really Add target edge to hybrid router "
+                      << debug_hybrid_key(key)
+                      << "metric:" << source_min_metric + cross_metric;
+          CHECK_EQ_S(new_edge.from_cluster_id, out_edge.to_cluster_id);
+          CHECK_NE_S(new_edge.from_cluster_id, d.mcw[TARGET]->mc.cluster_id);
+          CHECK_EQ_S(new_edge.to_cluster_id, d.mcw[TARGET]->mc.cluster_id);
+          // The new edge is an incoming edge in the target cluster.
+          const GeoAnchor& ta = d.router[TARGET]->GetTargetAnchor();
+          const MMIncomingEdge& in_edge = mg.out_edge_to_in_edge(new_edge);
+          const uint32_t pos =
+              ta.FindPosByEdgeIdx(d.mcw[TARGET]->mc, in_edge.edge_idx);
+          CHECK_NE_S(pos, INFU32);
+          // 'cross_metric' is too high, and we need to remove the part *from*
+          // the point on the edge to the end of the edge.
+          const float diff_fraction =
+              ta.edge_points().at(pos).GetFromFraction();
+          const uint32_t diff_metric =
+              diff_fraction * d.mcw[TARGET]->edge_weights.at(in_edge.edge_idx);
+          CHECK_LE_S(diff_metric, cross_metric);
+          LOG_S(INFO) << "AA2 cross_metric:" << cross_metric << " -> "
+                      << cross_metric - diff_metric;
+          cross_metric -= diff_metric;
+          LOG_S(INFO) << "AA3 new cross_metric:" << cross_metric;
+        }
+
+        if (source_min_metric + cross_metric < vis.min_metric) {
           const uint32_t new_metric = source_min_metric + cross_metric;
-          /*
-          LOG_S(INFO) << "Find or alloc hybrid egde <" << key
-                      << "> with new metric " << new_metric << " old metric "
-                      << vis.min_metric;
-                      */
+          if (vis.target_edge) {
+            LOG_S(INFO) << "AA4 add target edge with metric:" << new_metric;
+          }
           vis.min_metric = new_metric;
           vis.prev_source = source;
           vis.prev_key_or_v_idx = source_key;
@@ -211,19 +280,24 @@ class MMHybridRouter final {
     }
   }
 
-  static MMRoutingResult Route(const MMGraph& mg,
-                               const MMGeoAnchor& start_anchor,
-                               const MMGeoAnchor& target_anchor) {
+  static MMRoutingResult Route(const MMGraph& mg, const GeoAnchor& start_anchor,
+                               const GeoAnchor& target_anchor) {
+    LOG_S(INFO) << "=========================================================";
     FuncTimer timer("MMHybridRouter::Route()", __FILE__, __LINE__);
-    LOG_S(INFO) << "start anchor has " << start_anchor.edge_points.size()
-                << " edges";
-    for (const auto& ep : start_anchor.edge_points) {
+    LOG_S(INFO) << "=========================================================";
+    LOG_S(INFO) << absl::StrFormat(
+        "Start anchor cluster:%u edges:%llu",
+        start_anchor.edge_points().front().fe.cluster_id,
+        start_anchor.edge_points().size());
+    for (const auto& ep : start_anchor.edge_points()) {
       LOG_S(INFO) << "  " << ep.fe.DebugString(mg)
                   << " frac: " << ep.to_fraction;
     }
-    LOG_S(INFO) << "target anchor has " << target_anchor.edge_points.size()
-                << " edges";
-    for (const auto& ep : target_anchor.edge_points) {
+    LOG_S(INFO) << absl::StrFormat(
+        "Target anchor cluster:%u edges:%llu",
+        target_anchor.edge_points().front().fe.cluster_id,
+        target_anchor.edge_points().size());
+    for (const auto& ep : target_anchor.edge_points()) {
       LOG_S(INFO) << "  " << ep.fe.DebugString(mg)
                   << " frac: " << ep.to_fraction;
     }
@@ -250,7 +324,6 @@ class MMHybridRouter final {
       if (min_metric[START] != INFU32 &&
           min_metric[START] <= min_metric[TARGET] &&
           min_metric[START] <= min_metric[HYBRID]) {
-        // LOG_S(INFO) << "Route START";
         // Inspect the minimal element in the start cluster.
         const uint32_t v_idx = d.router[START]->QueueMinVIdx();
         if (d.router[START]->IsOutgoingEdge(v_idx)) {
@@ -274,7 +347,6 @@ class MMHybridRouter final {
       } else if (min_metric[TARGET] != INFU32 &&
                  min_metric[TARGET] <= min_metric[START] &&
                  min_metric[TARGET] <= min_metric[HYBRID]) {
-        // LOG_S(INFO) << "Route TARGET";
         // Inspect the minimal element in the target cluster.
         const uint32_t v_idx = d.router[TARGET]->QueueMinVIdx();
         if (d.router[TARGET]->IsOutgoingEdge(v_idx)) {
@@ -295,11 +367,10 @@ class MMHybridRouter final {
           return AssembleSegments(mg, d, TARGET, rs);
         }
 
-      } else if (min_metric[HYBRID] != INFU32 &&
-                 min_metric[HYBRID] <= min_metric[START] &&
-                 min_metric[HYBRID] <= min_metric[TARGET]) {
-        // LOG_S(INFO) << "Route HYBRID";
-        // Hybrid routing
+      } else if (min_metric[HYBRID] != INFU32) {
+        // We know that START and TARGET are not smaller, so it must be HYBRID.
+        CHECK_S(min_metric[HYBRID] <= min_metric[START] &&
+                min_metric[HYBRID] <= min_metric[TARGET]);
         const QueuedEdge e = d.hybrid_queue.top();
         d.hybrid_queue.pop();
 
@@ -315,13 +386,7 @@ class MMHybridRouter final {
                     << e.min_metric;
                     */
         CHECK_EQ_S(e.min_metric, vis.min_metric);
-        // LOG_S(INFO) << "min_metric[HYBRID] is " << min_metric[HYBRID];
         vis.done = 1;
-        /*
-        const MMCluster& mc = mg.clusters.at(cluster_id_from_hybrid_key(e.key));
-        const MMOutgoingEdge& out_edge =
-            mc.out_edges.at(og_edge_idx_from_hybrid_key(e.key));
-        */
         const MMOutgoingEdge& out_edge = out_edge_from_hybrid_key(mg, e.key);
         HandleOutgoingEdgeTransition(mg, e.min_metric, out_edge, HYBRID,
                                      /*source_key=*/e.key, d);
@@ -353,6 +418,11 @@ class MMHybridRouter final {
 
   static inline uint32_t hybrid_key(uint32_t cluster_id, uint32_t og_edge_idx) {
     return (cluster_id << 10) + og_edge_idx;
+  }
+  static inline std::string debug_hybrid_key(uint32_t key) {
+    return absl::StrFormat("key(cluster:%u pos:%u",
+                           cluster_id_from_hybrid_key(key),
+                           og_edge_idx_from_hybrid_key(key));
   }
   static inline uint32_t cluster_id_from_hybrid_key(uint32_t hybrid_key) {
     return hybrid_key >> 10;
@@ -508,15 +578,25 @@ class MMHybridRouter final {
         for (size_t i = 0; i < segment.hybrid_edges.size(); ++i) {
           const HybridEdge he = segment.hybrid_edges.at(i);
           const MMOutgoingEdge& out_edge = out_edge_from_hybrid_key(mg, he.key);
-          LOG_S(INFO) << he.vis.min_metric << ": " << out_edge.DebugString();
+          LOG_S(INFO) << "min_metric:" << he.vis.min_metric << " "
+                      << out_edge.DebugString();
         }
       } else {
         LOG_S(INFO) << "***** "
                     << (segment.source == START ? "START Segment"
                                                 : "TARGET Segment");
         for (size_t i = 0; i < segment.res.full_edges.size(); ++i) {
-          LOG_S(INFO) << segment.res.min_metrics.at(i) << ": "
-                      << segment.res.full_edges.at(i).DebugString(mg);
+          if (i >= 3 && i < segment.res.full_edges.size() - 3) {
+            if (i == 3) {
+              LOG_S(INFO) << "       ... ("
+                          << (segment.res.full_edges.size() - 6) << " omitted)";
+            }
+          } else {
+            LOG_S(INFO) << absl::StrFormat(
+                "%5llu. min_metric:%u edge_metric:%u %s", i + 1,
+                segment.res.min_metrics.at(i), segment.res.edge_metric(i),
+                segment.res.full_edges.at(i).DebugString(mg));
+          }
         }
       }
     }
@@ -525,7 +605,10 @@ class MMHybridRouter final {
   template <typename T>
   static void AppendVector(const std::vector<T>& src, size_t offset,
                            std::vector<T>* dest) {
-    dest->insert(dest->end(), src.cbegin() + offset, src.cend());
+    // dest->insert(dest->end(), src.cbegin() + offset, src.cend());
+    CHECK_S(!dest->empty());
+    dest->pop_back();
+    dest->insert(dest->end(), src.cbegin(), src.cend());
   }
 
   static MMRoutingResult ExpandHybridClusters(
@@ -535,9 +618,6 @@ class MMHybridRouter final {
     for (size_t seg_pos = 0; seg_pos < segments.size(); ++seg_pos) {
       const Segment& seg = segments.at(seg_pos);
       if (seg.source != HYBRID) {
-        LOG_S(INFO) << "***** "
-                    << (seg.source == START ? "START Segment"
-                                            : "TARGET Segment");
         if (seg_pos == 0) {
           res = seg.res;
         } else {
@@ -546,7 +626,7 @@ class MMHybridRouter final {
           constexpr uint32_t off = 1;  // First edge is a dup.
           AppendVector(seg.res.full_edges, off, &res.full_edges);
           AppendVector(seg.res.min_metrics, off, &res.min_metrics);
-          AppendVector(seg.res.edge_weights, off, &res.edge_weights);
+          // AppendVector(seg.res.edge_metric, off, &res.edge_metric);
           if (seg_pos == segments.size() - 1) {
             res.target = seg.res.target;
             res.final_metric = seg.res.final_metric;
@@ -560,23 +640,24 @@ class MMHybridRouter final {
         CHECK_S(!res.full_edges.empty());
 
         const MMOutgoingEdge* prev_out_edge =
-            &(res.full_edges.back().AsOutgoingEdge(mg));
+            &(res.full_edges.back().ToOutgoingEdge(mg));
         for (size_t i = 0; i < seg.hybrid_edges.size(); ++i) {
           const MMIncomingEdge& in_edge =
               mg.out_edge_to_in_edge(*prev_out_edge);
           const HybridEdge he = seg.hybrid_edges.at(i);
           const MMOutgoingEdge& out_edge = out_edge_from_hybrid_key(mg, he.key);
           // Now route from in_edge to out_edge.
-          // TODO: Get this instead from the memfile, once we store the routes.
+          // TODO: Get this instead from the memfile, once we store the
+          // routes.
           const MMCluster& mc = mg.mc(in_edge.to_cluster_id);
-          MMGeoAnchor start;
+          GeoAnchor start;
           start.AddEdge(mg, 1.0, in_edge.ToFullEdge(mg));
-          MMGeoAnchor target;
+          GeoAnchor target;
           target.AddEdge(mg, 1.0, out_edge.ToFullEdge(mg));
           LOG_S(INFO) << "Route from start: "
-                      << start.edge_points.front().DebugString(mc, 0, 0);
+                      << start.edge_points().front().DebugString(mc, 0, 0);
           LOG_S(INFO) << "Route to target: "
-                      << target.edge_points.front().DebugString(mc, 0, 0);
+                      << target.edge_points().front().DebugString(mc, 0, 0);
           MMClusterWrapper mcw(mc, VH_MOTORCAR, RoutingMetricTime(),
                                /*include_dead_ends=*/true);
           MMClusterRouter router(mcw, {.handle_restricted_access = true,
@@ -589,13 +670,13 @@ class MMHybridRouter final {
           MMRoutingResult sub_res = router.GetRoutingResult(status.last_v_idx);
           AppendVector(sub_res.full_edges, 1, &res.full_edges);
           AppendVector(sub_res.min_metrics, 1, &res.min_metrics);
-          AppendVector(sub_res.edge_weights, 1, &res.edge_weights);
+          // AppendVector(sub_res.edge_metric, 1, &res.edge_metric);
           prev_out_edge = &out_edge;
         }
       }
     }
     CHECK_EQ_S(res.full_edges.size(), res.min_metrics.size());
-    CHECK_EQ_S(res.full_edges.size(), res.edge_weights.size());
+    // CHECK_EQ_S(res.full_edges.size(), res.edge_metric.size());
     LogPath(mg, res);
     return res;
   }
@@ -604,12 +685,13 @@ class MMHybridRouter final {
     LOG_S(INFO) << "**************** PATH ***************";
     for (size_t i = 0; i < res.full_edges.size(); ++i) {
       if (i == 5 && res.full_edges.size() > 10) {
-        LOG_S(INFO) << "... (" << res.full_edges.size() - 10 << " omitted)";
+        LOG_S(INFO) << "       ... (" << res.full_edges.size() - 10
+                    << " omitted)";
         i = res.full_edges.size() - 5;
       }
-      LOG_S(INFO) << i << ". " << res.min_metrics.at(i) << " "
-                  << res.edge_weights.at(i) << ": "
-                  << res.full_edges.at(i).DebugString(mg);
+      LOG_S(INFO) << absl::StrFormat(
+          "%5i. min_metric:%u edge_metric:%u %s", i + 1, res.min_metrics.at(i),
+          res.edge_metric(i), res.full_edges.at(i).DebugString(mg));
     }
     LOG_S(INFO) << "*************************************";
   }

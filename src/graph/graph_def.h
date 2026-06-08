@@ -328,7 +328,7 @@ struct GEdge {
   // Note: Only bridges connect dead-end with non-dead-end nodes.
   std::uint32_t bridge : 1;
   // An edge that connects two border nodes of different clusters.
-  std::uint32_t cluster_border_edge : 1;
+  std::uint32_t cross_cluster_edge : 1;
   // 1 iff the edge is in a dead end (excluding the bride), 0 for all other
   // edges.
   std::uint32_t dead_end : 1;
@@ -654,7 +654,7 @@ inline std::string debug_str(const Graph& g, const GEdge& e) {
       e.distance_cm, e.unique_target, e.to_bridge, e.contra_way,
       e.cross_country, e.inverted, e.both_directions, e.car_label,
       e.complex_turn_restriction_trigger, e.stop_sign, e.traffic_signal,
-      e.road_priority, e.bridge, e.cluster_border_edge, e.dead_end);
+      e.road_priority, e.bridge, e.cross_cluster_edge, e.dead_end);
 }
 
 inline size_t gnode_edges_start(const Graph& g, uint32_t node_idx) {

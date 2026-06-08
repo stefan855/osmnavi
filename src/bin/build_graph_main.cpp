@@ -851,11 +851,11 @@ int main(int argc, char* argv[]) {
     if (mmg.clusters.size() > 20) {
       // Select arbitrary nodes from two different clusters.
       const MMCluster& mc10 = mmg.clusters.at(10);
-      MMGeoAnchor start_anchor;
+      GeoAnchor start_anchor;
       start_anchor.AddStartNode(mc10, mc10.nodes.size() / 2);
 
       const MMCluster& mc15 = mmg.clusters.at(15);
-      MMGeoAnchor target_anchor;
+      GeoAnchor target_anchor;
       target_anchor.AddTargetNode(mc15, mc15.nodes.size() / 2);
 
       MMHybridRouter router;

@@ -70,15 +70,17 @@ class MMClusterRouter final {
 
   const std::vector<VisitedEdge>& GetVisitedEdges() const { return vis_; }
 
+  const GeoAnchor& GetTargetAnchor() { return target_anchor_; }
+
  private:
   void LabelTargetEdges() {
-    for (const MMEdgePoint& ep : target_anchor_.edge_points) {
+    for (const EdgePoint& ep : target_anchor_.edge_points()) {
       vis_.at(ep.fe.edge_idx(mc_)).is_target_edge = 1;
     }
   }
 
   void PushStartEdges(uint32_t start_metric_offset) {
-    for (const MMEdgePoint& ep : start_anchor_.edge_points) {
+    for (const EdgePoint& ep : start_anchor_.edge_points()) {
       const uint32_t edge_idx = ep.fe.edge_idx(mc_);
       const MMEdge edge(mc_.edges.at(edge_idx));
 
@@ -116,7 +118,7 @@ class MMClusterRouter final {
         const uint32_t pos = target_anchor_.FindPosByEdgeIdx(mc_, edge_idx);
         CHECK_NE_S(pos, INFU32);
         const auto target_fraction =
-            target_anchor_.edge_points.at(pos).to_fraction;
+            target_anchor_.edge_points().at(pos).to_fraction;
         if (target_fraction < ep.to_fraction) {
           vis.ignore_target_edge = true;
         } else {
@@ -144,8 +146,8 @@ class MMClusterRouter final {
 
   // Execute edge based single source Dijkstra (from start edges to *all*
   // reachable edge).
-  void RouteInit(const MMGeoAnchor& start_anchor,
-                 const MMGeoAnchor& target_anchor = {},
+  void RouteInit(const GeoAnchor& start_anchor,
+                 const GeoAnchor& target_anchor = {},
                  uint32_t start_metric_offset = 0) {
     Clear();
     start_anchor_ = start_anchor;
@@ -289,7 +291,7 @@ class MMClusterRouter final {
       if (vis_.at(edge_idx).is_target_edge) {
         const uint32_t pos = target_anchor_.FindPosByEdgeIdx(mc_, edge_idx);
         CHECK_NE_S(pos, INFU32);
-        const auto fraction = target_anchor_.edge_points.at(pos).to_fraction;
+        const auto fraction = target_anchor_.edge_points().at(pos).to_fraction;
         new_metric = prev_v.min_metric + decompress_turn_cost(turn_costs[off]) +
                      static_cast<uint32_t>(
                          mcw_.edge_weights.at(edge_idx) * fraction + 0.5);
@@ -323,8 +325,8 @@ class MMClusterRouter final {
   }
 
   // Execute edge based Dijkstra.
-  MMClusterRouterStatus Route(const MMGeoAnchor& start_anchor,
-                              const MMGeoAnchor& target_anchor = {},
+  MMClusterRouterStatus Route(const GeoAnchor& start_anchor,
+                              const GeoAnchor& target_anchor = {},
                               uint32_t start_metric_offset = 0) {
     RouteInit(start_anchor, target_anchor, start_metric_offset);
 
@@ -355,7 +357,7 @@ class MMClusterRouter final {
       res.start_is_anchor = (start_edge_pos != INFU32);
       if (res.start_is_anchor) {
         // We have a start edge!
-        res.start = start_anchor_.edge_points.at(start_edge_pos);
+        res.start = start_anchor_.edge_points().at(start_edge_pos);
       } else {
         // Is this an incoming edge?
         uint32_t in_edge_pos = mc_.find_incoming_edge_pos(graph_edge_idx);
@@ -374,9 +376,9 @@ class MMClusterRouter final {
     // Fill path information.
     res.full_edges.reserve(v_arr.size());
     res.min_metrics.reserve(v_arr.size());
-    res.edge_weights.reserve(v_arr.size());
+    // res.edge_metric.reserve(v_arr.size());
     {
-      uint32_t prev_metric = 0;  // TODO: wrong when starting on in_edge.
+      // uint32_t prev_metric = 0;  // TODO: wrong when starting on in_edge.
       for (uint32_t pos = 0; pos < v_arr.size(); ++pos) {
         const uint32_t v_idx = v_arr.at(pos);
         if (pos == 0) {
@@ -389,12 +391,12 @@ class MMClusterRouter final {
         }
         const MMClusterRouter::VisitedEdge& ve = GetVEdge(v_idx);
         res.min_metrics.push_back(ve.min_metric);
-        res.edge_weights.push_back(ve.min_metric - prev_metric);
-        prev_metric = ve.min_metric;
+        // res.edge_metric.push_back(ve.min_metric - prev_metric);
+        // prev_metric = ve.min_metric;
         /*
         LOG_S(INFO) << "Fill path edge "
                     << res.full_edges.back().DebugString(mc_)
-                    << " metric:" << res.edge_weights.back();
+                    << " metric:" << res.edge_metric.back();
                     */
       }
     }
@@ -407,7 +409,7 @@ class MMClusterRouter final {
       res.target_is_anchor = (target_edge_pos != INFU32);
       if (res.target_is_anchor) {
         // We have a target edge!
-        res.target = target_anchor_.edge_points.at(target_edge_pos);
+        res.target = target_anchor_.edge_points().at(target_edge_pos);
         CHECK_EQ_S(res.target.fe.edge_idx(mc_),
                    res.full_edges.back().edge_idx(mc_));
       } else {
@@ -441,44 +443,6 @@ class MMClusterRouter final {
     std::reverse(v.begin(), v.end());
     return v;
   }
-
-#if 0
-  // Return the v_idx of the entry with the lowest min_metric.
-  uint32_t GetLowestMetricIdxAt(const uint32_t base_v_idx) const {
-    if (vis_.at(base_v_idx).next == INFU32) {
-      return base_v_idx;
-    }
-    uint32_t best_i = base_v_idx;
-    uint32_t i = vis_.at(best_i).next;
-    while (i != base_v_idx) {
-      if (vis_.at(i).min_metric < vis_.at(best_i).min_metric) {
-        best_i = i;
-      }
-      i = vis_.at(i).next;
-    }
-    return best_i;
-  }
-
-  // Get the shortest path finishing at an edge in 'target'.
-  // Returns an empty path if there is no shortest path ending at 'target'.
-  std::vector<uint32_t> GetShortestPathToGeoAnchor(
-      const MMGeoAnchor& target) const {
-    if (target.edge_points.empty()) {
-      return {};  // No path.
-    }
-    uint32_t best_idx =
-        GetLowestMetricIdxAt(target.edge_points.at(0).fe.edge_idx(mc_));
-    for (uint32_t i = 1; i < target.edge_points.size(); ++i) {
-      uint32_t v_idx =
-          GetLowestMetricIdxAt(target.edge_points.at(i).fe.edge_idx(mc_));
-      if (vis_.at(v_idx).min_metric < vis_.at(best_idx).min_metric) {
-        best_idx = v_idx;
-      }
-    }
-
-    return GetForwardPath(best_idx);
-  }
-#endif
 
   inline uint32_t GetGraphEdgeIdx(uint32_t v_idx) const {
     return GetBaseIdx(v_idx);
@@ -660,8 +624,8 @@ class MMClusterRouter final {
   const MMCluster& mc_;
   const MMClusterWrapper& mcw_;
   const Options opt_;
-  MMGeoAnchor start_anchor_;
-  MMGeoAnchor target_anchor_;
+  GeoAnchor start_anchor_;
+  GeoAnchor target_anchor_;
   // First edge index *not* belonging to an outgoing edge.
   // Outgoing edges are at [0..outgoing_edge_idx_stop).
   const uint32_t outgoing_edge_idx_stop_;
@@ -797,6 +761,9 @@ void AnalyzePath(const MMCluster& mc, const std::vector<uint32_t>& path) {
 }
 
 // Compute all shortest paths between border edges in a cluster.
+// The computed metric for each path starts at the end of the incoming edge
+// (i.e. not counting the edge itself) and continues to the/ end of the outgoing
+// edge.
 inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
     const MMClusterWrapper& mcw, const RoutingMetric& metric, VEHICLE vt) {
   const MMCluster& mc = mcw.mc;
@@ -811,7 +778,9 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
     int16_t off =
         (int16_t)(in_edge.edge_idx - mc.edge_start_idx(in_edge.from_node_idx));
 
-    MMGeoAnchor ga;
+    GeoAnchor ga;
+    // Start and incoming edge at the end of it, i.e. don't count the metric on
+    // the edge, but use the turn cost.
     ga.AddEdge(mc, 1.0, in_edge.from_node_idx, off);
     router.Route(ga);
 
@@ -837,8 +806,8 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
 }
 
 inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
-                                        const MMGeoAnchor& start_anchor,
-                                        const MMGeoAnchor& target_anchor,
+                                        const GeoAnchor& start_anchor,
+                                        const GeoAnchor& target_anchor,
                                         Verbosity verb = Verbosity::Brief) {
   const MMCluster& mc = mcw.mc;
   if (verb >= Verbosity::Brief) {
@@ -864,12 +833,10 @@ inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
     if (verb >= Verbosity::Verbose) {
       LOG_S(INFO) << "MMClusterRouter shortest path #edges:"
                   << res.full_edges.size();
-      uint32_t metric = 0;
       for (uint32_t i = 0; i < res.full_edges.size(); ++i) {
         const MMFullEdge& fe = res.full_edges.at(i);
-        metric += res.edge_weights.at(i);
         LOG_S(INFO) << (i + 1) << ". " << fe.DebugString(mc)
-                    << " metric:" << metric;
+                    << " min_metric:" << res.min_metrics.at(i);
       }
     }
   }
@@ -880,9 +847,9 @@ inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
 inline MMRoutingResult RouteOnMMClusterFromNodes(
     const MMClusterWrapper& mcw, uint32_t start_idx, uint32_t target_idx,
     Verbosity verb = Verbosity::Brief) {
-  MMGeoAnchor start_anchor;
+  GeoAnchor start_anchor;
   start_anchor.AddStartNode(mcw.mc, start_idx);
-  MMGeoAnchor target_anchor;
+  GeoAnchor target_anchor;
   target_anchor.AddTargetNode(mcw.mc, target_idx);
   return RouteOnMMCluster(mcw, start_anchor, target_anchor, verb);
 }

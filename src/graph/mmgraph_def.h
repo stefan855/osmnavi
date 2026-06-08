@@ -48,7 +48,7 @@ struct MMEdge {
   bool bridge() const { return (data__ & 2ull) != 0; }
   bool restricted() const { return (data__ & 4ull) != 0; }
   bool contra_way() const { return (data__ & 8ull) != 0; }
-  bool cluster_border_edge() const { return (data__ & 16ull) != 0; }
+  bool cross_cluster_edge() const { return (data__ & 16ull) != 0; }
   bool complex_turn_restriction_trigger() const {
     return (data__ & 32ull) != 0;
   }
@@ -59,7 +59,7 @@ struct MMEdge {
   void set_bridge(bool val) { data__ = (data__ & ~2ull) | (val << 1ull); }
   void set_restricted(bool val) { data__ = (data__ & ~4ull) | (val << 2ull); }
   void set_contra_way(bool val) { data__ = (data__ & ~8ull) | (val << 3ull); }
-  void set_cluster_border_edge(bool val) {
+  void set_cross_cluster_edge(bool val) {
     data__ = (data__ & ~16ull) | (val << 4ull);
   }
   void set_complex_turn_restriction_trigger(bool val) {
@@ -161,9 +161,11 @@ struct MMCluster {
   MMVec64<MMIncomingEdge> in_edges;
   MMVec64<MMOutgoingEdge> out_edges;
 
-  // Metrics from in_edge to out_edge computed using standard settings. The
-  // client might compute new distances with different settings. Dimension is
-  // #in_edges x #out_edges. See 'get_path_metric()' below.
+  // Metrics from the end of the in_edge to the end of the out_edge, computed
+  // using standard settings. The client might compute new distances with
+  // different settings. Dimension is #in_edges x #out_edges.
+  //
+  // See 'get_path_metric()' below.
   MMVec64<uint32_t> path_metrics;
 
   // *** Inside cluster routing.
@@ -388,7 +390,7 @@ struct MMCluster {
 
   const MMOutgoingEdge& find_outgoing_edge(uint32_t edge_idx) const {
     uint32_t pos = find_outgoing_edge_pos(edge_idx);
-    CHECK_NE_S(pos, INFU32);
+    CHECK_NE_S(pos, INFU32) << edge_idx << " " << out_edges.size();
     return out_edges.at(pos);
   }
 
@@ -561,33 +563,52 @@ struct MMFullEdge {
   const MMCluster& mc(const MMGraph& mg) const {
     return mg.clusters.at(cluster_id);
   }
-
-  // Return MMOutgoingEdge for a full edge that represents an outgoing edge.
-  // Fails if it is not an outgoing edge.
-  const MMOutgoingEdge& AsOutgoingEdge(const MMCluster& mc) const {
-    return mc.find_outgoing_edge(edge_idx(mc));
+  inline bool IsCrossClusterEdge(const MMCluster& mc) const {
+    return edge(mc).cross_cluster_edge();
   }
-  const MMOutgoingEdge& AsOutgoingEdge(const MMGraph& mg) const {
-    return mc(mg).find_outgoing_edge(edge_idx(mc(mg)));
+  bool IsIncomingEdge(const MMCluster& mc) const {
+    return mc.get_node(from_node_idx).off_cluster_node();
   }
-
-  // Return MMIncomingEdge for a full edge that represents an incoming edge.
   // Fails if it is not an incoming edge.
-  const MMIncomingEdge& AsIncomingEdge(const MMCluster& mc) const {
+  const MMIncomingEdge& ToIncomingEdge(const MMCluster& mc) const {
     return mc.find_incoming_edge(edge_idx(mc));
   }
-  const MMIncomingEdge& AsIncomingEdge(const MMGraph& mg) const {
-    return mc(mg).find_incoming_edge(edge_idx(mc(mg)));
+  bool IsOutgoingEdge(const MMCluster& mc) const {
+    return mc.get_node(target_idx(mc)).off_cluster_node();
+  }
+  // Fails if it is not an outgoing edge.
+  const MMOutgoingEdge& ToOutgoingEdge(const MMCluster& mc) const {
+    return mc.find_outgoing_edge(edge_idx(mc));
+  }
+  const MMOutgoingEdge& ToOutgoingEdge(const MMGraph& mg) const {
+    return ToOutgoingEdge(mc(mg));
   }
 
-  static inline MMFullEdge CreateWithEdgeIdx(const MMCluster& mc,
-                                             uint32_t from_node_idx,
-                                             uint32_t edge_idx) {
-    uint32_t offset = edge_idx - mc.edge_start_idx(from_node_idx);
-    CHECK_LT_S(offset, 256);
-    return {.from_node_idx = from_node_idx,
-            .cluster_id = mc.cluster_id,
-            .edge_offset = offset};
+  // Returns the cluster id of the connected external cluster. Check fails if
+  // the edge isn't a cross cluster edge.
+  uint32_t GetCrossClusterId(const MMCluster& mc) const {
+    CHECK_S(IsCrossClusterEdge(mc));
+    if (IsIncomingEdge(mc)) {
+      return mc.find_incoming_edge(edge_idx(mc)).from_cluster_id;
+    } else {
+      return mc.find_outgoing_edge(edge_idx(mc)).to_cluster_id;
+    }
+  }
+
+  // A cross cluster edge exists in the two clusters. This method computes the
+  // dual edge of a cross cluster edge.
+  // Check fails if the edge is not a cross cluster edge.
+  MMFullEdge GetDualCrossClusterEdge(const MMGraph& mg) const {
+    const MMCluster& mmc = mc(mg);
+    CHECK_S(IsCrossClusterEdge(mmc));
+    if (IsIncomingEdge(mmc)) {
+      const MMIncomingEdge& in_edge = ToIncomingEdge(mmc);
+      return mg.in_edge_to_out_edge(in_edge).ToFullEdge(mg);
+    } else {
+      CHECK_S(IsOutgoingEdge(mmc));
+      const MMOutgoingEdge& out_edge = ToOutgoingEdge(mmc);
+      return mg.out_edge_to_in_edge(out_edge).ToFullEdge(mg);
+    }
   }
 
   std::string DebugString(const MMCluster& mc) const {
@@ -595,7 +616,7 @@ struct MMFullEdge {
     // Find the from/to clusters.
     uint32_t cluster_id_from = cluster_id;
     uint32_t cluster_id_to = cluster_id;
-    if (edge(mc).cluster_border_edge()) {
+    if (edge(mc).cross_cluster_edge()) {
       if (mc.get_node(from_node_idx).off_cluster_node()) {
         // incoming edge.
         cluster_id_from = mc.find_incoming_edge(edge_idx(mc)).from_cluster_id;
@@ -610,6 +631,16 @@ struct MMFullEdge {
   }
   std::string DebugString(const MMGraph& mg) const {
     return DebugString(mc(mg));
+  }
+
+  static inline MMFullEdge CreateWithEdgeIdx(const MMCluster& mc,
+                                             uint32_t from_node_idx,
+                                             uint32_t edge_idx) {
+    uint32_t offset = edge_idx - mc.edge_start_idx(from_node_idx);
+    CHECK_LT_S(offset, 256);
+    return {.from_node_idx = from_node_idx,
+            .cluster_id = mc.cluster_id,
+            .edge_offset = offset};
   }
 
   // Spaceship operator, implements all comparison functions at once.
@@ -671,7 +702,7 @@ struct MMClusterWrapper {
   // Pre-compute all edge weights for the edges of the cluster.
   void FillEdgeWeights(VEHICLE vt, const RoutingMetric& metric,
                        bool include_dead_ends) {
-    size_t num =
+    const size_t num =
         include_dead_ends ? mc.edges.size() : mc.num_non_dead_end_edges();
     edge_weights.clear();
     edge_weights.reserve(num);

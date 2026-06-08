@@ -99,10 +99,10 @@ void ValidateGraph(const Graph& g) {
       CHECK_EQ_S(node.dead_end != target.dead_end, e.bridge);
 
       // A bridge can't be a cluster border edge.
-      CHECK_S(!(e.cluster_border_edge && e.bridge));
+      CHECK_S(!(e.cross_cluster_edge && e.bridge));
 
       // Only cluster border edges connect different clusters.
-      CHECK_S(e.cluster_border_edge || node.cluster_id == target.cluster_id)
+      CHECK_S(e.cross_cluster_edge || node.cluster_id == target.cluster_id)
           << debug_str(node) << debug_str(target);
     }
   }
@@ -822,7 +822,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.traffic_signal = 0;
   e.road_priority = GEdge::PRIO_UNSET;
   e.bridge = 0;
-  e.cluster_border_edge = 0;
+  e.cross_cluster_edge = 0;
   e.dead_end = 0;
 
   const GWay& way = g.ways.at(way_idx);
@@ -1504,9 +1504,9 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
           target.cluster_id == INVALID_CLUSTER_ID) {
         stats->num_cluster_outside_edges += 1;
       } else if (n.cluster_id != target.cluster_id) {
-        stats->num_cluster_border_edges += 1;
+        stats->num_cross_cluster_edges += 1;
         if (e.car_label != GEdge::LABEL_FREE) {
-          stats->num_cluster_border_edges_restr += 1;
+          stats->num_cross_cluster_edges_restr += 1;
           LOG_S(INFO) << absl::StrFormat(
               "Cluster border cluster restricted edge %lld to %lld, label:%d "
               "way:%lld",
@@ -1734,31 +1734,31 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
 
   LOG_S(INFO) << absl::StrFormat("Clusters:           %12lld",
                                  g.clusters.size());
-  LOG_S(INFO) << absl::StrFormat("  Num border nodes: %12lld",
+  LOG_S(INFO) << absl::StrFormat("  border nodes:     %12lld",
                                  stats.num_cluster_border_nodes);
-  LOG_S(INFO) << absl::StrFormat("  Num inside nodes: %12lld",
+  LOG_S(INFO) << absl::StrFormat("  inside nodes:     %12lld",
                                  stats.num_cluster_inside_nodes);
-  LOG_S(INFO) << absl::StrFormat("  Num outside nodes:%12lld",
+  LOG_S(INFO) << absl::StrFormat("  outside nodes:    %12lld",
                                  stats.num_cluster_outside_nodes);
 
-  LOG_S(INFO) << absl::StrFormat("  Num border edges: %12lld",
-                                 stats.num_cluster_border_edges);
-  LOG_S(INFO) << absl::StrFormat("  Num inside edges: %12lld",
+  LOG_S(INFO) << absl::StrFormat("  cross cluster edges:%10lld",
+                                 stats.num_cross_cluster_edges);
+  LOG_S(INFO) << absl::StrFormat("  inside edges:     %12lld",
                                  stats.num_cluster_inside_edges);
-  LOG_S(INFO) << absl::StrFormat("  Num outside edges:%12lld",
+  LOG_S(INFO) << absl::StrFormat("  outside edges:    %12lld",
                                  stats.num_cluster_outside_edges);
 
-  LOG_S(INFO) << absl::StrFormat("  Num border in edges:%10lld",
+  LOG_S(INFO) << absl::StrFormat("  border in edges:  %12lld",
                                  stats.num_cluster_border_in_edges);
-  LOG_S(INFO) << absl::StrFormat("  Num border out edges:%9lld",
+  LOG_S(INFO) << absl::StrFormat("  border out edges: %12lld",
                                  stats.num_cluster_border_out_edges);
   LOG_S(INFO) << absl::StrFormat(
       "  Avg len paths:    %12.2f",
       static_cast<double>(stats.sum_cluster_valid_path_nodes) /
           stats.num_cluster_valid_paths);
 
-  LOG_S(INFO) << absl::StrFormat("  Num restr border edges:%7lld",
-                                 stats.num_cluster_border_edges_restr);
+  LOG_S(INFO) << absl::StrFormat("  restr cross cluster edges:%4lld",
+                                 stats.num_cross_cluster_edges_restr);
 
   // LOG_S(INFO) << absl::StrFormat("  Cross clust restr+de:%9lld",
   //                           stats.num_cross_cluster_restricted_dead_end);

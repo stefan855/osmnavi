@@ -136,7 +136,10 @@ add_executable(routing_server src/bin/routing_server.cpp)
 target_include_directories(routing_server SYSTEM PRIVATE)
 target_link_libraries(routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_format loguru_lib absl::time absl::time build_graph_lib)
 
+find_package(OpenSSL REQUIRED)
 add_executable(mm_routing_server src/bin/mm_routing_server.cpp)
-target_include_directories(mm_routing_server SYSTEM PRIVATE)
-target_link_libraries(mm_routing_server PRIVATE ZLIB::ZLIB absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time absl::time)
+# The following line switches between https and http.
+# target_compile_definitions(mm_routing_server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
+target_include_directories(mm_routing_server SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_link_libraries(mm_routing_server PRIVATE ZLIB::ZLIB absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time absl::time OpenSSL::SSL OpenSSL::Crypto)
 

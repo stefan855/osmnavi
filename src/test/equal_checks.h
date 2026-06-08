@@ -18,26 +18,26 @@
   CHECK_EQ_S(n1.is_pedestrian_crossing, n2.is_pedestrian_crossing);
 
 // Check fail if e1 and e1 are different in any of the attributes.
-#define CHECK_EDGES_EQUAL(e1, e2)                             \
-  CHECK_EQ_S(e1.target_idx, e2.target_idx);                   \
-  CHECK_EQ_S(e1.way_idx, e2.way_idx);                         \
-  CHECK_EQ_S(e1.distance_cm, e2.distance_cm);                 \
-  CHECK_EQ_S(e1.turn_cost_idx, e2.turn_cost_idx);             \
-  CHECK_EQ_S(e1.unique_target, e2.unique_target);             \
-  CHECK_EQ_S(e1.to_bridge, e2.to_bridge);                     \
-  CHECK_EQ_S(e1.contra_way, e2.contra_way);                   \
-  CHECK_EQ_S(e1.cross_country, e2.cross_country);             \
-  CHECK_EQ_S(e1.inverted, e2.inverted);                       \
-  CHECK_EQ_S(e1.both_directions, e2.both_directions);         \
-  CHECK_EQ_S(e1.car_label, e2.car_label);                     \
-  CHECK_EQ_S(e1.car_label_strange, e2.car_label_strange);     \
-  CHECK_EQ_S(e1.complex_turn_restriction_trigger,             \
-             e2.complex_turn_restriction_trigger);            \
-  CHECK_EQ_S(e1.stop_sign, e2.stop_sign);                     \
-  CHECK_EQ_S(e1.traffic_signal, e2.traffic_signal);           \
-  CHECK_EQ_S(e1.road_priority, e2.road_priority);             \
-  CHECK_EQ_S(e1.bridge, e2.bridge);                           \
-  CHECK_EQ_S(e1.cluster_border_edge, e2.cluster_border_edge); \
+#define CHECK_EDGES_EQUAL(e1, e2)                           \
+  CHECK_EQ_S(e1.target_idx, e2.target_idx);                 \
+  CHECK_EQ_S(e1.way_idx, e2.way_idx);                       \
+  CHECK_EQ_S(e1.distance_cm, e2.distance_cm);               \
+  CHECK_EQ_S(e1.turn_cost_idx, e2.turn_cost_idx);           \
+  CHECK_EQ_S(e1.unique_target, e2.unique_target);           \
+  CHECK_EQ_S(e1.to_bridge, e2.to_bridge);                   \
+  CHECK_EQ_S(e1.contra_way, e2.contra_way);                 \
+  CHECK_EQ_S(e1.cross_country, e2.cross_country);           \
+  CHECK_EQ_S(e1.inverted, e2.inverted);                     \
+  CHECK_EQ_S(e1.both_directions, e2.both_directions);       \
+  CHECK_EQ_S(e1.car_label, e2.car_label);                   \
+  CHECK_EQ_S(e1.car_label_strange, e2.car_label_strange);   \
+  CHECK_EQ_S(e1.complex_turn_restriction_trigger,           \
+             e2.complex_turn_restriction_trigger);          \
+  CHECK_EQ_S(e1.stop_sign, e2.stop_sign);                   \
+  CHECK_EQ_S(e1.traffic_signal, e2.traffic_signal);         \
+  CHECK_EQ_S(e1.road_priority, e2.road_priority);           \
+  CHECK_EQ_S(e1.bridge, e2.bridge);                         \
+  CHECK_EQ_S(e1.cross_cluster_edge, e2.cross_cluster_edge); \
   CHECK_EQ_S(e1.dead_end, e2.dead_end);
 
 #define CHECK_WAYS_EQUAL(w1, w2)                                    \

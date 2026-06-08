@@ -127,8 +127,7 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, int32_t lat,
 
 }  // namespace
 
-inline MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat,
-                                    int32_t lon) {
+inline GeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
   LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%u, %u)", lat,
                                  lon);
   const std::vector<ClusterInfo> good_clusters = FindGoodClusters(mg, lat, lon);
@@ -170,33 +169,32 @@ inline MMGeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat,
   LOG_S(INFO) << absl::StrFormat("%u of %llu clusters scanned", count_scanned,
                                  good_clusters.size());
 
-  MMGeoAnchor a = {.point = {.lat = lat, .lon = lon}};
+  GeoAnchor a({lat, lon});
   for (const ClosestEdge& ce : topn.span()) {
     if (ce.valid) {
-      a.edge_points.push_back(
-          {.distance_cm = static_cast<uint32_t>(ce.dts.distance_cm),
-           .to_fraction = static_cast<float>(ce.dts.fraction_closest),
-           .lat_at_fraction = ce.dts.lat_closest,
-           .lon_at_fraction = ce.dts.lon_closest,
-           .fe = ce.fe});
+      a.AddEdge({.distance_cm = static_cast<uint32_t>(ce.dts.distance_cm),
+                 .to_fraction = static_cast<float>(ce.dts.fraction_closest),
+                 .lat_at_fraction = ce.dts.lat_closest,
+                 .lon_at_fraction = ce.dts.lon_closest,
+                 .fe = ce.fe});
       // LOG_S(INFO) << absl::StrFormat("fraction_closest:%.3f",
       //                                ce.dts.fraction_closest);
     }
   }
 
-  if (a.edge_points.size() == 1) {
+  if (a.edge_points().size() == 1) {
     // Find backward edge
-    const MMEdgePoint& ep = a.edge_points.front();
+    const EdgePoint& ep = a.edge_points().front();
     const MMCluster& mc = ep.fe.mc(mg);
     uint32_t backward_idx = mc.find_edge_idx(
         ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
     if (backward_idx != INFU32) {
-      a.edge_points.push_back({.distance_cm = ep.distance_cm,
-                               .to_fraction = 1.0f - ep.to_fraction,
-                               .lat_at_fraction = ep.lat_at_fraction,
-                               .lon_at_fraction = ep.lon_at_fraction,
-                               .fe = MMFullEdge::CreateWithEdgeIdx(
-                                   mc, ep.fe.target_idx(mc), backward_idx)});
+      a.AddEdge({.distance_cm = ep.distance_cm,
+                 .to_fraction = 1.0f - ep.to_fraction,
+                 .lat_at_fraction = ep.lat_at_fraction,
+                 .lon_at_fraction = ep.lon_at_fraction,
+                 .fe = MMFullEdge::CreateWithEdgeIdx(mc, ep.fe.target_idx(mc),
+                                                     backward_idx)});
     }
   }
 

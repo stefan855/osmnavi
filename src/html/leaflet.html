@@ -304,7 +304,7 @@
         fitSelectedRoutes: false,
         routeWhileDragging: false,
         position: 'bottomleft',
-        serviceUrl: 'http://localhost:8081/route/v1',
+        serviceUrl: '/route/v1',
         lineOptions: {
           styles: [{ color: 'red', weight: 5, dashArray: '5, 10' }]
         }
@@ -365,7 +365,7 @@
 
         L.DomEvent.on(DIYBtn, 'click', function() {
           var opt = routingControl.getRouter().options;
-          opt.serviceUrl = 'http://localhost:8081/route/v1';
+          opt.serviceUrl = '/route/v1';
           opt.lineOptions.styles[0].color = 'red';
           routingControl.route();
           map.closePopup();

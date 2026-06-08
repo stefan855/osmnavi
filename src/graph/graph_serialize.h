@@ -129,7 +129,7 @@ inline void EncodeGEdge(const GEdge& e, WriteBuff* buff) {
   std::uint32_t traffic_signal : 1;
   ROAD_PRIORITY road_priority : NUM_GEDGE_ROAD_PRIORITY_BITS;
   std::uint32_t bridge : 1;
-  std::uint32_t cluster_border_edge : 1;
+  std::uint32_t cross_cluster_edge : 1;
   std::uint32_t dead_end : 1;
   */
   uint64_t bits = 0;
@@ -146,7 +146,7 @@ inline void EncodeGEdge(const GEdge& e, WriteBuff* buff) {
   bits = (bits << 1) + e.traffic_signal;
   bits = (bits << NUM_GEDGE_ROAD_PRIORITY_BITS) + e.road_priority;
   bits = (bits << 1) + e.bridge;
-  bits = (bits << 1) + e.cluster_border_edge;
+  bits = (bits << 1) + e.cross_cluster_edge;
   bits = (bits << 1) + e.dead_end;
 
   // bits = (bits << NUM_GEDGE_TYPE_BITS) + e.type;
@@ -164,7 +164,7 @@ inline uint32_t DecodeGEdge(const std::uint8_t* ptr, GEdge* e) {
     uint64_t bitset;
     cnt += DecodeUInt(ptr + cnt, &bitset);
     DECODE_BITS(bitset, 1, e->dead_end);
-    DECODE_BITS(bitset, 1, e->cluster_border_edge);
+    DECODE_BITS(bitset, 1, e->cross_cluster_edge);
     DECODE_BITS(bitset, 1, e->bridge);
     DECODE_BITS(bitset, NUM_GEDGE_ROAD_PRIORITY_BITS, e->road_priority);
     DECODE_BITS(bitset, 1, e->traffic_signal);

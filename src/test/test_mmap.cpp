@@ -85,7 +85,7 @@ void TestMMEdge() {
   CHECK_S(!x.bridge());
   CHECK_S(!x.restricted());
   CHECK_S(!x.contra_way());
-  CHECK_S(!x.cluster_border_edge());
+  CHECK_S(!x.cross_cluster_edge());
   CHECK_S(!x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
@@ -94,7 +94,7 @@ void TestMMEdge() {
   CHECK_S(!x.bridge());
   CHECK_S(!x.restricted());
   CHECK_S(!x.contra_way());
-  CHECK_S(!x.cluster_border_edge());
+  CHECK_S(!x.cross_cluster_edge());
   CHECK_S(!x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
@@ -103,7 +103,7 @@ void TestMMEdge() {
   CHECK_S(x.bridge());
   CHECK_S(!x.restricted());
   CHECK_S(!x.contra_way());
-  CHECK_S(!x.cluster_border_edge());
+  CHECK_S(!x.cross_cluster_edge());
   CHECK_S(!x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
@@ -112,7 +112,7 @@ void TestMMEdge() {
   CHECK_S(x.bridge());
   CHECK_S(x.restricted());
   CHECK_S(!x.contra_way());
-  CHECK_S(!x.cluster_border_edge());
+  CHECK_S(!x.cross_cluster_edge());
   CHECK_S(!x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
@@ -121,16 +121,16 @@ void TestMMEdge() {
   CHECK_S(x.bridge());
   CHECK_S(x.restricted());
   CHECK_S(x.contra_way());
-  CHECK_S(!x.cluster_border_edge());
+  CHECK_S(!x.cross_cluster_edge());
   CHECK_S(!x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
-  x.set_cluster_border_edge(true);
+  x.set_cross_cluster_edge(true);
   CHECK_S(x.dead_end());
   CHECK_S(x.bridge());
   CHECK_S(x.restricted());
   CHECK_S(x.contra_way());
-  CHECK_S(x.cluster_border_edge());
+  CHECK_S(x.cross_cluster_edge());
   CHECK_S(!x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
@@ -139,7 +139,7 @@ void TestMMEdge() {
   CHECK_S(x.bridge());
   CHECK_S(x.restricted());
   CHECK_S(x.contra_way());
-  CHECK_S(x.cluster_border_edge());
+  CHECK_S(x.cross_cluster_edge());
   CHECK_S(x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
@@ -148,7 +148,7 @@ void TestMMEdge() {
   CHECK_S(x.bridge());
   CHECK_S(x.restricted());
   CHECK_S(x.contra_way());
-  CHECK_S(x.cluster_border_edge());
+  CHECK_S(x.cross_cluster_edge());
   CHECK_S(x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 12345678);
 }

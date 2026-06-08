@@ -170,7 +170,7 @@ void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
           target.cluster_id == ci->cluster_id) {
         CHECK_EQ_S((n.cluster_id == ci->cluster_id) !=
                        (target.cluster_id == ci->cluster_id),
-                   e.cluster_border_edge);
+                   e.cross_cluster_edge);
         // Add edge;
         uint32_t ctarget_idx =
             FindInMapOrFail(ci->gnode_to_cnode, e.target_idx);
@@ -181,7 +181,7 @@ void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
         eb.set_bridge(e.bridge);
         eb.set_restricted(e.car_label != GEdge::LABEL_FREE);
         eb.set_contra_way(e.contra_way);
-        eb.set_cluster_border_edge(e.cluster_border_edge);
+        eb.set_cross_cluster_edge(e.cross_cluster_edge);
         eb.set_complex_turn_restriction_trigger(
             e.complex_turn_restriction_trigger);
         ci->mm_edges.push_back(eb.data__);
@@ -804,8 +804,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
                  MM_EDGE(tci.mm_edges.at(i)).restricted());
       CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).contra_way(),
                  MM_EDGE(tci.mm_edges.at(i)).contra_way());
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).cluster_border_edge(),
-                 MM_EDGE(tci.mm_edges.at(i)).cluster_border_edge());
+      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).cross_cluster_edge(),
+                 MM_EDGE(tci.mm_edges.at(i)).cross_cluster_edge());
       CHECK_EQ_S(
           MM_EDGE(mmc.edges.at(i)).complex_turn_restriction_trigger(),
           MM_EDGE(tci.mm_edges.at(i)).complex_turn_restriction_trigger());
@@ -949,26 +949,6 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
       "  nodes: border:%u off_cluster:%u inner:%u dead_end:%u",
       mmcluster->num_border_nodes, mmcluster->num_off_cluster_nodes,
       mmcluster->num_inner_nodes, mmcluster->num_dead_end_nodes);
-
-#if 0
-  mmcluster->in_edges.WriteDataBlob(
-      "in_edges", global_object_offset + offsetof(MMCluster, in_edges), fd,
-      tci.mm_in_edges);
-
-  mmcluster->out_edges.WriteDataBlob(
-      "out_edges", global_object_offset + offsetof(MMCluster, out_edges), fd,
-      tci.mm_out_edges);
-
-  {
-    // Write zeroes, will be filled in later.
-    std::vector<uint32_t> empty_metrics(
-        tci.mm_in_edges.size() * tci.mm_out_edges.size(), 0);
-    mmcluster->path_metrics.WriteDataBlob(
-        "path_metrics",
-        global_object_offset + offsetof(MMCluster, path_metrics), fd,
-        empty_metrics);
-  }
-#endif
 
   mmcluster->nodes.WriteDataBlob(
       "nodes", global_object_offset + offsetof(MMCluster, nodes), fd,

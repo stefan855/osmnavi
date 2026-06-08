@@ -336,7 +336,7 @@ inline void LabelEdgesAndNodes(Graph* g) {
         CHECK_NE_S(target.cluster_id, INVALID_CLUSTER_ID);
         n.cluster_border_node = 1;
         target.cluster_border_node = 1;
-        e.cluster_border_edge = 1;
+        e.cross_cluster_edge = 1;
       }
     }
   }
@@ -366,13 +366,13 @@ inline void LabelEdgesAndNodes(Graph* g) {
 
     for (GEdge& e : gnode_forward_edges(*g, n0_pos)) {
       const GNode& n1 = g->nodes.at(e.target_idx);
-      if (e.cluster_border_edge) {
+      if (e.cross_cluster_edge) {
         CHECK_NE_S(n0.cluster_id, n1.cluster_id);
         cl0.num_outer_edges++;
         g->clusters.at(n1.cluster_id).num_outer_edges++;
       } else if (e.bridge || e.dead_end) {
         CHECK_EQ_S(n0.cluster_id, n1.cluster_id);
-        CHECK_S(!e.cluster_border_edge);
+        CHECK_S(!e.cross_cluster_edge);
         cl0.num_deadend_edges++;
       } else {
         CHECK_EQ_S(n0.cluster_id, n1.cluster_id);
