@@ -84,7 +84,7 @@ struct MMFullEdge;
 struct MMIncomingEdge {
   uint32_t from_cluster_id;  // The cluster id of the other cluster.
   uint32_t from_node_idx;
-  uint32_t to_cluster_id;
+  uint32_t to_cluster_id;  // The "home" cluster.
   uint32_t to_node_idx;
   uint32_t edge_idx;     // Index of this edge in the edge array.
   uint16_t in_edge_pos;  // Position of this entry in the containing vector.
@@ -104,9 +104,9 @@ struct MMIncomingEdge {
 
 // An edge with target node in another cluster.
 struct MMOutgoingEdge {
-  uint32_t from_cluster_id;  // The cluster id of the other cluster.
+  uint32_t from_cluster_id;  // The "home" cluster.
   uint32_t from_node_idx;
-  uint32_t to_cluster_id;
+  uint32_t to_cluster_id;  // The cluster id of the other cluster.
   uint32_t to_node_idx;
   uint32_t edge_idx;      // Index of this edge in the edge array.
   uint16_t out_edge_pos;  // Position of this entry in the containing vector.
@@ -147,6 +147,9 @@ struct MMBoundingRect {
 // file.
 struct MMCluster {
   uint32_t cluster_id;
+  // The "color" of a cluster. A small number drawn in such a way that adjacent
+  // clusters have different numbers.
+  uint16_t color_no = 0;
 
   // Nodes in 'nodes' are sorted by type, with the following layout:
   // border_nodes | off_cluster_nodes | inner_nodes | dead_end_nodes.
@@ -686,7 +689,7 @@ inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(
 // TODO: add scope.
 constexpr uint64_t kMagic = 7715514337782280064ull;
 constexpr uint32_t kVersionMajor = 0;
-constexpr uint32_t kVersionMinor = 2;
+constexpr uint32_t kVersionMinor = 3;
 
 struct MMClusterWrapper {
   const MMCluster& mc;

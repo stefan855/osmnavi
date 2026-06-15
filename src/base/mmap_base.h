@@ -71,14 +71,6 @@ inline void WriteDataTo(int fd, off_t pos, const uint8_t* buff, size_t size) {
   WriteDataBuffer(fd, buff, size);
 }
 
-// Returns the bits needed to store the maximum value in data.
-// Returns 0 if data is empty or all values are 0.
-template <typename uint_type>
-uint8_t DetermineBitWidth(const std::vector<uint_type>& data) {
-  const auto iter = std::max_element(data.begin(), data.end());
-  return static_cast<uint8_t>(std::bit_width(*iter));
-}
-
 // Vector of elements of type 'T'. The actual data is stored in a blob starting
 // at 'relative_blob_offset__' and has 'num' elements.
 template <typename T>
@@ -189,6 +181,16 @@ class MMBitset {
   }
 };
 CHECK_IS_MM_OK(MMBitset);
+
+namespace {
+// Returns the bits needed to store the maximum value in data.
+// Returns 0 if data is empty or all values are 0.
+template <typename uint_type>
+uint8_t DetermineBitWidth(const std::vector<uint_type>& data) {
+  const auto iter = std::max_element(data.begin(), data.end());
+  return static_cast<uint8_t>(std::bit_width(*iter));
+}
+}  // namespace
 
 // Implements a fixed size, memory mapped vector of unsigned integers of a
 // fixed bit width.

@@ -22,6 +22,7 @@ struct TmpComplexTR {
 // Temporary data for a cluster, before it is written to the mmap file.
 struct TmpClusterInfo {
   uint32_t cluster_id;
+  uint16_t color_no;
 
   // **************************************************************************
   // Auxiliary data.
@@ -87,6 +88,7 @@ inline void CollectClusterNodes(const Graph& g,
     const GCluster& gc = g.clusters.at(cluster_id);
     TmpClusterInfo* ci = &cluster_infos->at(cluster_id);
     ci->cluster_id = cluster_id;
+    ci->color_no = gc.color_no;
     // +500 to accommodate the border nodes of connected clusters.
     ci->cnode_to_gnode.reserve(gc.num_nodes + gc.num_deadend_nodes + 500);
   }
@@ -896,6 +898,7 @@ void CheckMMGraph(const std::string& path, const Graph& g,
 void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
                               int64_t global_object_offset, int fd) {
   mmcluster->cluster_id = tci.cluster_id;
+  mmcluster->color_no = tci.color_no;
   ComputeClusterNodeNumbers(tci, mmcluster);
   mmcluster->bounding_rect = tci.mm_bounding_rect;
 

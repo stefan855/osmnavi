@@ -30,7 +30,7 @@ class MMClusterRouter final {
   struct VisitedEdge {
     // The minimal metric seen so far. INFU32 if unused.
     std::uint32_t min_metric;
-    // Previous edge entry. INFU32 if prevous entry does not exist.
+    // Previous edge entry. INFU32 if previous entry does not exist.
     std::uint32_t from_v_idx;
     std::uint32_t active_ctr_id : 27;
     // True iff the edge is one of the target edges for routing.
@@ -71,6 +71,7 @@ class MMClusterRouter final {
   const std::vector<VisitedEdge>& GetVisitedEdges() const { return vis_; }
 
   const GeoAnchor& GetTargetAnchor() { return target_anchor_; }
+  const MMCluster& mc() const { return mc_; }
 
  private:
   void LabelTargetEdges() {
@@ -350,7 +351,8 @@ class MMClusterRouter final {
 
     // Fill start edge.
     {
-      // The first edge must be either a start edge or an incoming edge.
+      // The first edge must be either a start edge or an incoming edge (or
+      // both).
       const uint32_t graph_edge_idx = GetGraphEdgeIdx(v_arr.at(0));
       const uint32_t start_edge_pos =
           start_anchor_.FindPosByEdgeIdx(mc_, graph_edge_idx);
@@ -464,6 +466,8 @@ class MMClusterRouter final {
   inline bool IsStartEdge(uint32_t v_idx) const {
     return start_anchor_.FindPosByEdgeIdx(mc_, GetBaseIdx(v_idx)) != INFU32;
   }
+
+  const GeoAnchor& GetStartAnchor() const { return start_anchor_; }
 
   const VisitedEdge& GetVEdge(uint32_t v_idx) const { return vis_.at(v_idx); }
 

@@ -281,7 +281,8 @@ class MMHybridRouter final {
   }
 
   static MMRoutingResult Route(const MMGraph& mg, const GeoAnchor& start_anchor,
-                               const GeoAnchor& target_anchor) {
+                               const GeoAnchor& target_anchor,
+                               RouterData* router_data = nullptr) {
     LOG_S(INFO) << "=========================================================";
     FuncTimer timer("MMHybridRouter::Route()", __FILE__, __LINE__);
     LOG_S(INFO) << "=========================================================";
@@ -302,7 +303,14 @@ class MMHybridRouter final {
                   << " frac: " << ep.to_fraction;
     }
 
-    RouterData d;
+    // Use the externally provided router data if it exists, otherwise use the
+    // internal one and make it accessible through as 'd'.
+    RouterData router_data_internal;
+    if (router_data == nullptr) {
+      router_data = &router_data_internal;
+    }
+    RouterData& d = *router_data;
+
     d.Init(mg, start_anchor, target_anchor);
 
     while (true) {
@@ -399,6 +407,12 @@ class MMHybridRouter final {
     return {};
   }
 
+  static const MMOutgoingEdge& out_edge_from_hybrid_key(const MMGraph& mg,
+                                                        uint32_t key) {
+    const MMCluster& mc = mg.clusters.at(cluster_id_from_hybrid_key(key));
+    return mc.out_edges.at(og_edge_idx_from_hybrid_key(key));
+  }
+
  private:
   struct HybridEdge {
     uint32_t key;
@@ -429,11 +443,6 @@ class MMHybridRouter final {
   }
   static inline uint32_t og_edge_idx_from_hybrid_key(uint32_t hybrid_key) {
     return hybrid_key & ((1u << 10) - 1);
-  }
-  static const MMOutgoingEdge& out_edge_from_hybrid_key(const MMGraph& mg,
-                                                        uint32_t key) {
-    const MMCluster& mc = mg.clusters.at(cluster_id_from_hybrid_key(key));
-    return mc.out_edges.at(og_edge_idx_from_hybrid_key(key));
   }
 
   // Add a START/TARGET segment and return true iff the segment has the

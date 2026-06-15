@@ -20,6 +20,7 @@
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
 #include "geometry/closest_edge.h"
+#include "geometry/tiles.h"
 #include "graph/mmgraph_def.h"
 
 #if 0
@@ -51,6 +52,9 @@ double CalculateAngle(double lat1, double lon1, double lat2, double lon2) {
 #endif
 
 namespace {
+
+// This is a global pointer to the last router data that was produced.
+static std::shared_ptr<MMHybridRouter::RouterData> g_last_router_data;
 
 using CoordinatePair = struct {
   double lat;
@@ -326,7 +330,13 @@ nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
   {
     absl::Time start_time = absl::Now();
     MMHybridRouter router;
-    res = router.Route(mg, start, target);
+
+    // Keep the router data of the last route computation in a global shared
+    // pointer for examination. The shared pointer can be copied atomically
+    // before examination.
+    MMHybridRouter::RouterData* router_data = new MMHybridRouter::RouterData;
+    res = router.Route(mg, start, target, router_data);
+    g_last_router_data.reset(router_data);
     routing_time = ToDoubleSeconds(absl::Now() - start_time);
   }
   LOG_S(INFO) << "Finished routing";
@@ -510,6 +520,36 @@ int main(int argc, char* argv[]) {
             ToDoubleSeconds(absl::Now() - overall_start));
       });
 
+  // Fill in empty data.
+  g_last_router_data.reset(new MMHybridRouter::RouterData);
+  svr.Get(R"(/tiles/last_route/([^/]+)/([^/]+)/([^/]+)\.png)",
+          [&mg](const httplib::Request& req, httplib::Response& res) {
+            // Keep it alive while we serve the request.
+            std::shared_ptr<MMHybridRouter::RouterData> rd = g_last_router_data;
+            // This will change on each route, so it shouldn't be cached.
+            res.set_header("Cache-Control",
+                           "no-store, no-cache, must-revalidate, max-age=0");
+            res.set_header("Pragma", "no-cache");
+            res.set_header("Expires", "0");
+            res.set_content(CreatePNGForHybridRouting(
+                                mg, *rd, atoi(req.matches.str(1).c_str()),
+                                atoi(req.matches.str(2).c_str()),
+                                atoi(req.matches.str(3).c_str())),
+                            "image/png");
+          });
+
+  const MMTileData mm_tile_data(mg);
+  // Match the request path against a regular expression
+  // and extract its captures
+  svr.Get(R"(/tiles/([^/]+)/([^/]+)/([^/]+)/([^/]+)\.png)",
+          [&mm_tile_data](const httplib::Request& req, httplib::Response& res) {
+            res.set_content(CreatePNG(mm_tile_data, req.matches.str(1),
+                                      atoi(req.matches.str(2).c_str()),
+                                      atoi(req.matches.str(3).c_str()),
+                                      atoi(req.matches.str(4).c_str())),
+                            "image/png");
+          });
+
   // Try something on startup:
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
@@ -519,5 +559,6 @@ int main(int argc, char* argv[]) {
 
   mg.PrintInfo();
   LOG_S(INFO) << "Listening...";
+
   svr.listen("0.0.0.0", 8081);
 }

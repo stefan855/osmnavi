@@ -141,5 +141,5 @@ add_executable(mm_routing_server src/bin/mm_routing_server.cpp)
 # The following line switches between https and http.
 # target_compile_definitions(mm_routing_server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 target_include_directories(mm_routing_server SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
-target_link_libraries(mm_routing_server PRIVATE ZLIB::ZLIB absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time absl::time OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(mm_routing_server PRIVATE libgd.a libpng.a ZLIB::ZLIB absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time absl::time OpenSSL::SSL OpenSSL::Crypto)
 

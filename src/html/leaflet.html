@@ -42,7 +42,7 @@
         attribution: '&copy; Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community</a>'
       });
 
-      var graph_motorcar = L.tileLayer('http://localhost:8080/tiles/graph_motorcar/{z}/{x}/{y}.png', {
+      var graph_motorcar = L.tileLayer('tiles/graph_motorcar/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -52,7 +52,7 @@
         attribution: my_attribution
       });
 
-      var louvain = L.tileLayer('http://localhost:8080/tiles/louvain/{z}/{x}/{y}.png', {
+      var clusters = L.tileLayer('/tiles/clusters/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -145,7 +145,17 @@
         attribution: my_attribution
       });
 
-      var cross = L.tileLayer('http://localhost:8080/tiles/cross/{z}/{x}/{y}.png', {
+      var restricted_edges = L.tileLayer('/tiles/restricted/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
+      var last_route = L.tileLayer('/tiles/last_route/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution,
+      });
+
+      var cross_country_edges = L.tileLayer('http://localhost:8080/tiles/cross/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -187,7 +197,8 @@
         maxZoom: 21,
         attribution: my_attribution
       });
-      var experimental9 = L.tileLayer('http://localhost:8080/tiles/experimental9/{z}/{x}/{y}.png', {
+
+      var experimental9 = L.tileLayer('/tiles/experimental9/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution
       });
@@ -195,7 +206,7 @@
       var map = L.map('map', {
         center: [46.78566, 8.1596],
         zoom: 9,
-        layers: [osm, graph_motorcar]
+        layers: [osm]
       });
 
       var baseMaps = {
@@ -204,10 +215,12 @@
       var overlayMaps = {
         "OpenStreetMap": osm,
         "ArcGis": arcgis,
-        "Graph Cars": graph_motorcar,
+        "Graph Cars*": graph_motorcar,
         "Graph Bicycles": graph_bicycle,
-        "Louvain": louvain,
-        "Cross-Country Edges": cross,
+        "Clusters*": clusters,
+        "Restricted Edges*": restricted_edges,
+        "Last Route*": last_route,
+        "Cross-Country Edges": cross_country_edges,
         "PB Route Dijkstra Forward": pb_dijks_forward,
         "PB_Route Dijkstra Backward": pb_dijks_backward,
         "PB_Route Dijkstra Forward Hybrid": pb_dijks_forward_hybrid,
