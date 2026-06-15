@@ -69,6 +69,7 @@ sudo apt-get install protobuf-compiler libprotobuf-dev
 sudo apt install libgd-dev
 sudo apt install libosmpbf-dev
 sudo apt install nlohmann-json3-dev
+sudo apt install libssl-dev
 
 cd ~
 mkdir src; cd src
