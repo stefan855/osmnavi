@@ -16,6 +16,7 @@
 #include "algos/mm_cluster_router.h"
 #include "algos/mm_hybrid_router.h"
 #include "base/argli.h"
+#include "base/lru_cache.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
@@ -23,38 +24,43 @@
 #include "geometry/tiles.h"
 #include "graph/mmgraph_def.h"
 
-#if 0
-// Function to calculate the bearing between two points.
-double CalculateAngle(double lat1, double lon1, double lat2, double lon2) {
-  // Convert latitude and longitude from degrees to radians.
-  double lat1_rad = lat1 * M_PI / 180.0;
-  double lon1_rad = lon1 * M_PI / 180.0;
-  double lat2_rad = lat2 * M_PI / 180.0;
-  double lon2_rad = lon2 * M_PI / 180.0;
+struct RouteKey {
+  double lat1;
+  double lon1;
+  double lat2;
+  double lon2;
+  bool operator==(const RouteKey& other) const {
+    return other.lat1 == lat1 && other.lon1 == lon1 && other.lat2 == lat2 &&
+           other.lon2 == lon2;
+  }
+};
 
-  // Calculate the difference in longitude.
-  double delta_lon = lon2_rad - lon1_rad;
+// Hash function specialization
+template <>
+struct std::hash<RouteKey> {
+  size_t operator()(const RouteKey& k) const noexcept {
+    // Simple hash combine pattern
+    size_t h1 = std::hash<double>{}(k.lat1);
+    size_t h2 = std::hash<double>{}(k.lon1);
+    size_t h3 = std::hash<double>{}(k.lat2);
+    size_t h4 = std::hash<double>{}(k.lon2);
 
-  // Calculate the bearing in radians.
-  double y = sin(delta_lon) * cos(lat2_rad);
-  double x = cos(lat1_rad) * sin(lat2_rad) -
-             sin(lat1_rad) * cos(lat2_rad) * cos(delta_lon);
-  double bearing_rad = atan2(y, x);
-
-  // Convert from radians to degrees.
-  double bearing_deg = bearing_rad * 180.0 / M_PI;
-
-  // Normalize the bearing to ensure it is within the range [0, 360).
-  bearing_deg = fmod((bearing_deg + 360), 360);
-
-  return bearing_deg;
-}
-#endif
+    // Combine hashes (XOR + rotate)
+    size_t result = h1;
+    result ^= h2 + 0x9e3779b9 + (result << 6) + (result >> 2);
+    result ^= h3 + 0x9e3779b9 + (result << 6) + (result >> 2);
+    result ^= h4 + 0x9e3779b9 + (result << 6) + (result >> 2);
+    return result;
+  }
+};
 
 namespace {
 
 // This is a global pointer to the last router data that was produced.
 static std::shared_ptr<MMHybridRouter::RouterData> g_last_router_data;
+
+// Cache the results of route requests.
+static LRUCache<RouteKey, std::string> g_route_result_cache(8);
 
 using CoordinatePair = struct {
   double lat;
@@ -274,7 +280,8 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
            res.target.lat_at_fraction / TEN_POW_7_DBL}}});
   }
 
-  // We currently support only one leg, so the only thing to fill are the steps.
+  // We currently support only one leg, so the only thing to fill are the
+  // steps.
   StepsData steps_data(mg, res);
 
   JsonResult res_steps = CreateSteps(mg, steps_data);
@@ -290,8 +297,8 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   return {{"code", "Ok"}, {"waypoints", waypoints}, {"routes", routes}};
 }
 
-nlohmann::json ComputeRoute(const MMGraph& mg, bool hybrid, double lon1,
-                            double lat1, double lon2, double lat2) {
+nlohmann::json ComputeRoute(const MMGraph& mg, double lon1, double lat1,
+                            double lon2, double lat2) {
   FUNC_TIMER();
 
   LOG_S(INFO) << "Search " << lon1 << " " << lat1;
@@ -472,24 +479,14 @@ int main(int argc, char* argv[]) {
       [&mg](const httplib::Request& req, httplib::Response& res) {
         const absl::Time overall_start = absl::Now();
 
-#if 0
-        LOG_S(INFO) << "=== Request Dump ===";
-        LOG_S(INFO) << "Method: " << req.method;
-        LOG_S(INFO) << "Path: " << req.path;
-        LOG_S(INFO) << "Headers:";
-        for (const auto& h : req.headers) {
-          LOG_S(INFO) << "  " << h.first << ": " << h.second;
-        }
-        LOG_S(INFO) << "Body: " << req.body;
-        LOG_S(INFO) << "====================";
-#endif
-
-        nlohmann::json result;
+        // nlohmann::json result;
         std::string_view comp = req.matches.str(1);
+
+        std::string res_str;
         if (comp != "v1" && comp != "v1hybrid") {
-          result = {{"code", "InvalidUrl"}};
+          // result = {{"code", "InvalidUrl"}};
+          res_str = nlohmann::json({{"code", "InvalidUrl"}}).dump();
         } else {
-          const bool hybrid = req.matches.str(1) != "v1";
           LOG_S(INFO) << "Serving routing request";
           LOG_S(INFO) << "Arg1:" << req.matches.str(2);
           LOG_S(INFO) << "Arg2:" << req.matches.str(3);
@@ -500,15 +497,28 @@ int main(int argc, char* argv[]) {
               !absl::SimpleAtod(req.matches.str(3), &lat1) ||
               !absl::SimpleAtod(req.matches.str(4), &lon2) ||
               !absl::SimpleAtod(req.matches.str(5), &lat2)) {
-            result = {{"code", "InvalidQuery"}};
+            // result = {{"code", "InvalidQuery"}};
+            res_str = nlohmann::json({{"code", "InvalidQuery"}}).dump();
           } else {
-            result = ComputeRoute(mg, hybrid, lon1, lat1, lon2, lat2);
+            const RouteKey route_key = {lon1, lat1, lon2, lat2};
+            std::optional<std::string> cache_res =
+                g_route_result_cache.get(route_key);
+            if (cache_res.has_value()) {
+              res_str = cache_res.value();
+              LOG_S(INFO) << "Return cached result length " << res_str.size()
+                          << " bytes";
+            } else {
+              nlohmann::json result = ComputeRoute(mg, lon1, lat1, lon2, lat2);
+              res_str = result.dump();
+              g_route_result_cache.put(route_key, res_str);
+            }
           }
         }
         {
           auto result_start = absl::Now();
           res.set_header("Access-Control-Allow-Origin", "*");
-          res.set_content(result.dump(), "application/json");
+          // res.set_content(result.dump(), "application/json");
+          res.set_content(res_str, "application/json");
           LOG_S(INFO) << absl::StrFormat(
               "**** Web result creation:      %.3f secs",
               ToDoubleSeconds(absl::Now() - result_start));
@@ -553,9 +563,8 @@ int main(int argc, char* argv[]) {
   // Try something on startup:
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
-  LOG_S(INFO) << ComputeRoute(mg, /*hybrid=*/false, 8.720121, 47.3476881,
-                              8.7204095, 47.3476057)
-                     .dump(2);
+  LOG_S(INFO)
+      << ComputeRoute(mg, 8.720121, 47.3476881, 8.7204095, 47.3476057).dump(2);
 
   mg.PrintInfo();
   LOG_S(INFO) << "Listening...";
