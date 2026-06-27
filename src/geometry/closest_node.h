@@ -9,6 +9,7 @@
 #include <numeric>
 #include <vector>
 
+#include "base/deg_coord.h"
 #include "base/util.h"
 #include "geometry/distance.h"
 #include "graph/graph_def.h"
@@ -20,13 +21,13 @@ struct ClosestNodeResult {
 
 // Computes distance to each node in the graph and chooses the node with the
 // shortest distance.
-inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, int64_t lat,
-                                             int64_t lon) {
+inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, DegE6 lat,
+                                             DegE6 lon) {
   uint32_t found_pos = INFU32;
   int64_t min_dist = INF64;
   for (uint32_t i = 0; i < g.nodes.size(); ++i) {
     const GNode& n = g.nodes.at(i);
-    int64_t dist = calculate_distance(lat, lon, n.lat, n.lon);
+    int64_t dist = calculate_distance(lat.v(), lon.v(), n.lat.v(), n.lon.v());
     if (dist < min_dist) {
       min_dist = dist;
       found_pos = i;
@@ -42,7 +43,7 @@ namespace {
 // else, so I have to implement my own binary search...
 inline int64_t LowerBoundBinSearch(const Graph& g,
                                    const std::vector<uint32_t>& idx,
-                                   int64_t lon) {
+                                   DegE6 lon) {
   uint64_t L = 0;
   uint64_t R = idx.size();
   while (L < R) {
@@ -60,8 +61,8 @@ inline int64_t LowerBoundBinSearch(const Graph& g,
 }
 
 struct FastSearchData {
-  const int64_t lat;
-  const int64_t lon;
+  const DegE6 lat;
+  const DegE6 lon;
   // Distance of one degree in lon direction at 'lat'.
   const double dist_one_deg_lon;
   int64_t min_dist;
@@ -77,7 +78,7 @@ struct FastSearchData {
 // if inside.
 inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
   const GNode& n = g.nodes.at(pos);
-  const int64_t dlon = std::abs(fsdata->lon - n.lon);
+  const int64_t dlon = std::abs(fsdata->lon.v64() - n.lon.v64());
   if (dlon > fsdata->max_dlon) {
     return false;
   }
@@ -87,14 +88,15 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
     return true;
   }
 #endif
-  int64_t dist = calculate_distance(fsdata->lat, fsdata->lon, n.lat, n.lon);
+  int64_t dist = calculate_distance(fsdata->lat.v(), fsdata->lon.v(), n.lat.v(),
+                                    n.lon.v());
   if (dist < fsdata->min_dist) {
     fsdata->min_dist = dist;
     fsdata->found_pos = pos;
     fsdata->max_dlon =
         // Add 1% to max_dlon to correct for boundary errors.
         // Divide by 2 because the point can be at the pole.
-        std::llround(1.01 * 10000000.0 * (dist / fsdata->dist_one_deg_lon));
+        std::llround(1.01 * TEN_POW_7_DBL * (dist / fsdata->dist_one_deg_lon));
   }
   return true;
 }
@@ -113,7 +115,7 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
 // longitude could be very at the pole.
 double ComputeOneDegreeHeuristic(int64_t lat) {
   return static_cast<double>(
-             calculate_distance(lat, 0, lat, 180ll * 10'000'000ll)) /
+             calculate_distance(lat, 0, lat, 180ll * TEN_POW_7)) /
          (180.0 * 2.0);
 }
 
@@ -138,14 +140,14 @@ inline std::vector<uint32_t> SortNodeIndexesByLon(const Graph& g) {
 // there were no errors when comparing 10k computations.
 inline ClosestNodeResult FindClosestNodeFast(const Graph& g,
                                              const std::vector<uint32_t>& idx,
-                                             int64_t lat, int64_t lon) {
+                                             DegE6 lat, DegE6 lon) {
   // Find first element >= the given lon.
   int64_t posf = LowerBoundBinSearch(g, idx, lon);  // first element >= 'lon'.
   // Search both forward (posf)and backward (posb) from the found position.
   int64_t posb = posf - 1;
   FastSearchData fsdata = {.lat = lat,
                            .lon = lon,
-                           .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat),
+                           .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat.v()),
                            .min_dist = INF64,
                            .max_dlon = INF64,
                            .found_pos = INFU32};
@@ -178,7 +180,7 @@ inline ClosestNodeResult FindClosestNodeFast(const Graph& g,
 // TODO: Verify that the heuristic used in FindClosestNodeFast() is 100%
 // accurate.
 void CheckHeuristic() {
-  int64_t deg1 = 10'000'000;
+  int64_t deg1 = TEN_POW_7;
   for (int64_t lat = -89; lat < 90; lat++) {
     int64_t d1 = 180 * calculate_distance(lat * deg1, 0, lat * deg1, deg1);
     int64_t d90 = 2 * calculate_distance(lat * deg1, 0, lat * deg1, 90 * deg1);

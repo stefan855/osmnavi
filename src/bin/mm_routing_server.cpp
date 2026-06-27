@@ -24,6 +24,7 @@
 #include "geometry/tiles.h"
 #include "graph/mmgraph_def.h"
 
+namespace {
 struct RouteKey {
   double lat1;
   double lon1;
@@ -34,6 +35,7 @@ struct RouteKey {
            other.lon2 == lon2;
   }
 };
+}  // namespace
 
 // Hash function specialization
 template <>
@@ -61,6 +63,28 @@ static std::shared_ptr<MMHybridRouter::RouterData> g_last_router_data;
 
 // Cache the results of route requests.
 static LRUCache<RouteKey, std::string> g_route_result_cache(8);
+
+// Cache the result for 'FindClosestEdges()'.
+inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, double d_lat,
+                                           double d_lon) {
+  static LRUCache<uint64_t, GeoAnchor> g_closest_edge_cache(32);
+
+  const DegE6 lat(d_lat);
+  const DegE6 lon(d_lon);
+
+  // Combine both lat and lon into one uint64_t, so we don't have to create a
+  // hash function.
+  uint64_t key = static_cast<uint32_t>(lat.v());
+  key = (key << 32) + static_cast<uint32_t>(lon.v());
+
+  std::optional<GeoAnchor> res = g_closest_edge_cache.get(key);
+  if (res.has_value()) {
+    return res.value();
+  }
+  GeoAnchor anch = FindClosestEdges(mg, lat, lon);
+  g_closest_edge_cache.put(key, anch);
+  return anch;
+}
 
 using CoordinatePair = struct {
   double lat;
@@ -151,12 +175,12 @@ struct JsonResult {
   std::string last_name;
 };
 
-float GetLon(const MMCluster& mc, uint32_t n_idx) {
-  return mc.node_to_lon(n_idx) / static_cast<float>(TEN_POW_7);
+double GetLon(const MMCluster& mc, uint32_t n_idx) {
+  return mc.node_to_lon(n_idx).AsDouble();
 }
 
-float GetLat(const MMCluster& mc, uint32_t n_idx) {
-  return mc.node_to_lat(n_idx) / static_cast<float>(TEN_POW_7);
+double GetLat(const MMCluster& mc, uint32_t n_idx) {
+  return mc.node_to_lat(n_idx).AsDouble();
 }
 
 std::string GetEdgeName(const MMCluster& mc, const MMFullEdge& fe) {
@@ -181,17 +205,17 @@ class StepsData {
     const MMFullEdge& fe = res_.full_edges.at(pos);
     const MMCluster& mc = fe.mc(mg);
 
-    float from_lon = GetLon(mc, fe.from_node_idx);
-    float from_lat = GetLat(mc, fe.from_node_idx);
-    float to_lon = GetLon(mc, fe.target_idx(mc));
-    float to_lat = GetLat(mc, fe.target_idx(mc));
+    double from_lon = GetLon(mc, fe.from_node_idx);
+    double from_lat = GetLat(mc, fe.from_node_idx);
+    double to_lon = GetLon(mc, fe.target_idx(mc));
+    double to_lat = GetLat(mc, fe.target_idx(mc));
     if (pos == 0) {
-      from_lon = res_.start.lon_at_fraction / TEN_POW_7_DBL;
-      from_lat = res_.start.lat_at_fraction / TEN_POW_7_DBL;
+      from_lon = res_.start.lon_at_fraction.AsDouble();
+      from_lat = res_.start.lat_at_fraction.AsDouble();
     }
     if (pos + 1 == num_steps()) {
-      to_lon = res_.target.lon_at_fraction / TEN_POW_7_DBL;
-      to_lat = res_.target.lat_at_fraction / TEN_POW_7_DBL;
+      to_lon = res_.target.lon_at_fraction.AsDouble();
+      to_lat = res_.target.lat_at_fraction.AsDouble();
     }
 
     std::vector<CoordinatePair> coords;
@@ -221,8 +245,8 @@ class StepsData {
   JsonResult CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
-    float to_lon = res_.target.lon_at_fraction / TEN_POW_7_DBL;
-    float to_lat = res_.target.lat_at_fraction / TEN_POW_7_DBL;
+    float to_lon = res_.target.lon_at_fraction.AsFloat();
+    float to_lat = res_.target.lat_at_fraction.AsFloat();
 
     std::vector<CoordinatePair> coords;
     coords.push_back({.lat = to_lat, .lon = to_lon});
@@ -268,16 +292,16 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
         {{"distance", std::roundf(res.start.distance_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.start.fe.mc(mg), res.start.fe)},
          {"location",
-          {res.start.lon_at_fraction / TEN_POW_7_DBL,
-           res.start.lat_at_fraction / TEN_POW_7_DBL}}});
+          {res.start.lon_at_fraction.AsDouble(),
+           res.start.lat_at_fraction.AsDouble()}}});
   }
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.target.distance_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.target.fe.mc(mg), res.target.fe)},
          {"location",
-          {res.target.lon_at_fraction / TEN_POW_7_DBL,
-           res.target.lat_at_fraction / TEN_POW_7_DBL}}});
+          {res.target.lon_at_fraction.AsDouble(),
+           res.target.lat_at_fraction.AsDouble()}}});
   }
 
   // We currently support only one leg, so the only thing to fill are the
@@ -307,10 +331,8 @@ nlohmann::json ComputeRoute(const MMGraph& mg, double lon1, double lat1,
   double find_closest_time;
   {
     absl::Time start_time = absl::Now();
-    start = FindClosestEdges(mg, std::llround(lat1 * TEN_POW_7_DBL),
-                             std::llround(lon1 * TEN_POW_7_DBL));
-    target = FindClosestEdges(mg, std::llround(lat2 * TEN_POW_7_DBL),
-                              std::llround(lon2 * TEN_POW_7_DBL));
+    start = FindClosestEdgesWithCache(mg, lat1, lon1);
+    target = FindClosestEdgesWithCache(mg, lat2, lon2);
     find_closest_time = ToDoubleSeconds(absl::Now() - start_time);
   }
   LOG_S(INFO) << absl::StrFormat("**** Find closest edges: %.2f secs",
@@ -446,9 +468,9 @@ int main(int argc, char* argv[]) {
   }
   ::close(fd);
   const MMGraph& mg = *((MMGraph*)ptr);
-  CHECK_EQ_S(mg.magic, kMagic);
-  CHECK_EQ_S(mg.version_major, kVersionMajor);
-  CHECK_EQ_S(mg.version_minor, kVersionMinor);
+  CHECK_EQ_S(mg.magic, kMMMagic);
+  CHECK_EQ_S(mg.version_major, kMMVersionMajor);
+  CHECK_EQ_S(mg.version_minor, kMMVersionMinor);
 
   svr.Get("/hi", [&](const httplib::Request&, httplib::Response& res) {
     res.set_content("Hello World!", "text/plain");

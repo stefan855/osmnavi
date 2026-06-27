@@ -11,8 +11,8 @@
 struct DistanceToSegment {
   double distance_cm = 0;
   double fraction_closest = 0.0;
-  int32_t lat_closest = 0;
-  int32_t lon_closest = 0;
+  DegE6 lat_closest;
+  DegE6 lon_closest;
   double t = 0.0;
 
   // "spaceship" operator, automatically defines ==, !=, <, <=, >, >=.
@@ -20,46 +20,48 @@ struct DistanceToSegment {
 };
 
 // Convert lat/lon coordinate (given as deg * 10^7) to radians.
-constexpr inline double IntDegToRad(int32_t int_deg) {
-  return int_deg * (M_PI / 180.0 / TEN_POW_7);
+constexpr inline double IntDegToRad(DegE6 int_deg) {
+  return int_deg.AsDouble() * M_PI / 180.0;
+  // return int_deg * (M_PI / 180.0 / TEN_POW_7);
 }
 
 // Compute the length of a specific longitude offset in cm on a circle of
 // latitude at 'lat'.
-constexpr double LonDistanceAtLat(int32_t lon, int32_t lat) {
+constexpr double LonDistanceAtLat(DegE6 lon, DegE6 lat) {
   const double lat_rad = IntDegToRad(lat);
   return kEarthRadiusCm * IntDegToRad(lon) * std::cos(lat_rad);
 }
 
 // Return the length of a circle of longitude of length 'lat'.
-constexpr double CmPerLatitudeDegree(int32_t lat) {
+constexpr double CmPerLatitudeDegree(DegE6 lat) {
   return kEarthRadiusCm * IntDegToRad(lat);
 }
 
 // Given a length in centimeters, return the integer lat offset that corresponds
 // to it.
 constexpr int32_t LatDistanceForLength(int32_t length_cm) {
-  double fraction =
-      static_cast<double>(length_cm) / kEarthCircumReferenceCm;
+  double fraction = static_cast<double>(length_cm) / kEarthCircumReferenceCm;
   return 360 * TEN_POW_7_DBL * fraction;
 }
 
 // Compute the (x, y) distance from (lat0, lon0) to (lat1, lon1) in
 // centimeters. Uses a flat (x,y) coordinate system with (lat0, lon0) at (0,0)
 // for computation. Works reasonably well only for small distances.
-constexpr void FastEarthDistanceXY(int32_t lat0, int32_t lon0, int32_t lat1,
-                                   int32_t lon1, double* x, double* y) {
+constexpr void FastEarthDistanceXY(DegE6 lat0, DegE6 lon0, DegE6 lat1,
+                                   DegE6 lon1, double* x, double* y) {
   double lat0_rad = IntDegToRad(lat0);
-  *x = kEarthRadiusCm * IntDegToRad(lon1 - lon0) * std::cos(lat0_rad);
-  *y = kEarthRadiusCm * IntDegToRad(lat1 - lat0);
+  *x = kEarthRadiusCm * IntDegToRad(DegE6(lon1.v64() - lon0.v64())) *
+       std::cos(lat0_rad);
+  *y = kEarthRadiusCm * IntDegToRad(DegE6(lat1.v64() - lat0.v64()));
 }
 
 // Compute distance of (lat_p, lon_p) to segment (lat_a,lon_a) -> (lat_b,lon_b).
 // Returns the distance and the fraction of AB that has to be travelled to get
 // to the closest point.
-constexpr DistanceToSegment FastPointToSegmentDistance(
-    int32_t lat_p, int32_t lon_p, int32_t lat_a, int32_t lon_a, int32_t lat_b,
-    int32_t lon_b) {
+constexpr DistanceToSegment FastPointToSegmentDistance(DegE6 lat_p, DegE6 lon_p,
+                                                       DegE6 lat_a, DegE6 lon_a,
+                                                       DegE6 lat_b,
+                                                       DegE6 lon_b) {
   // Convert to local coordinates (A is origin)
   double x_p, y_p, x_b, y_b;
   FastEarthDistanceXY(lat_a, lon_a, lat_p, lon_p, &x_p, &y_p);
@@ -96,18 +98,20 @@ constexpr DistanceToSegment FastPointToSegmentDistance(
 
   return {.distance_cm = std::hypot(x_p - closest_x, y_p - closest_y),
           .fraction_closest = fraction_closest,
-          .lat_closest =
-              lat_a + static_cast<int32_t>(fraction_closest * (lat_b - lat_a)),
-          .lon_closest =
-              lon_a + static_cast<int32_t>(fraction_closest * (lon_b - lon_a)),
+          .lat_closest = DegE6(
+              lat_a.v64() + static_cast<int64_t>(fraction_closest *
+                                                 (lat_b.v64() - lat_a.v64()))),
+          .lon_closest = DegE6(
+              lon_a.v64() + static_cast<int64_t>(fraction_closest *
+                                                 (lon_b.v64() - lon_a.v64()))),
           .t = t};
 }
 
 // Example usage demonstrating the separation
 int ComputeTestDistance2() {
-  int32_t lat_p = 488566000, lon_p = 23522000;   // Paris
-  int32_t lat_a = 515074000, lon_a = -1278000;   // London
-  int32_t lat_b = 525200000, lon_b = 134050000;  // Berlin
+  DegE6 lat_p(488566000), lon_p(23522000);   // Paris
+  DegE6 lat_a(515074000), lon_a(-1278000);   // London
+  DegE6 lat_b(525200000), lon_b(134050000);  // Berlin
 
   // 1. Fast path: Just get distance (e.g., for filtering or sorting)
   DistanceToSegment dist =
@@ -118,9 +122,9 @@ int ComputeTestDistance2() {
   LOG_S(INFO) << absl::StrFormat("T clamped: %.8f", dist.fraction_closest);
   LOG_S(INFO) << absl::StrFormat("T:         %.8f", dist.t);
   LOG_S(INFO) << absl::StrFormat("lat:       %.8f",
-                                 dist.lat_closest / TEN_POW_7_DBL);
+                                 dist.lat_closest.AsDouble());
   LOG_S(INFO) << absl::StrFormat("lon:       %.8f",
-                                 dist.lon_closest / TEN_POW_7_DBL);
+                                 dist.lon_closest.AsDouble());
   return 0;
 }
 

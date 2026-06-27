@@ -19,7 +19,7 @@
 class TiledCountryLookup {
  public:
   // Units that incoming coordinates must have. This is 100 nanodegrees.
-  static constexpr int32_t kDegreeUnits = 10000000;
+  static constexpr int32_t kDegreeUnits = TEN_POW_7;
 
   // Size of a tile in the lat/lon coordinate system using kDegreeUnits.
   // The default size 1 << 20 is roughly 10^6, i.e. 1/10 degrees.

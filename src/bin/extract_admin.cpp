@@ -35,8 +35,9 @@ int64_t WritePolyPoints(const AdminInfo& info, const AdminRelWayPiece& piece,
   for (size_t i = piece.start ? 0 : 1; i < nodes.size(); ++i) {
     count++;
     const OsmPbfReader::Node n = FindNode(info.nodes, nodes.at(i));
-    *myfile << absl::StrFormat("%s,%s,%d,%d\n", i > 0 ? "pt" : "poly-start",
-                               piece.inner ? "red" : "black", n.lat, n.lon);
+    *myfile << absl::StrFormat("%s,%s,%ld,%ld\n", i > 0 ? "pt" : "poly-start",
+                               piece.inner ? "red" : "black", n.osm_lat,
+                               n.osm_lon);
   }
   return count;
 }
@@ -103,8 +104,9 @@ void ConsumeNode(const OsmPbfReader::NodeWithTags& node, int thread_idx,
                  std::mutex& mut, AdminInfo* admin_info) {
   if (admin_info->ref_nodes.contains(node.id())) {
     std::unique_lock<std::mutex> l(mut);
-    admin_info->nodes[node.id()] = {
-        .id = node.id(), .lat = node.lat_, .lon = node.lon_};
+    admin_info->nodes[node.id()] = {.id = node.id(),
+                                    .osm_lat = node.osm_lat_,
+                                    .osm_lon = node.osm_lon_};
   }
 }
 

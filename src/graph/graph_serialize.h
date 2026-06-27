@@ -66,8 +66,8 @@ inline void EncodeGNode(const GNode& base, const GNode& n, WriteBuff* buff) {
   EncodeInt(n.edges_start_pos - base.edges_start_pos, buff);
   EncodeUInt(n.num_forward_edges, buff);
   EncodeUInt(n.ncc, buff);
-  EncodeInt(n.lat, buff);
-  EncodeInt(n.lon, buff);
+  EncodeInt(n.lat.v(), buff);
+  EncodeInt(n.lon.v(), buff);
   /*
   ** bit std::uint32_t large_component : 1;
   ** bit std::uint32_t cluster_border_node : 1 = 0;

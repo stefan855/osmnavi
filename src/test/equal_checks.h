@@ -10,8 +10,8 @@
   CHECK_EQ_S(n1.edges_start_pos, n2.edges_start_pos);         \
   CHECK_EQ_S(n1.num_forward_edges, n2.num_forward_edges);     \
   CHECK_EQ_S(n1.ncc, n2.ncc);                                 \
-  CHECK_EQ_S(n1.lat, n2.lat);                                 \
-  CHECK_EQ_S(n1.lon, n2.lon);                                 \
+  CHECK_EQ_S(n1.lat.v(), n2.lat.v());                         \
+  CHECK_EQ_S(n1.lon.v(), n2.lon.v());                         \
   CHECK_EQ_S(n1.large_component, n2.large_component);         \
   CHECK_EQ_S(n1.cluster_border_node, n2.cluster_border_node); \
   CHECK_EQ_S(n1.dead_end, n2.dead_end);                       \

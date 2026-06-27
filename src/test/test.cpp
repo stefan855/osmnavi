@@ -514,18 +514,18 @@ void FindNode(const DataBlockTable& t, std::uint64_t id, std::int64_t lat,
   NodeBuilder::VNode node;
   CHECK_S(NodeBuilder::FindNode(t, id, &node));
   CHECK_EQ_S(node.id, id);
-  CHECK_EQ_S(node.lat, lat);
-  CHECK_EQ_S(node.lon, lon);
+  CHECK_EQ_S(node.lat.v(), lat);
+  CHECK_EQ_S(node.lon.v(), lon);
 }
 
 void TestNodeDataBlock() {
   LOG_S(INFO) << "TestNodeDataBlock() started";
   DataBlockTable t(10);
   NodeBuilder builder;
-  builder.AddNode({5, 1, 10});
-  builder.AddNode({300, 2, 100});
+  builder.AddNode({5, DegE6(1), DegE6(10)});
+  builder.AddNode({300, DegE6(2), DegE6(100)});
   builder.AddBlockToTable(&t);
-  builder.AddNode({500, 3, 1000});
+  builder.AddNode({500, DegE6(3), DegE6(1000)});
   builder.AddBlockToTable(&t);
 
   t.Sort();
@@ -555,7 +555,7 @@ void TestNodeDataBlockReEncode() {
   {
     NodeBuilder builder;
     for (unsigned int i = 1; i <= num_elements; ++i) {
-      builder.AddNode({i, 0, 0});
+      builder.AddNode({i, DegE6(0), DegE6(0)});
       if (builder.pending_nodes(), 3) {
         builder.AddBlockToTable(&from);
       }
@@ -582,7 +582,7 @@ void TestNodeDataBlockReEncode() {
   for (unsigned int i = 1; i <= num_elements; ++i) {
     NodeBuilder::VNode node;
     CHECK_S(NodeBuilder::FindNode(to, i, &node));
-    CHECK_S(node.lat == 0 && node.lon == 0);
+    CHECK_S(node.lat.v() == 0 && node.lon.v() == 0);
   }
   LOG_S(INFO) << "TestNodeDataBlockReEncode() finished";
 }
@@ -1192,7 +1192,7 @@ void TestArglis() {
 }
 
 void TestCalculateDistance() {
-  constexpr int32_t unit = 10000000;
+  constexpr int32_t unit = TEN_POW_7;
   LOG_S(INFO) << "TestCalculateDistance() started";
   LOG_S(INFO) << "New:"
               << calculate_distance(-10 * unit, -20 * unit, 30 * unit,
@@ -1206,12 +1206,14 @@ void TestCalculateDistance() {
 }
 
 uint32_t ComputeAngle(double lat1, double lon1, double lat2, double lon2) {
-  const int32_t lat1n = std::lround(lat1 * TEN_POW_7);
-  const int32_t lon1n = std::lround(lon1 * TEN_POW_7);
-  const int32_t lat2n = std::lround(lat2 * TEN_POW_7);
-  const int32_t lon2n = std::lround(lon2 * TEN_POW_7);
-  const uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
-  return angle_to_east_degrees(lat1n, lon1n, lat2n, lon2n, length_cm);
+  const DegE6 lat1n(lat1);
+  const DegE6 lon1n(lon1);
+  const DegE6 lat2n(lat2);
+  const DegE6 lon2n(lon2);
+  const uint32_t length_cm =
+      calculate_distance(lat1n.v(), lon1n.v(), lat2n.v(), lon2n.v());
+  return angle_to_east_degrees(lat1n.v(), lon1n.v(), lat2n.v(), lon2n.v(),
+                               length_cm);
 }
 
 int32_t TestAngle(double lat1, double lon1, double lat2, double lon2,
@@ -1400,9 +1402,9 @@ void TestDeDuperMergeSort() {
 }
 
 namespace {
-int64_t qdist(int64_t lat, int64_t lon, const GNode& n) {
-  int64_t dlat = lat - n.lat;
-  int64_t dlon = lon - n.lon;
+int64_t qdist(DegE6 lat, DegE6 lon, const GNode& n) {
+  int64_t dlat = lat.v64() - n.lat.v64();
+  int64_t dlon = lon.v64() - n.lon.v64();
   return dlat * dlat + dlon * dlon;
 }
 }  // namespace
@@ -1411,10 +1413,10 @@ void TestClosestPoint() {
   FUNC_TIMER();
   Graph g;
   // Coords (-1,-1) (0,0) (1,1) (2,2)
-  g.nodes.push_back({.lat = 0, .lon = 0});
-  g.nodes.push_back({.lat = 40'000'000, .lon = 20'000'000});
-  g.nodes.push_back({.lat = 20'000'000, .lon = 10'000'000});
-  g.nodes.push_back({.lat = -20'000'000, .lon = -10'000'000});
+  g.nodes.push_back({.lat = DegE6(0.0), .lon = DegE6(0.0)});
+  g.nodes.push_back({.lat = DegE6(4.0), .lon = DegE6(2.0)});
+  g.nodes.push_back({.lat = DegE6(2.0), .lon = DegE6(1.0)});
+  g.nodes.push_back({.lat = DegE6(-2.0), .lon = DegE6(-1.0)});
 
   auto idx = SortNodeIndexesByLon(g);
   CHECK_EQ_S(idx.size(), 4);
@@ -1423,21 +1425,21 @@ void TestClosestPoint() {
   CHECK_EQ_S(idx.at(2), 2);
   CHECK_EQ_S(idx.at(3), 1);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -10'000'001), 0);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -10'000'000), 0);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -9'999'999), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-1.000001)), 0);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-1.000000)), 0);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-0.999999)), 1);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, -1), 1);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 0), 1);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 1), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-1)), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(0)), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1)), 2);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 9'999'999), 2);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 10'000'000), 2);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 10'000'001), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(0.999999)), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1.000000)), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1.000001)), 3);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 19'999'999), 3);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 20'000'000), 3);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, 20'000'001), 4);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1.999999)), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(2.000000)), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(2.000001)), 4);
 
   // Note, we've found two (lat,lon) pairs that different results slow vs. fast
   // because the have the same qdist:
@@ -1446,8 +1448,10 @@ void TestClosestPoint() {
   srand(1);
   for (int i = 0; i < 100'000; ++i) {
     // Random coordinates in the range [-10, +10) degrees.
-    int64_t lat = (rand() % (2 * 90 * TEN_POW_7)) - 90 * TEN_POW_7;
-    int64_t lon = (rand() % (2 * 180 * TEN_POW_7)) - 180 * TEN_POW_7;
+    DegE6 lat(static_cast<double>((rand() % (2 * 90)) - 90));
+    DegE6 lon(static_cast<double>((rand() % (2 * 180)) - 180));
+    // int64_t lat = (rand() % (2 * 90 * TEN_POW_7)) - 90 * TEN_POW_7;
+    // int64_t lon = (rand() % (2 * 180 * TEN_POW_7)) - 180 * TEN_POW_7;
     auto slow = FindClosestNodeSlow(g, lat, lon);
     auto fast = FindClosestNodeFast(g, idx, lat, lon);
     if (slow.dist != fast.dist) {
@@ -1458,8 +1462,8 @@ void TestClosestPoint() {
       LOG_S(INFO) << absl::StrFormat(
           "Searching for (%d,%d)\nslow (%d,%d) qdist:%d cm:%d\nfast (%d,%d) "
           "qdist:%d cm:%d",
-          lat, lon, nslow.lat, nslow.lon, slow_qdist, slow.dist, nfast.lat,
-          nfast.lon, fast_qdist, fast.dist);
+          lat.v(), lon.v(), nslow.lat.v(), nslow.lon.v(), slow_qdist, slow.dist,
+          nfast.lat.v(), nfast.lon.v(), fast_qdist, fast.dist);
     }
   }
 }

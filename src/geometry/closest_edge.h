@@ -27,7 +27,7 @@ struct ClusterInfo {
 
 // Return the minimal distance for (lat, lon) to any of the four border lines of
 // 'br'. Returns 0 if (lat, lon) is inside the bounding rect.
-uint32_t DistanceToBoundingRect(int32_t lat, int32_t lon, MMBoundingRect br) {
+uint32_t DistanceToBoundingRect(DegE6 lat, DegE6 lon, MMBoundingRect br) {
   if (lat >= br.min.lat && lat <= br.max.lat && lon >= br.min.lon &&
       lon <= br.max.lon) {
     return 0;
@@ -60,12 +60,12 @@ uint32_t DistanceToBoundingRect(int32_t lat, int32_t lon, MMBoundingRect br) {
 
 // At latitude 'lat', how many degrees (in 10^-7 degrees units) do we travel for
 // 10 km?
-int64_t Get10kmLongitudeAtLatitude(int32_t lat) {
+int64_t Get10kmLongitudeAtLatitude(DegE6 lat) {
   // Compute an estimate of how long one kilometer of longitude is (in 10^-7
   // degrees) at a specific latitude.
   // Compute length for one degree longitude at 'lat'.
   double length_one_deg_in_km =
-      calculate_distance(lat, 0, lat, TEN_POW_7) / (100.0 * 1000.0);
+      calculate_distance(lat.v(), 0, lat.v(), TEN_POW_7) / (100.0 * 1000.0);
   return 1'000'00000 / length_one_deg_in_km;
 }
 
@@ -74,8 +74,8 @@ int64_t Get10kmLongitudeAtLatitude(int32_t lat) {
 // of the cluster and secondly by increasing distance to the center of the
 // cluster. The distance of the point is 0 if it is inside the border of the
 // cluster.
-std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, int32_t lat,
-                                          int32_t lon) {
+std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, DegE6 lat,
+                                          DegE6 lon) {
   std::vector<ClusterInfo> result;
 
   // Roughly ten kilometers in lat direction.
@@ -85,21 +85,21 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, int32_t lat,
 
   for (const MMClusterBoundingRect& cl_br : mg.sorted_bounding_rects.span()) {
     const MMBoundingRect& br = cl_br.bounding_rect;
-    if ((int64_t)lat < (int64_t)br.min.lat - lat_10km ||
-        (int64_t)lat > (int64_t)br.max.lat + lat_10km) {
+    if (lat.v64() < br.min.lat.v64() - lat_10km ||
+        lat.v64() > br.max.lat.v64() + lat_10km) {
       continue;
     }
-    if (std::abs(lat) < 85ll * TEN_POW_7 &&
-        ((int64_t)lon < (int64_t)br.min.lon - lon_10km ||
-         (int64_t)lon > (int64_t)br.max.lon + lon_10km)) {
+    if (std::abs(lat.v()) < 85ll * TEN_POW_7 &&
+        (lon.v64() < br.min.lon.v64() - lon_10km ||
+         lon.v64() > br.max.lon.v64() + lon_10km)) {
       continue;
     }
 
     ClusterInfo ci = {.cluster_id = cl_br.cluster_id};
     ci.point_to_border_cm = DistanceToBoundingRect(lat, lon, br);
     ci.point_to_center_cm = calculate_distance(
-        lat, lon, ((int64_t)br.min.lat + (int64_t)br.max.lat) / 2,
-        ((int64_t)br.min.lon + (int64_t)br.max.lon) / 2);
+        lat.v(), lon.v(), (br.min.lat.v64() + br.max.lat.v64()) / 2,
+        (br.min.lon.v64() + br.max.lon.v64()) / 2);
 
     if (ci.point_to_border_cm < 10 * 1000 * 100) {  // 10 km
       // LOG_S(INFO) << absl::StrFormat(
@@ -127,9 +127,9 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, int32_t lat,
 
 }  // namespace
 
-inline GeoAnchor FindClosestEdges(const MMGraph& mg, int32_t lat, int32_t lon) {
-  LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%u, %u)", lat,
-                                 lon);
+inline GeoAnchor FindClosestEdges(const MMGraph& mg, DegE6 lat, DegE6 lon) {
+  LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%.6f, %.6f)",
+                                 lat.AsDouble(), lon.AsDouble());
   const std::vector<ClusterInfo> good_clusters = FindGoodClusters(mg, lat, lon);
 
   TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;

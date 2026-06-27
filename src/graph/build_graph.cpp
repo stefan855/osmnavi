@@ -32,6 +32,9 @@ namespace {
 struct ExtractedWayNode {
   int64_t id;
   uint16_t ncc;
+  // Keep track of duplicate ids in a list of node ids.
+  bool dup_earlier;  // true iff there is the same id earlier in the list.
+  bool dup_later;    // true iff there is the same id later in the list.
 };
 
 // Data needed while constructing the way representation of type GWay.
@@ -60,7 +63,7 @@ void ValidateGraph(const Graph& g) {
       CHECK_GT_S(node.node_id, g.nodes.at(node_idx - 1).node_id) << node_idx;
     }
 
-    // No dup edges.
+    // No dup edges with (from_idx, target_idx, way_idx) as key.
     const uint32_t num_all_edges = gnode_num_all_edges(g, node_idx);
     for (uint32_t off1 = 0; off1 < num_all_edges; ++off1) {
       const GEdge& e1 = g.edges.at(node.edges_start_pos + off1);
@@ -162,8 +165,8 @@ void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
     int kv_start = -1;
     for (int i = 0; i < pg.dense().id_size(); ++i) {
       node.id_ += pg.dense().id(i);
-      node.lat_ += pg.dense().lat(i);
-      node.lon_ += pg.dense().lon(i);
+      node.osm_lat_ += pg.dense().lat(i);
+      node.osm_lon_ += pg.dense().lon(i);
       const int kv_stop =
           OsmPbfReader::NodeWithTags::AdvanceKVWindow(keys_vals, &kv_start);
 
@@ -182,8 +185,9 @@ void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
         }
 
         CHECK_GT_S(node.id_, 0);
-        builder.AddNode(
-            {.id = (uint64_t)node.id_, .lat = node.lat_, .lon = node.lon_});
+        builder.AddNode({.id = (uint64_t)node.id_,
+                         .lat = DegE6::FromOSM(node.osm_lat_),
+                         .lon = DegE6::FromOSM(node.osm_lon_)});
         if (builder.pending_nodes() >= 128) {
           std::unique_lock<std::mutex> l(mut);
           builder.AddBlockToTable(node_table);
@@ -312,7 +316,7 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
   std::int64_t running_id = 0;
   for (int ref_idx = 0; ref_idx < osm_way.refs().size(); ++ref_idx) {
     running_id += osm_way.refs(ref_idx);
-    //
+
     // Check for repeated nodes/segments. If found, remove them.
     if (way_nodes.size() > 0 && way_nodes.back().id == running_id) {
       // Repeated node. This is an error that causes headaches, for instance
@@ -355,8 +359,11 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
       *missing_nodes = true;
       continue;
     }
-    uint16_t ncc = meta.tiler->GetCountryNum(node.lon, node.lat);
-    way_nodes.push_back({.id = running_id, .ncc = ncc});
+    uint16_t ncc = meta.tiler->GetCountryNum(node.lon.v(), node.lat.v());
+    way_nodes.push_back({.id = running_id,
+                         .ncc = ncc,
+                         .dup_earlier = false,
+                         .dup_later = false});
   }
   if (*missing_nodes) {
     LOG_S(INFO) << "Way " << osm_way.id() << " has missing node(s) -- country:"
@@ -365,6 +372,17 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
                         : CountryNumToString(way_nodes.front().ncc));
     return {};
   }
+
+  // Label dups and store the direction of the dup.
+  for (size_t pos = 0; pos < way_nodes.size() - 1; ++pos) {
+    for (size_t h = pos + 1; h < way_nodes.size(); ++h) {
+      if (way_nodes.at(pos).id == way_nodes.at(h).id) {
+        way_nodes.at(pos).dup_later = true;
+        way_nodes.at(h).dup_earlier = true;
+      }
+    }
+  }
+
   return way_nodes;
 }
 
@@ -394,7 +412,7 @@ void SetWayCountryCode(const std::vector<ExtractedWayNode>& way_nodes,
 // Should only be called when mutex-locked.
 // Marks all nodes referenced by a way as "seen". If a node is already "seen"
 // then it marks it also as "needed", because this means that the point is an
-// intersection of two ways.
+// intersection of at least two ways.
 // Also marks the nodes of edges connecting different countries as "needed".
 // This keeps edge distances short when we are not sure about speed limits,
 // access rules etc.
@@ -437,6 +455,9 @@ void MarkSeenAndNeeded(GraphMetaData* meta,
   // Find loops in the way nodes and mark all nodes in the loop as needed.
   for (size_t i = 0; i < ncs.size() - 1; ++i) {
     const ExtractedWayNode& nc1 = ncs.at(i);
+    if (!nc1.dup_later) {
+      continue;
+    }
     for (size_t j = i + 1; j < ncs.size(); ++j) {
       if (ncs.at(j).id == nc1.id) {
         // [i..j] is a loop.
@@ -663,11 +684,11 @@ std::pair<bool, bool> GetPriorityRoadSetting(
 // Check if osm_way is part of the routable network (routable by car etc.) and
 // add a record to graph.ways. Also updates 'seen nodes' and 'needed nodes'
 // bitsets.
-void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                      std::mutex& mut,
-                      DeDuperWithIds<WaySharedAttrs>* wsa_deduper,
-                      DeDuperWithIds<std::string>* streetname_deduper,
-                      GraphMetaData* meta, BuildGraphStats* stats) {
+void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
+                    std::mutex& mut,
+                    DeDuperWithIds<WaySharedAttrs>* wsa_deduper,
+                    DeDuperWithIds<std::string>* streetname_deduper,
+                    GraphMetaData* meta, BuildGraphStats* stats) {
   if (osm_way.refs().size() <= 1) {
     LOG_S(INFO) << absl::StrFormat("Ignore way %lld of length %lld",
                                    osm_way.id(), osm_way.refs().size());
@@ -709,6 +730,7 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   uint32_t dup_segments = 0;
   const std::vector<ExtractedWayNode> way_nodes =
       ExtractWayNodes(*meta, osm_way, &missing_nodes, &dup_segments);
+  stats->max_way_nodes = std::max(stats->max_way_nodes, way_nodes.size());
   if (missing_nodes || way_nodes.size() <= 1) {
     stats->num_ways_missing_nodes++;
     return;
@@ -780,8 +802,9 @@ void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 namespace {
 void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const bool inverted, const bool contra_way, const bool has_shapes,
-             const bool both_directions, const size_t way_idx,
-             const std::uint64_t distance_cm, bool car_restricted) {
+             const bool has_reverse_shapes, const bool both_directions,
+             const size_t way_idx, const std::uint64_t distance_cm,
+             bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
   CHECK_LE_S(distance_cm, MAX_EDGE_DISTANCE_CM)
@@ -812,6 +835,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.to_bridge = 0;
   e.contra_way = contra_way ? 1 : 0;
   e.has_shapes = has_shapes ? 1 : 0;
+  e.has_reverse_shapes = has_reverse_shapes ? 1 : 0;
   e.cross_country = n.ncc != other.ncc;
   e.inverted = inverted ? 1 : 0;
   e.both_directions = both_directions ? 1 : 0;
@@ -898,8 +922,8 @@ void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
   reader->ReadWays([&wsa_deduper, &streetname_deduper, meta](
                        const OSMTagHelper& tagh, const OSMPBF::Way& way,
                        int thread_idx, std::mutex& mut) {
-    ConsumeWayWorker(tagh, way, mut, &wsa_deduper, &streetname_deduper, meta,
-                     &meta->Stats(thread_idx));
+    LoadGWayWorker(tagh, way, mut, &wsa_deduper, &streetname_deduper, meta,
+                   &meta->Stats(thread_idx));
   });
 
   {
@@ -938,6 +962,7 @@ void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
   }
 }
 
+// Sort by ascending way.id.
 void SortGWays(GraphMetaData* meta) {
   FUNC_TIMER();
   // We have two way related vectors with the same size. They have to be sorted
@@ -948,12 +973,6 @@ void SortGWays(GraphMetaData* meta) {
   std::ranges::sort(zip, [](const auto& a, const auto& b) {
     return std::get<0>(a).id < std::get<0>(b).id;
   });
-
-#if 0
-  // Sort by ascending way_id.
-  std::sort(meta->graph.ways.begin(), meta->graph.ways.end(),
-            [](const GWay& a, const GWay& b) { return a.id < b.id; });
-#endif
 }
 
 void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
@@ -984,8 +1003,8 @@ void AllocateGNodes(GraphMetaData* meta) {
       // n.simple_turn_restriction_via_node = 0;
       n.is_pedestrian_crossing = 0;
       n.cluster_skeleton = 0;
-      n.lat = node->lat;
-      n.lon = node->lon;
+      n.lat = node->lat.v();
+      n.lon = node->lon.v();
       meta->graph.nodes.push_back(n);
     }
   }
@@ -995,7 +1014,7 @@ void SetCountryInGNodes(GraphMetaData* meta) {
   FUNC_TIMER();
   // TODO: run with thread pool.
   for (GNode& n : meta->graph.nodes) {
-    n.ncc = meta->tiler->GetCountryNum(n.lon, n.lat);
+    n.ncc = meta->tiler->GetCountryNum(n.lon.v(), n.lat.v());
   }
 }
 
@@ -1072,6 +1091,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
   std::vector<uint64_t> ids;
   std::vector<size_t> node_idx;
   std::vector<uint64_t> dist_sums;
+  absl::flat_hash_set<uint32_t> id_set;
 
   // Compute distances between the nodes of the way and store
   for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
@@ -1089,7 +1109,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
 
     // Compute distances sum from start and store in distance vector.
     // Non-existing nodes add 0 to the distance.
-    NodeBuilder::VNode prev_node = {.id = 0, .lat = 0, .lon = 0};
+    NodeBuilder::VNode prev_node = {.id = 0, .lat = DegE6(), .lon = DegE6()};
     int64_t sum = 0;
     for (const uint64_t id : ids) {
       if (meta->way_nodes_seen->GetBit(id)) {
@@ -1101,14 +1121,17 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
         }
         // Sum up distance so far.
         if (prev_node.id != 0) {
-          sum += calculate_distance(prev_node.lat, prev_node.lon, node.lat,
-                                    node.lon);
+          sum += calculate_distance(prev_node.lat.v(), prev_node.lon.v(),
+                                    node.lat.v(), node.lon.v());
 #if 0
           LOG_S(INFO) << "delta-lat:" << (node.lat - prev_node.lat);
           LOG_S(INFO) << "delta-lon:" << (node.lon - prev_node.lon);
 #endif
         }
         prev_node = node;
+      } else {
+        // TODO: if this never fires then create a CHECK() above.
+        ABORT_S() << "should be needed";
       }
       dist_sums.push_back(sum);
       if (meta->way_nodes_needed->GetBit(id)) {
@@ -1138,34 +1161,50 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
       const bool vt_backward =
           RoutableAccess(GetRAFromWSA(wsa, meta->opt.vt, DIR_BACKWARD).access);
 
-      std::unique_lock<std::mutex> l(mut);
-      int last_pos = -1;
+      id_set.clear();
+      int prev_pos = -1;
+      // True if the id at prev_pos was a repetition of an earlier id.
+      bool prev_pos_is_repeated_id = false;
+
+      std::lock_guard<std::mutex> l(mut);
       for (size_t pos = 0; pos < ids.size(); ++pos) {
         uint64_t id = ids.at(pos);
         if (meta->way_nodes_needed->GetBit(id)) {
-          if (last_pos >= 0) {
+          if (prev_pos >= 0) {
             // Emit edge.
-            std::size_t idx1 = node_idx.at(last_pos);
-            std::size_t idx2 = node_idx.at(pos);
-            uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(last_pos);
-            bool has_shapes = pos - last_pos > 1;
-            // Store edges with the summed up distance.
+            const std::size_t idx1 = node_idx.at(prev_pos);
+            const std::size_t idx2 = node_idx.at(pos);
+            uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(prev_pos);
 
-            // if (WSAAnyRoutable(wsa, DIR_FORWARD) &&
-            //     WSAAnyRoutable(wsa, DIR_BACKWARD)) {
+            const bool has_shapes = pos - prev_pos > 1;
+            if (prev_pos_is_repeated_id && has_shapes) {
+              // This can only occur in ways that have a loop and that have a
+              // shape edge starting at the *end* of the loop.
+#if 0
+              LOG_S(INFO) << "TTT way:" << way.id
+                          << " node:" << ids.at(prev_pos)
+                          << " prev_pos:" << prev_pos;
+#endif
+              graph.edge_in_way_start_pos_map[{idx1, idx2, way_idx}] =
+                  static_cast<uint32_t>(prev_pos);
+            }
+
+            // Store edges with the summed up distance.
             if (vt_forward && vt_backward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false, has_shapes,
+                      /*has_reverse_shapes=*/false,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_f);
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
-                      /*contra_way=*/true, has_shapes,
+                      /*contra_way=*/true, /*has_shapes=*/false,
+                      /*has_reverse_shapes=*/has_shapes,
                       /*both_directions=*/true, way_idx, distance_cm,
                       restr_car_b);
-              // } else if (WSAAnyRoutable(wsa, DIR_FORWARD)) {
             } else if (vt_forward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false, has_shapes,
+                      /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
               // Inverted edges should have the same contra way as the
@@ -1173,27 +1212,32 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               // querying the way information works the same for inverted and
               // non-inverted edges.
               AddEdge(graph, idx2, idx1, /*inverted=*/true,
-                      /*contra_way=*/false, has_shapes,
+                      /*contra_way=*/false, /*has_shapes=*/false,
+                      /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_f);
             } else {
-              // CHECK_S(WSAAnyRoutable(wsa, DIR_BACKWARD)) << way.id;
               CHECK_S(vt_backward) << way.id;
-              AddEdge(graph, idx2, idx1, /*inverted=*/false,
-                      /*contra_way=*/true, has_shapes,
-                      /*both_directions=*/false, way_idx, distance_cm,
-                      restr_car_b);
+              AddEdge(
+                  graph, idx2, idx1, /*inverted=*/false,
+                  /*contra_way=*/true, has_shapes, /*has_reverse_shapes=*/false,
+                  /*both_directions=*/false, way_idx, distance_cm, restr_car_b);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
               // querying the way information works the same for inverted and
               // non-inverted edges.
               AddEdge(graph, idx1, idx2, /*inverted=*/true,
-                      /*contra_way=*/true, has_shapes,
+                      /*contra_way=*/true, /*has_shapes=*/false,
+                      /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
                       restr_car_b);
             }
           }
-          last_pos = pos;
+          prev_pos = pos;
+          // True iff the id has been seen before in the same way. Needed later
+          // to find the start point an edge when computing shape lists.
+          prev_pos_is_repeated_id = id_set.contains(id);
+          id_set.insert(id);
         }
       }
     }
@@ -1215,7 +1259,8 @@ void PopulateEdgeArrays(GraphMetaData* meta) {
 }
 
 namespace {
-// Sort the edges [start..stop) in g->edges by ascending (target_idx, way_idx).
+// Sort the edges [start..stop) in g->edges by ascending (target_idx,
+// way_idx).
 void SortEdgeSpan(Graph* g, uint32_t start, uint32_t stop) {
   std::sort(
       g->edges.begin() + start, g->edges.begin() + stop,
@@ -1345,7 +1390,8 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
   ComputeShortestEdgePathsInAllClusters(meta);
   if (meta->opt.check_shortest_cluster_paths) {
     // Check if astar and dijkstra find the same shortest paths.
-    build_clusters::CheckShortestClusterPaths(meta->graph, meta->opt.n_threads);
+    build_clusters::CheckShortestClusterPaths(meta->graph,
+  meta->opt.n_threads);
   }
   */
 }
@@ -1445,6 +1491,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
     //     n.simple_turn_restriction_via_node ? n.num_forward_edges : 0;
 
     int64_t num_inverted_edges = 0;
+    int64_t num_contra_way_edges = 0;
     int64_t num_forward_edges = 0;
     num_forwards.at(n.num_forward_edges)++;
     if (absl::ToInt64Nanoseconds(absl::Now() - absl::Time()) %
@@ -1462,6 +1509,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
         stats->num_edges_non_unique++;
       }
       num_inverted_edges += e.inverted;
+      num_contra_way_edges += e.contra_way;
       num_forward_edges += (e.inverted == 0);
       stats->num_edges_bridge += e.bridge;
 
@@ -1529,6 +1577,7 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
         std::max(stats->max_edges, num_forward_edges + num_inverted_edges);
     stats->num_edges_forward += num_forward_edges;
     stats->num_edges_inverted += num_inverted_edges;
+    stats->num_edges_contra_way += num_contra_way_edges;
     stats->max_edges_out = std::max(stats->max_edges_out, num_forward_edges);
     stats->max_edges_inverted =
         std::max(stats->max_edges_inverted, num_inverted_edges);
@@ -1567,6 +1616,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_ways_too_short);
   LOG_S(INFO) << absl::StrFormat("Ways with missing nodes:%8lld",
                                  stats.num_ways_missing_nodes);
+  LOG_S(INFO) << absl::StrFormat("Ways max nodes:     %12lu",
+                                 stats.max_way_nodes);
   LOG_S(INFO) << absl::StrFormat("Ways dup segments:  %12lld",
                                  stats.num_ways_dup_segments);
 
@@ -1682,6 +1733,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_forward);
   LOG_S(INFO) << absl::StrFormat("  Num inverted:     %12lld",
                                  stats.num_edges_inverted);
+  LOG_S(INFO) << absl::StrFormat("  Num contra way:   %12lld",
+                                 stats.num_edges_contra_way);
   LOG_S(INFO) << absl::StrFormat("  Num has shapes    %12lld",
                                  stats.num_edges_has_shapes);
   LOG_S(INFO) << absl::StrFormat("  Num non-unique:   %12lld",
@@ -1731,6 +1784,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_cross_country_edges);
   LOG_S(INFO) << absl::StrFormat("  Cross country restr:%10lld",
                                  stats.num_cross_country_restricted);
+  LOG_S(INFO) << absl::StrFormat("  Saved startpos in way:%8lld",
+                                 g.edge_in_way_start_pos_map.size());
 
   LOG_S(INFO) << absl::StrFormat("Clusters:           %12lld",
                                  g.clusters.size());

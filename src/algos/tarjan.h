@@ -39,8 +39,8 @@ class Tarjan {
           LOG_S(INFO) <<
             absl::StrFormat("bridge %lld - %lld", n1.node_id, n2.node_id);
           LOG_S(INFO) << absl::StrFormat("[[%f,%f],[%f,%f]],",
-              n1.lon / 10000000.0, n1.lat / 10000000.0,
-              n2.lon / 10000000.0, n2.lat / 10000000.0);
+              n1.lat.AsDouble(), n1.lon.AsDouble(),
+              n2.lat.AsDouble(), n2.lon.AsDouble());
         }
       } else if (v != parent) {
         // Node is visited but not parent.

@@ -6,6 +6,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "base/constants.h"
+#include "base/deg_coord.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
 #include "base/util.h"
@@ -222,8 +223,8 @@ struct GNode {
 
   std::uint32_t cluster_skeleton : 1;
 
-  std::int32_t lat;
-  std::int32_t lon;
+  DegE6 lat;
+  DegE6 lon;
 };
 
 // TODO: 32 bits are needed to represent all distances on earth, but for edges
@@ -293,6 +294,8 @@ struct GEdge {
   std::uint32_t contra_way : 1;
   // 1 iff the edges passes one or more shape nodes.
   std::uint32_t has_shapes : 1;
+  // 1 iff the edges has no shapes, but the reverse edge has them.
+  std::uint32_t has_reverse_shapes : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
   std::uint32_t cross_country : 1;
@@ -453,6 +456,19 @@ struct Graph {
   // Set of osm way ids that have oneway set to "reversible". Entering such a
   // way cost a significant cost.
   absl::flat_hash_set<int64_t> way_ids_with_oneway_reversible;
+
+  // Context: We want to build the shape list of an edge later.
+  // In order to do this, we need to know the start position of the node in the
+  // list of way node ids. This is easy when the node occurs only once in the
+  // list - just take the first position. But in the *rare* case that a node
+  // repeats in the list and we don't want the first occurrence, we need to
+  // remember the actual position of the node For this, we maintain a map
+  // 'edge_in_way_start_pos_map' of
+  //     (from_node_idx, target_node_idx, way_idx) -> start_pos.
+  using TEdgeInWayStartPosKey = std::tuple<uint32_t, uint32_t, uint32_t>;
+  using TEdgeInWayStartPosMap =
+      absl::flat_hash_map<TEdgeInWayStartPosKey, uint32_t>;
+  TEdgeInWayStartPosMap edge_in_way_start_pos_map;
 
   std::size_t FindWayIndex(std::int64_t way_id) const {
     auto it = std::lower_bound(

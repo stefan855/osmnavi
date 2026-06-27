@@ -52,7 +52,7 @@ void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
             LOG_S(INFO) << absl::StrFormat(
                 "%d DIFF for POI %c %d lat:%d lon:%d fast id:%d dist:%d slow "
                 "id:%d dist:%d",
-                i, poi.obj_type, poi.id, poi.lat, poi.lon, fast.node_id,
+                i, poi.obj_type, poi.id, poi.lat.v(), poi.lon.v(), fast.node_id,
                 res.dist, slow.node_id, res2.dist);
           }
         }
@@ -124,15 +124,16 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
       // Check if the edge is fully in a dead end or a bridge.
       bool dead_end = n1.dead_end || n2.dead_end;
       if (!export_file.empty()) {
-        myfile << absl::StrFormat("%lld,%d,%d,%d,%d,%lld,%d\n", way_id, n1.lat,
-                                  n1.lon, n2.lat, n2.lon, edge_traffic.at(i),
-                                  dead_end);
+        myfile << absl::StrFormat("%lld,%d,%d,%d,%d,%lld,%d\n", way_id,
+                                  n1.lat.v(), n1.lon.v(), n2.lat.v(),
+                                  n2.lon.v(), edge_traffic.at(i), dead_end);
       } else {
         int div = edge_traffic.at(i) / traffic_div;
         int idx = div < 1 ? 0 : div < 10 ? 1 : div < 100 ? 2 : 3;
         CHECK_LT_S(idx, 4);
-        myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", colors[idx], n1.lat,
-                                  n1.lon, n2.lat, n2.lon);
+        myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", colors[idx],
+                                  n1.lat.v(), n1.lon.v(), n2.lat.v(),
+                                  n2.lon.v());
       }
     }
   }
@@ -142,8 +143,7 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
 
 // Runs single source Dijkstra for every POI and adds up the traffic for every
 // edge in the spanning tree.
-void SingleSourceDijkstraWorker(const CompactGraph& cg,
-                                uint32_t poi_c_idx,
+void SingleSourceDijkstraWorker(const CompactGraph& cg, uint32_t poi_c_idx,
                                 std::vector<int64_t>* edge_traffic) {
   std::vector<uint32_t> spanning_tree_nodes;
   std::vector<compact_dijkstra::VisitedNode> vis =
@@ -333,8 +333,7 @@ void CollectRandomTraffic(const Graph& g, int n_threads,
                               &graph_to_compact_nodemap);
 
   const std::vector<std::uint32_t> compact_to_graph_nodemap =
-      CompactGraph::InvertGraphToCompactNodeMap(
-          graph_to_compact_nodemap);
+      CompactGraph::InvertGraphToCompactNodeMap(graph_to_compact_nodemap);
   CompactGraph::SortAndCleanupEdges(&full_edges);
   const CompactGraph cg(num_nodes, full_edges);
   cg.LogStats();

@@ -13,7 +13,7 @@ inline int64_t length_lat_segment_cm(int64_t lat_diff_100nano) {
       kEarthRadiusCm * std::numbers::pi * 2;
 
   return std::llround((kEarthCircumferenceThroughPoles * lat_diff_100nano) /
-                      (360ll * 10000000ll));
+                      (360ll * TEN_POW_7));
 }
 
 }  // namespace
@@ -24,10 +24,10 @@ inline int64_t length_lat_segment_cm(int64_t lat_diff_100nano) {
 // distance is in centimeters.
 inline int64_t calculate_distance(int32_t lat1_100nano, int32_t lon1_100nano,
                                   int32_t lat2_100nano, int32_t lon2_100nano) {
-  double lat1 = lat1_100nano * (std::numbers::pi / 180.0 / 10000000.0);
-  double lon1 = lon1_100nano * (std::numbers::pi / 180.0 / 10000000.0);
-  double lat2 = lat2_100nano * (std::numbers::pi / 180.0 / 10000000.0);
-  double lon2 = lon2_100nano * (std::numbers::pi / 180.0 / 10000000.0);
+  double lat1 = lat1_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
+  double lon1 = lon1_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
+  double lat2 = lat2_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
+  double lon2 = lon2_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
   double f_dlat = std::sin((lat2 - lat1) / 2.0);
   double f_dlon = std::sin((lon2 - lon1) / 2.0);
   double a =

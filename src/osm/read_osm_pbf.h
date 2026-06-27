@@ -80,8 +80,8 @@ class OsmPbfReader {
   };
   struct Node {
     int64_t id;
-    int64_t lat;
-    int64_t lon;
+    int64_t osm_lat;
+    int64_t osm_lon;
   };
 
   // Node that looks similar to the Way and Relation classes defined as
@@ -89,8 +89,8 @@ class OsmPbfReader {
   // entities. Using this struct makes them easier to use.
   struct NodeWithTags {
     int64_t id_ = 0;
-    int64_t lat_ = 0;
-    int64_t lon_ = 0;
+    int64_t osm_lat_ = 0;
+    int64_t osm_lon_ = 0;
     std::vector<int> keys_;
     std::vector<int> vals_;
 
@@ -560,8 +560,8 @@ class OsmPbfReader {
       int kv_start = -1;
       for (int i = 0; i < pg.dense().id_size(); ++i) {
         node.id_ += pg.dense().id(i);
-        node.lat_ += pg.dense().lat(i);
-        node.lon_ += pg.dense().lon(i);
+        node.osm_lat_ += pg.dense().lat(i);
+        node.osm_lon_ += pg.dense().lon(i);
 
         // Update tag vectors.
         if (kv_start < pg.dense().keys_vals().size()) {

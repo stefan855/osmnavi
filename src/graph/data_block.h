@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 
+#include "base/deg_coord.h"
 #include "base/simple_mem_pool.h"
 #include "base/varbyte.h"
 // #include "graph/graph_def.h"
@@ -112,8 +113,8 @@ class NodeBuilder {
  public:
   struct VNode {
     std::uint64_t id;
-    std::int64_t lat;
-    std::int64_t lon;
+    DegE6 lat;
+    DegE6 lon;
   };
 
  private:
@@ -140,9 +141,9 @@ class NodeBuilder {
       cnt_ += DecodeUInt(b_->buff + cnt_, &udelta);
       n_.id += udelta;
       cnt_ += DecodeInt(b_->buff + cnt_, &idelta);
-      n_.lat += idelta;
+      n_.lat = n_.lat.v64() + idelta;
       cnt_ += DecodeInt(b_->buff + cnt_, &idelta);
-      n_.lon += idelta;
+      n_.lon = n_.lon.v64() + idelta;
       ++pos_;
       return true;
     }
@@ -158,11 +159,11 @@ class NodeBuilder {
     }
     assert(node.id >= prev_id_);
     EncodeUInt(node.id - prev_id_, &buff_);
-    EncodeInt(node.lat - prev_lat_, &buff_);
-    EncodeInt(node.lon - prev_lon_, &buff_);
+    EncodeInt(node.lat.v64() - prev_lat_, &buff_);
+    EncodeInt(node.lon.v64() - prev_lon_, &buff_);
     prev_id_ = node.id;
-    prev_lat_ = node.lat;
-    prev_lon_ = node.lon;
+    prev_lat_ = node.lat.v64();
+    prev_lon_ = node.lon.v64();
     num_records_++;
   }
 

@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <tuple>
 
 #include "algos/components.h"
 #include "algos/tarjan.h"
@@ -74,6 +75,7 @@ struct BuildGraphStats {
   int64_t num_noderefs_with_highway_tag = 0;
   int64_t num_ways_too_short = 0;
   int64_t num_ways_missing_nodes = 0;
+  uint64_t max_way_nodes = 0;
   int64_t num_ways_dup_segments = 0;
 
   // Graph building
@@ -129,6 +131,7 @@ struct BuildGraphStats {
   int64_t num_nodes_unique_edges[num_nodes_unique_edges_dim] = {0};  // All 0
 
   int64_t num_edges_inverted = 0;
+  int64_t num_edges_contra_way = 0;
   int64_t num_edges_forward = 0;
   int64_t num_edges_forward_car_restr_unset = 0;
   int64_t num_edges_forward_car_restr_free = 0;
@@ -164,6 +167,7 @@ struct BuildGraphStats {
     num_noderefs_with_highway_tag += other.num_noderefs_with_highway_tag;
     num_ways_too_short += other.num_ways_too_short;
     num_ways_missing_nodes += other.num_ways_missing_nodes;
+    max_way_nodes = std::max(max_way_nodes, other.max_way_nodes);
     num_ways_dup_segments += other.num_ways_dup_segments;
 
     num_turn_restriction_success += other.num_turn_restriction_success;
@@ -223,6 +227,7 @@ struct BuildGraphStats {
     }
 
     num_edges_inverted += other.num_edges_inverted;
+    num_edges_contra_way += other.num_edges_contra_way;
     num_edges_forward += other.num_edges_forward;
     num_edges_forward_car_restr_unset +=
         other.num_edges_forward_car_restr_unset;
@@ -379,10 +384,10 @@ WayTaggedZones ExtractWayZones(const OSMTagHelper& tagh,
 // tagh,
 //                            const OSMPBF::Way& osm_way, GWay* way);
 
-void ConsumeWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
-                      std::mutex& mut,
-                      DeDuperWithIds<WaySharedAttrs>* wsa_deduper,
-                      DeDuperWithIds<std::string>* streetname_deduper,
-                      GraphMetaData* meta, BuildGraphStats* stats);
+void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
+                    std::mutex& mut,
+                    DeDuperWithIds<WaySharedAttrs>* wsa_deduper,
+                    DeDuperWithIds<std::string>* streetname_deduper,
+                    GraphMetaData* meta, BuildGraphStats* stats);
 
 }  // namespace build_graph

@@ -11,6 +11,7 @@
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
 #include "base/argli.h"
+#include "base/constants.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
 #include "cpp-httplib/httplib.h"
@@ -125,7 +126,7 @@ double ConvertToDouble(std::string_view numstr) {
     if (!absl::SimpleAtoi(numstr, &num)) {
       LOG_S(INFO) << "Can not convert string to int64: <" << numstr << ">";
     }
-    return num / 10000000.0;
+    return num / TEN_POW_7_DBL;
   }
 }
 

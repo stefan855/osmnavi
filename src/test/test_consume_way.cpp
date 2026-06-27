@@ -121,7 +121,7 @@ build_graph::GraphMetaData CreateMeta() {
 void StoreNodes(int num_nodes, DataBlockTable* t) {
   NodeBuilder builder;
   for (int32_t i = 1; i <= num_nodes; ++i) {
-    builder.AddNode({.id = (uint32_t)i, .lat = i, .lon = i});
+    builder.AddNode({.id = (uint32_t)i, .lat = DegE6(i), .lon = DegE6(i)});
   }
   builder.AddBlockToTable(t);
 }
@@ -171,8 +171,8 @@ void TestWay1() {
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
   std::mutex mut;
 
-  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &streetname_deduper,
-                   &meta, &meta.Stats());
+  LoadGWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &streetname_deduper,
+                 &meta, &meta.Stats());
   CHECK_EQ_S(meta.graph.ways.size(), 1);
   CHECK_EQ_S(deduper.num_added(), 1);
   CHECK_EQ_S(streetname_deduper.num_added(), 1);
@@ -209,8 +209,8 @@ void TestWay2() {
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
   std::mutex mut;
 
-  ConsumeWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &streetname_deduper,
-                   &meta, &meta.Stats());
+  LoadGWayWorker(*wr.tagh, wr.osm_way, mut, &deduper, &streetname_deduper,
+                 &meta, &meta.Stats());
   CHECK_EQ_S(meta.graph.ways.size(), 1);
   CHECK_EQ_S(deduper.num_added(), 1);
   const WaySharedAttrs& wsa = deduper.GetObj(0);

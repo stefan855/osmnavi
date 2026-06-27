@@ -117,7 +117,7 @@ class MinMaxAvg {
   int64_t Count() const { return count_; }
   T Min() const { return min_; }
   T Max() const { return max_; }
-  T Avg() const { return sum_ / count_; }
+  T Avg() const { return (count_ == 0) ? 0 : (sum_ / count_); }
   T Sum() const { return sum_; }
 
   void Clear() {

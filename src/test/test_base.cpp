@@ -4,10 +4,12 @@
 
 #include <cmath>
 
+#include "base/deg_coord.h"
 #include "base/top_n.h"
 #include "base/util.h"
 
 void TestTopNGreater() {
+  FUNC_TIMER();
   TopN<int, 5, /*keep_greater*/true> topn;
   std::vector<int> items = {1, 6, 3, 9, 3, 7, 1, 5, 9, 34, 2, 8};
   for (int val : items) {
@@ -25,6 +27,7 @@ void TestTopNGreater() {
 }
 
 void TestTopNSmaller() {
+  FUNC_TIMER();
   TopN<int, 5, /*keep_greater*/false> topn;
   std::vector<int> items = {1, 6, 3, 9, 3, 7, 1, 5, 9, 34, 2, 8};
   for (int val : items) {
@@ -41,6 +44,23 @@ void TestTopNSmaller() {
   CHECK_EQ_S(topn.top(), 1);
 }
 
+void TestDegE6() {
+  FUNC_TIMER();
+  DegE6 a(static_cast<int>(5));
+  DegE6 b(static_cast<int32_t>(5));
+  DegE6 c(static_cast<int64_t>(5));
+  DegE6 d(5.0f);
+  DegE6 e(5.0);
+
+  CHECK_EQ_S(a.v(), 5);;
+  CHECK_EQ_S(b.v(), 5);
+  CHECK_EQ_S(c.v(), 5);
+  CHECK_EQ_S(d.v(), 5 * DegE6::MulFactor());
+  CHECK_EQ_S(e.v(), 5 * DegE6::MulFactor());
+  CHECK_EQ_S(d.AsFloat(), 5.0f);
+  CHECK_EQ_S(e.AsDouble(), 5.0);
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -49,6 +69,7 @@ int main(int argc, char* argv[]) {
 
   TestTopNGreater();
   TestTopNSmaller();
+  TestDegE6();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

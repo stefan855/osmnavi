@@ -8,10 +8,15 @@
 
 #include "algos/routing_metric.h"
 #include "base/deduper_with_ids.h"
+#include "base/deg_coord.h"
 #include "base/frequency_table.h"
 #include "base/mmap_base.h"
 #include "geometry/geometry.h"
 #include "graph/graph_def.h"
+
+constexpr uint64_t kMMMagic = 7715514337782280064ull;
+constexpr uint32_t kMMVersionMajor = 0;
+constexpr uint32_t kMMVersionMinor = 5;
 
 // Stores basic node data in an uint64_t.
 struct MMNode {
@@ -133,8 +138,8 @@ struct MMComplexTurnRestriction {
 };
 
 struct MMLatLon {
-  int32_t lat;
-  int32_t lon;
+  DegE6 lat;
+  DegE6 lon;
 };
 
 struct MMBoundingRect {
@@ -304,16 +309,24 @@ struct MMCluster {
     return {.lat = node_to_lat(node_idx), .lon = node_to_lon(node_idx)};
   }
 
-  int32_t node_to_lat(uint32_t node_idx) const {
+  DegE6 node_to_lat(uint32_t node_idx) const {
+    return DegE6(bounding_rect.min.lat.v64() +
+                 static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
+    /*
     return static_cast<int32_t>(
         bounding_rect.min.lat +
         static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
+    */
   }
 
-  int32_t node_to_lon(uint32_t node_idx) const {
+  DegE6 node_to_lon(uint32_t node_idx) const {
+    return DegE6(bounding_rect.min.lon.v64() +
+                 static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
+    /*
     return static_cast<int32_t>(
         bounding_rect.min.lon +
         static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
+    */
   }
 
   const std::string_view get_streetname(uint32_t way_idx) const {
@@ -475,41 +488,62 @@ struct MMGraph {
   }
 
  private:
-  void LogLine(const char name[], const MinMaxAvg<uint64_t>& stat) const {
+  template <typename T>
+  static constexpr bool mm_has_bitwidth(const T& container) {
+    return std::is_same_v<T, MMCompressedUIntVec>;
+  }
+
+  void LogLine(const char name[], const MinMaxAvg<uint64_t>& stat_cnt,
+               const MinMaxAvg<uint64_t>& stat_bw,
+               const MinMaxAvg<uint64_t>& stat_by) const {
+    RAW_LOG_F(
+        INFO,
+        "%-29s %8lu %8lu %8lu %3lu %3lu %3lu %7lu %8lu %8lu %11lu (%5.2f%%)",
+        name, stat_cnt.Min(), stat_cnt.Avg(), stat_cnt.Max(), stat_bw.Min(),
+        stat_bw.Avg(), stat_bw.Max(), stat_by.Min(), stat_by.Avg(),
+        stat_by.Max(), stat_by.Sum(), (100.0 * stat_by.Sum()) / file_size);
+#if 0
     LOG_S(INFO) << absl::StrFormat(
         "%-29s %7llu %8llu %8llu %11llu (%5.2f%%)", name, stat.Min(),
         stat.Max(), stat.Avg(), stat.Sum(), (100.0 * stat.Sum()) / file_size);
+#endif
   }
 
-#define DO_STATS_FOR_CLUSTER_ATTR(attr_name, total_bytes) \
-  {                                                       \
-    MinMaxAvg<uint64_t> stat;                             \
-    for (const auto& mc : clusters.span()) {              \
-      stat.Add(mc.attr_name.num_data_bytes());            \
-    }                                                     \
-    LogLine(#attr_name, stat);                            \
-    total_bytes += stat.Sum();                            \
+#define DO_STATS_FOR_CLUSTER_ATTR(attr_name, total_bytes)              \
+  {                                                                    \
+    MinMaxAvg<uint64_t> stat_cnt;                                      \
+    MinMaxAvg<uint64_t> stat_bytes;                                    \
+    MinMaxAvg<uint64_t> stat_bw;                                       \
+    for (const auto& mc : clusters.span()) {                           \
+      stat_bytes.Add(mc.attr_name.num_data_bytes());                   \
+      stat_cnt.Add(mc.attr_name.size());                               \
+      if (mc.attr_name.size() > 0) {                                   \
+        uint64_t bit_width =                                           \
+            (8 * mc.attr_name.num_data_bytes()) / mc.attr_name.size(); \
+        stat_bw.Add(bit_width);                                        \
+      }                                                                \
+    }                                                                  \
+    LogLine(#attr_name, stat_cnt, stat_bw, stat_bytes);                \
+    total_bytes += stat_bytes.Sum();                                   \
   }
 
  public:
   void PrintInfo() const {
-    LOG_S(INFO) << absl::StrFormat("File size:           %12llu", file_size);
-    LOG_S(INFO) << absl::StrFormat("Size MMGraph struct:   %10llu",
-                                   sizeof(MMGraph));
-    LOG_S(INFO) << absl::StrFormat("  Size bounding rects: %10llu",
-                                   sorted_bounding_rects.num_data_bytes());
-    LOG_S(INFO) << absl::StrFormat("  Size clusters vector:%10llu",
-                                   clusters.num_data_bytes());
+    RAW_LOG_F(INFO, "File size:           %12lu", file_size);
+    RAW_LOG_F(INFO, "Size MMGraph struct:   %10lu", sizeof(MMGraph));
+    RAW_LOG_F(INFO, "  Size bounding rects: %10lu",
+              sorted_bounding_rects.num_data_bytes());
+    RAW_LOG_F(INFO, "  Size clusters vector:%10lu", clusters.num_data_bytes());
 
-    LOG_S(INFO) << "==========================================================="
-                   "=================";
-    LOG_S(INFO) << "Cluster Disk Usage Stats (bytes)";
-    LOG_S(INFO) << "                                        per cluster        "
-                   "   total";
-    LOG_S(INFO) << "What                              min      max      avg    "
-                   "     sum";
-    LOG_S(INFO) << "==========================================================="
-                   "=================";
+    RAW_LOG_F(INFO, std::string(115, '=').c_str());
+    RAW_LOG_F(INFO, "Cluster Disk Usage Stats (bytes)");
+    RAW_LOG_F(INFO,
+              "                                          counts          "
+              "bits/entry       bytes per cluster       total bytes");
+    RAW_LOG_F(INFO,
+              "What                               min      avg     max  min "
+              "avg max     min      avg      max         sum");
+    RAW_LOG_F(INFO, std::string(115, '=').c_str());
     uint64_t total = 0;
     DO_STATS_FOR_CLUSTER_ATTR(in_edges, total);
     DO_STATS_FOR_CLUSTER_ATTR(out_edges, total);
@@ -530,13 +564,11 @@ struct MMGraph {
     DO_STATS_FOR_CLUSTER_ATTR(streetnames_table, total);
     DO_STATS_FOR_CLUSTER_ATTR(grouped_node_to_osm_id, total);
     DO_STATS_FOR_CLUSTER_ATTR(grouped_way_to_osm_id, total);
-    LOG_S(INFO) << "-----------------------------------------------------------"
-                   "-----------------";
-    LOG_S(INFO) << absl::StrFormat("Total %u clusters %34llu %11llu (%5.2f%%)",
-                                   clusters.size(), total / clusters.size(),
-                                   total, (100.0 * total) / file_size);
-    LOG_S(INFO) << "==========================================================="
-                   "=================";
+    RAW_LOG_F(INFO, std::string(115, '-').c_str());
+    RAW_LOG_F(INFO, "Total %6lu clusters %63lu %20lu (%5.2f%%)",
+              clusters.size(), total / clusters.size(), total,
+              (100.0 * total) / file_size);
+    RAW_LOG_F(INFO, std::string(115, '=').c_str());
   }
 };
 CHECK_IS_MM_OK(MMGraph);
@@ -689,7 +721,7 @@ inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(
 // TODO: add scope.
 constexpr uint64_t kMagic = 7715514337782280064ull;
 constexpr uint32_t kVersionMajor = 0;
-constexpr uint32_t kVersionMinor = 3;
+constexpr uint32_t kVersionMinor = 4;
 
 struct MMClusterWrapper {
   const MMCluster& mc;

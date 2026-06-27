@@ -15,8 +15,8 @@ struct EdgePoint {
   // fe.from_node_idx. 1.0 means that the start is at the end of the edge. All
   // values between indicate a location between start and end.
   float to_fraction = 0.0;
-  int32_t lat_at_fraction = 0;
-  int32_t lon_at_fraction = 0;
+  DegE6 lat_at_fraction;
+  DegE6 lon_at_fraction;
   MMFullEdge fe = {};
 
   float GetFromFraction() const {
@@ -46,7 +46,7 @@ struct EdgePoint {
 // (lat, lon) if for information only.
 class GeoAnchor {
  public:
-  GeoAnchor() : point_({0, 0}){};
+  GeoAnchor() : point_({}){};
   GeoAnchor(const MMLatLon& point) : point_(point) {}
 
   void AddEdge(const EdgePoint& ep) { push_edge(ep); }
@@ -185,6 +185,7 @@ class GeoAnchor {
     }
     edge_points_.push_back(ep);
   }
+
   // The point selected by the user on the map.
   MMLatLon point_;
   std::vector<EdgePoint> edge_points_;

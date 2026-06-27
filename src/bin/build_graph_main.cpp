@@ -269,8 +269,9 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
           color = "green";
         }
       }
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
-                                n.lon, other.lat, other.lon);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
+                                n.lat.v(), n.lon.v(), other.lat.v(),
+                                other.lon.v());
       count++;
     }
   }
@@ -295,8 +296,9 @@ void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
       if (e.car_label_strange != strange) continue;
 
       const GNode& other = g.nodes.at(e.target_idx);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
-                                n.lon, other.lat, other.lon);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
+                                n.lat.v(), n.lon.v(), other.lat.v(),
+                                other.lon.v());
       count++;
     }
   }
@@ -324,8 +326,9 @@ void WriteClusterSkeletonEdges(const Graph& g, const std::string& color,
       }
 
       const GNode& target = g.nodes.at(e.target_idx);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
-                                n.lon, target.lat, target.lon);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
+                                n.lat.v(), n.lon.v(), target.lat.v(),
+                                target.lon.v());
       count++;
     }
   }
@@ -380,8 +383,9 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
         CHECK_S(false);
       }
       const GNode& other = g.nodes.at(e.target_idx);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(), n.lat,
-                                n.lon, other.lat, other.lon);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
+                                n.lat.v(), n.lon.v(), other.lat.v(),
+                                other.lon.v());
       count++;
     }
   }
@@ -408,8 +412,8 @@ void WriteCrossCountryEdges(const build_graph::GraphMetaData& meta,
       const GNode& n2 = meta.graph.nodes.at(node_idx.at(pos + 1));
       if (n1.ncc != n2.ncc) {
         count++;
-        myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat, n1.lon,
-                                  n2.lat, n2.lon);
+        myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat.v(),
+                                  n1.lon.v(), n2.lat.v(), n2.lon.v());
         // LOG_S(INFO) << absl::StrFormat("cross country %lld -> %lld",
         //                                n1.node_id, n2.node_id);
       }
@@ -467,8 +471,8 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
         color = colors[g.clusters.at(n0.cluster_id).color_no % kMaxColor];
       }
 
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, n0.lat, n0.lon,
-                                n1.lat, n1.lon);
+      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, n0.lat.v(),
+                                n0.lon.v(), n1.lat.v(), n1.lon.v());
       count++;
     }
   }
@@ -784,13 +788,15 @@ int main(int argc, char* argv[]) {
     PrintDebugInfoForNode(meta, argli.GetInt("debug_node"));
   }
 
+#if 0
   WriteSerializedGraph(g, "/tmp/graph.ser");
   {
     Graph g2 = ReadSerializedGraph("/tmp/graph.ser");
     CheckGraphsEqual(g, g2);
   }
+#endif
 
-  WriteGraphToMMFile(g, "/tmp/mmgraph.file", check_mmgraph);
+  WriteGraphToMMFile(g, *(meta.node_table), "/tmp/mmgraph.file", check_mmgraph);
   {
     int fd = ::open("/tmp/mmgraph.file", O_RDWR | O_CLOEXEC, 0644);
     if (fd < 0) FileAbortOnError("open");

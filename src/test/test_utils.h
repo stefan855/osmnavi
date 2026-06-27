@@ -111,15 +111,15 @@ inline void AddNode(Graph& g, uint32_t idx, uint32_t cluster_id = 0) {
                      .num_forward_edges = 0,
                      .dead_end = 0,
                      .ncc = NCC_CH,
-                     .lat = 100 + (int32_t)idx,
-                     .lon = 100 + (int32_t)idx});
+                     .lat = DegE6(100 + (int32_t)idx),
+                     .lon = DegE6(100 + (int32_t)idx)});
 }
 
 inline void SetNodeCoords(Graph& g, uint32_t idx, double lat, double lon) {
   CHECK_LT_S(idx, g.nodes.size());
   GNode& n = g.nodes.at(idx);
-  n.lat = std::roundl(lat * TEN_POW_7);
-  n.lon = std::roundl(lon * TEN_POW_7);
+  n.lat = DegE6(lat);
+  n.lon = DegE6(lon);
 }
 
 // Recompute distances for testing. Note that this ignores that ways may have
@@ -130,7 +130,8 @@ void RecomputeDistancesForTesting(Graph* g) {
     const GNode& n1 = g->nodes.at(node_idx);
     for (GEdge& e : gnode_all_edges(*g, node_idx)) {
       const GNode& n2 = g->nodes.at(e.target_idx);
-      e.distance_cm = calculate_distance(n1.lat, n1.lon, n2.lat, n2.lon);
+      e.distance_cm =
+          calculate_distance(n1.lat.v(), n1.lon.v(), n2.lat.v(), n2.lon.v());
     }
   }
 }
@@ -202,6 +203,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
                         .to_bridge = 0,
                         .contra_way = std::get<5>(e),
                         .has_shapes = 0,
+                        .has_reverse_shapes = 0,
                         .cross_country = 0,
                         .inverted = 0,
                         .both_directions = 0,

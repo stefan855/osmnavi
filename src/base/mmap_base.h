@@ -325,13 +325,16 @@ class MMTurnCostsTable {
   }
 
   uint64_t num_data_bytes() const { return arr__.num_data_bytes(); }
+  // Number of unique turn cost tables.
+  uint64_t size() const { return num_entries_; }
 
  private:
   MMVec64<std::uint8_t> arr__;
+  uint64_t num_entries_;  // Number of turn costs tables encoded in arr__.
   DISALLOW_COPY_ASSIGN_MOVE(MMTurnCostsTable);
 
  public:
-  MMTurnCostsTable() : arr__(){};
+  MMTurnCostsTable() : arr__(), num_entries_(0){};
 
   // Write a data blob to the end of the file 'fd'.
   //
@@ -356,6 +359,7 @@ class MMTurnCostsTable {
     arr__.WriteDataBlob(
         name, global_object_offset + offsetof(MMTurnCostsTable, arr__), fd,
         arr);
+    num_entries_ = idx_to_pos.size();
     return idx_to_pos;
   }
 };
@@ -373,13 +377,16 @@ class MMStringsTable {
   }
 
   uint64_t num_data_bytes() const { return arr__.num_data_bytes(); }
+  // Number of unique strings.
+  uint64_t size() const { return num_entries_; }
 
  private:
   MMVec64<char> arr__;
+  uint64_t num_entries_;  // Number of strings encoded in arr__.
   DISALLOW_COPY_ASSIGN_MOVE(MMStringsTable);
 
  public:
-  MMStringsTable() : arr__(){};
+  MMStringsTable() : arr__(), num_entries_(0){};
 
   // Write a data blob to the end of the file 'fd'.
   //
@@ -405,6 +412,7 @@ class MMStringsTable {
 
     arr__.WriteDataBlob(
         name, global_object_offset + offsetof(MMStringsTable, arr__), fd, arr);
+    num_entries_ = idx_to_pos.size();
     return idx_to_pos;
   }
 };
@@ -539,3 +547,104 @@ struct MMGroupedOSMIds {
   }
 };
 CHECK_IS_MM_OK(MMGroupedOSMIds);
+
+constexpr size_t kShapeCoordsGroupSize = 64;
+struct MMShapeCoords {
+ public:
+#if 0
+  int64_t at(uint32_t pos) const {
+    CHECK_LT_S(pos, num__);
+    size_t gidx = pos / kOSMIdsGroupSize;
+    const IdGroup& group = mmgroups__.at(gidx);
+    int64_t prev_id = group.first_id;
+    uint32_t skip = pos % kOSMIdsGroupSize;
+    uint32_t cnt = 0;
+    const uint8_t* ptr = ABS_BLOB_PTR(this, group.relative_blob_offset__);
+    // const uint8_t* ptr = base_ptr + (mmgroups__.end_offset() +
+    // group.blob_offset);
+    while (skip > 0) {
+      skip--;
+      int64_t id;
+      cnt += DeltaDecodeInt64(ptr + cnt, prev_id, &id);
+      prev_id = id;
+    }
+    return prev_id;
+  }
+#endif
+
+  // The number of ids.
+  uint64_t size() const { return num__; }
+  uint64_t num_data_bytes() const {
+    return mmgroups__.num_data_bytes() + blob_size_in_bytes__;
+  }
+
+ private:
+  struct CoordGroup {
+    // 64 x 4-bit set.
+    // For each edge we store a 4-bit value.
+    //   0-13: number of coord pairs stored
+    //   14:   coords stored at reverse edge.
+    //   15:   length > 13, stored in-stream.
+    uint64_t arr[4];
+    // Offset from the start of MMShapeCoords object to the start of the
+    // data for this group.
+    int64_t relative_blob_offset__;
+  };
+
+  // Number of Ids stored in total.
+  uint32_t num__;
+  uint32_t blob_size_in_bytes__;
+  MMVec64<CoordGroup> mmgroups__;
+  DISALLOW_COPY_ASSIGN_MOVE(MMShapeCoords);
+
+ public:
+  MMShapeCoords() : mmgroups__(){};
+
+#if 0
+  // Initialise the memory mapped vector with the data from 'ids'.
+  // 'global_object_offset' if the global offset of the object this method is
+  // called from.
+  void WriteDataBlob(const std::string& name, int64_t global_object_offset,
+                     int fd, const std::vector<int64_t>& ids) {
+    num__ = ids.size();
+
+    // Create the groups vector.
+    uint32_t num_groups = (num__ + kOSMIdsGroupSize - 1) / kOSMIdsGroupSize;
+    std::vector<MMGroupedOSMIds::IdGroup> groups(num_groups, {0});
+
+    // Compute the delta encodings for each individual group and store the
+    // deltas in one big buffer, keeping the start_id and offset for each
+    // group in the mmgroups__ vector.
+    WriteBuff buff;
+    const int64_t abs_blobs_offset = GetFileSize(fd);
+    for (uint32_t gidx = 0; gidx < groups.size(); ++gidx) {
+      MMGroupedOSMIds::IdGroup& group = groups.at(gidx);
+      uint32_t first_pos = gidx * kOSMIdsGroupSize;
+      int64_t prev_id = ids.at(first_pos);
+      // CHECK_LT_S(std::llabs(prev_id), 1ll << (kOSMIdsIdBits - 1));
+      // CHECK_LT_S(buff.used(), 1ull << kOSMIdsBlobOffsetBits);
+      group.first_id = prev_id;
+      group.relative_blob_offset__ =
+          abs_blobs_offset + buff.used() - global_object_offset;
+      for (uint32_t pos = first_pos + 1;
+           pos < std::min(first_pos + kOSMIdsGroupSize, ids.size()); ++pos) {
+        // Push delta.
+        int64_t id = ids.at(pos);
+        DeltaEncodeInt64(prev_id, id, &buff);
+        prev_id = id;
+      }
+    }
+
+    // Write blob containing the deltas
+    CHECK_EQ_S(abs_blobs_offset, GetFileSize(fd));
+    AppendData(name + ":blob", fd, buff.base_ptr(), buff.used());
+    blob_size_in_bytes__ = buff.used();
+
+    // Write groups vector.
+    mmgroups__.WriteDataBlob(
+        name, global_object_offset + offsetof(MMShapeCoords, mmgroups__), fd,
+        groups);
+  }
+#endif
+};
+CHECK_IS_MM_OK(MMShapeCoords);

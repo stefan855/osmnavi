@@ -7,12 +7,15 @@
 #include <vector>
 
 #include "base/deduper_with_ids.h"
+#include "base/deg_coord.h"
 #include "base/mmap_base.h"
 #include "geometry/geometry.h"
+#include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/mmgraph_def.h"
 
 namespace {
+
 struct TmpComplexTR {
   bool forbidden;
   uint32_t first_node_idx;
@@ -38,6 +41,10 @@ struct TmpClusterInfo {
   std::vector<uint16_t> cedge_to_gedge_offset;
   // Way index of edges in graph, indexed by cluster edge index.
   std::vector<uint32_t> cedge_to_gway_idx;
+
+  // true if the edge
+  std::vector<bool> cedge_has_shape_coords;
+  std::vector<bool> cedge_has_shape_coords_at_reverse_edge;
 
   std::vector<uint32_t> cedge_to_turn_cost_idx;
   std::vector<TurnCostData> turn_costs;
@@ -157,6 +164,8 @@ void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
   uint32_t edge_start_idx = 0;
   ci->cedge_to_gedge_offset.reserve(expected_num_edges);
   ci->cedge_to_gway_idx.reserve(expected_num_edges);
+  ci->cedge_has_shape_coords.reserve(expected_num_edges);
+  ci->cedge_has_shape_coords_at_reverse_edge.reserve(expected_num_edges);
   ci->mm_edge_to_distance.reserve(expected_num_edges);
   for (uint32_t c_pos = 0; c_pos < ci->cnode_to_gnode.size(); ++c_pos) {
     uint32_t gn_idx = ci->cnode_to_gnode.at(c_pos);
@@ -192,6 +201,9 @@ void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
         ci->mm_edge_to_distance.push_back(e.distance_cm);
         ci->cedge_to_gedge_offset.push_back(gnode_edge_offset(g, gn_idx, e));
         ci->cedge_to_gway_idx.push_back(e.way_idx);
+        ci->cedge_has_shape_coords.push_back(e.has_shapes);
+        ci->cedge_has_shape_coords_at_reverse_edge.push_back(
+            e.has_reverse_shapes);
 #if 0
         rc->num_shape_nodes += g.GetGWayShadowNodes(
             g.ways.at(e.way_idx), e.contra_way ? e.target_idx : gn_idx,
@@ -244,11 +256,11 @@ void ClusterAddWayData(const Graph& g, TmpClusterInfo* ci) {
 }
 
 inline std::ranges::iota_view<uint32_t, uint32_t> cnode_edge_indices(
-    const TmpClusterInfo& ci, uint32_t node_idx) {
-  uint32_t start = MM_NODE(ci.mm_nodes.at(node_idx)).edge_start_idx();
-  uint32_t stop = node_idx + 1 < ci.mm_nodes.size()
-                      ? MM_NODE(ci.mm_nodes.at(node_idx + 1)).edge_start_idx()
-                      : ci.mm_edges.size();
+    const TmpClusterInfo& tci, uint32_t node_idx) {
+  uint32_t start = MM_NODE(tci.mm_nodes.at(node_idx)).edge_start_idx();
+  uint32_t stop = node_idx + 1 < tci.mm_nodes.size()
+                      ? MM_NODE(tci.mm_nodes.at(node_idx + 1)).edge_start_idx()
+                      : tci.mm_edges.size();
   // LOG_S(INFO) << "start:" << start << " stop:" << stop;
   return std::views::iota(start, stop);
 }
@@ -472,7 +484,7 @@ void ClusterAddNodes(const Graph& g, TmpClusterInfo* ci) {
     // LOG_S(INFO) << "lat:" << n.lat << " lon:" << n.lon;
   }
 
-  ci->mm_bounding_rect = {0};
+  ci->mm_bounding_rect = {};
   if (!ci->mm_node_to_latlon.empty()) {
     ci->mm_bounding_rect.min = ci->mm_node_to_latlon.front();
     ci->mm_bounding_rect.max = ci->mm_node_to_latlon.front();
@@ -559,8 +571,8 @@ void CheckGNodePlausible(const Graph& g, const TmpClusterInfo& tci,
       << mmc.cluster_id;
 
   MMLatLon latlon = mmc.node_to_latlon(node_idx);
-  CHECK_EQ_S(latlon.lat, n.lat);
-  CHECK_EQ_S(latlon.lon, n.lon);
+  CHECK_EQ_S(latlon.lat.v(), n.lat.v());
+  CHECK_EQ_S(latlon.lon.v(), n.lon.v());
 }
 
 void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mmc,
@@ -701,9 +713,9 @@ void CheckMMGraph(const std::string& path, const Graph& g,
   ::close(fd);
 
   const MMGraph& mmheader = *((MMGraph*)ptr);
-  CHECK_EQ_S(mmheader.magic, kMagic);
-  CHECK_EQ_S(mmheader.version_major, kVersionMajor);
-  CHECK_EQ_S(mmheader.version_minor, kVersionMinor);
+  CHECK_EQ_S(mmheader.magic, kMMMagic);
+  CHECK_EQ_S(mmheader.version_major, kMMVersionMajor);
+  CHECK_EQ_S(mmheader.version_minor, kMMVersionMinor);
   CHECK_EQ_S(mmheader.file_size, file_size);
 
   LOG_S(INFO) << "Check " << mmheader.sorted_bounding_rects.size()
@@ -712,15 +724,15 @@ void CheckMMGraph(const std::string& path, const Graph& g,
   for (uint32_t idx = 0; idx < mmheader.sorted_bounding_rects.size(); ++idx) {
     const MMClusterBoundingRect& cbr = mmheader.sorted_bounding_rects.at(idx);
     const MMCluster& mmc = mmheader.clusters.at(cbr.cluster_id);
-    CHECK_EQ_S(cbr.bounding_rect.min.lat, mmc.bounding_rect.min.lat);
-    CHECK_EQ_S(cbr.bounding_rect.min.lon, mmc.bounding_rect.min.lon);
-    CHECK_EQ_S(cbr.bounding_rect.max.lat, mmc.bounding_rect.max.lat);
-    CHECK_EQ_S(cbr.bounding_rect.max.lon, mmc.bounding_rect.max.lon);
+    CHECK_EQ_S(cbr.bounding_rect.min.lat.v(), mmc.bounding_rect.min.lat.v());
+    CHECK_EQ_S(cbr.bounding_rect.min.lon.v(), mmc.bounding_rect.min.lon.v());
+    CHECK_EQ_S(cbr.bounding_rect.max.lat.v(), mmc.bounding_rect.max.lat.v());
+    CHECK_EQ_S(cbr.bounding_rect.max.lon.v(), mmc.bounding_rect.max.lon.v());
     if (idx > 0) {
       // Check that it is sorted.
       CHECK_GE_S(
-          cbr.bounding_rect.min.lon,
-          mmheader.sorted_bounding_rects.at(idx - 1).bounding_rect.min.lon);
+          cbr.bounding_rect.min.lon.v(),
+          mmheader.sorted_bounding_rects.at(idx - 1).bounding_rect.min.lon.v());
     }
   }
 
@@ -867,8 +879,8 @@ void CheckMMGraph(const std::string& path, const Graph& g,
     for (uint32_t i = 0; i < mmc.node_to_rel_lat.size(); ++i) {
       const auto latlon1 = mmc.node_to_latlon(i);
       const auto latlon2 = tci.mm_node_to_latlon.at(i);
-      CHECK_EQ_S(latlon1.lat, latlon2.lat);
-      CHECK_EQ_S(latlon1.lon, latlon2.lon);
+      CHECK_EQ_S(latlon1.lat.v(), latlon2.lat.v());
+      CHECK_EQ_S(latlon1.lon.v(), latlon2.lon.v());
     }
 
     // This is a little bit complicated, because the incoming data has a
@@ -933,8 +945,283 @@ void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
   }
 }
 
-void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
-                                int64_t global_object_offset, int fd) {
+struct ShapeCoordDeltas {
+  std::vector<int64_t> delta_lat;
+  std::vector<int64_t> delta_lon;
+};
+
+void LatLonDownScale(NodeBuilder::VNode& n) {
+  n.lat = (n.lat.v() / 10);
+  n.lon = (n.lon.v() / 10);
+}
+
+// Manages lat/lon and deltas that we have seen for the previous point.
+// Predicts the current delta.
+struct PrevCoord {
+  PrevCoord(int64_t lat, int64_t lon) : lat(lat), lon(lon), dlat(0), dlon(0) {}
+  int64_t lat;
+  int64_t lon;
+  int64_t dlat;
+  int64_t dlon;
+
+  // Simply predicts that the new dlat is the same as the old one/
+  int64_t predict_new_dlat() const { return dlat; }
+
+  // Given a new dlat, estimate the new dlon.
+  int64_t predict_new_dlon(int64_t new_dlat) const {
+    int64_t abs_dlat = std::abs(dlat);
+    int64_t abs_dlon = std::abs(dlon);
+    if (abs_dlat < 20 || abs_dlon < 20 || abs_dlat > 6 * abs_dlon ||
+        abs_dlon > 6 * abs_dlat) {
+      return dlon;
+    }
+    return (static_cast<double>(new_dlat) / dlat) * dlon;
+  }
+
+  void push_new(int64_t new_lat, int64_t new_lon) {
+    dlat = new_lat - lat;
+    dlon = new_lon - lon;
+    lat = new_lat;
+    lon = new_lon;
+  }
+};
+
+std::vector<NodeBuilder::VNode> GetCoords(const Graph& g,
+                                          const DataBlockTable& node_table,
+                                          uint32_t from_idx,
+                                          uint32_t target_idx,
+                                          uint32_t way_idx) {
+  std::vector<uint64_t> id_list = g.GetGWayNodeIds(g.ways.at(way_idx));
+  // May be >0 when from node ('from_idx') is a repeated node.
+  uint32_t start_pos = FindInMapOrDefault(g.edge_in_way_start_pos_map,
+                                          {from_idx, target_idx, way_idx}, 0);
+
+  const uint64_t id_from = g.nodes.at(from_idx).node_id;
+  const uint64_t id_to = g.nodes.at(target_idx).node_id;
+  std::vector<NodeBuilder::VNode> coords;
+  for (uint32_t i = start_pos; i < id_list.size(); ++i) {
+    uint64_t id = id_list.at(i);
+    if ((id == id_from && coords.empty()) || !coords.empty()) {
+      NodeBuilder::VNode vn;
+      CHECK_S(NodeBuilder::FindNode(node_table, id, &vn)) << id;
+      coords.push_back(vn);
+      if (coords.size() > 1 && id == id_to) {
+        break;
+      }
+    }
+  }
+  // We expect at least start/end node and one shape node in between.
+  CHECK_GT_S(coords.size(), 2);
+  return coords;
+}
+
+#if 0
+// Get the shape coordinates (between start and end point) for edge 'ge'
+// starting at node 'gfrom_idx'
+std::vector<MMLatLon> GetShapeCoordsFromGraph(const Graph& g,
+                                              const DataBlockTable& node_table,
+                                              uint32_t gfrom_idx,
+                                              const GEdge& ge) {
+  const std::vector<NodeBuilder::VNode> coords =
+      GetCoords(g, const node_table, ge.contra_way ? ge.target_idx : gfrom_idx,
+                ge.contra_way ? gfrom_idxgfrom_idx : ge.target_idx, ge.way_idx);
+  CHECK_GT_S(coords.size(), 2);
+
+  // The list we get is always stored in forward direction, reverse it of
+  // contra_way is true.
+  if (ge.contra_way) {
+    std::reverse(coords.begin(), coords.end());
+  }
+
+  LOG_S(INFO) << absl::StrFormat("shape coords way:%lu len:%lu id:%lu to %lu",
+                                 g.ways.at(ge.way_idx).id, coords.size(),
+                                 coords.front().id, coords.back().id);
+  CHECK_EQ_S(coords.front().lat, g.nodes.at(gfrom_idx).lat);
+  CHECK_EQ_S(coords.front().lon, g.nodes.at(gfrom_idx).lon);
+  CHECK_EQ_S(coords.back().lat, g.nodes.at(ge.target_idx).lat);
+  CHECK_EQ_S(coords.back().lon, g.nodes.at(ge.target_idx).lon);
+
+  LatLonDownScale(prevn);
+  double prev_m = 999999999999;
+  int64_t sum_dlat = 0;
+  int64_t sum_dlon = 0;
+  int64_t sum_ddlat = 0;
+  int64_t sum_ddlon = 0;
+  PrevCoord prev(prevn.lat, prevn.lon);
+  for (uint32_t i = start_pos + 1; i < stop_pos; ++i) {
+    NodeBuilder::VNode node;
+    CHECK_S(NodeBuilder::FindNode(node_table, id_list.at(i), &node))
+        << id_list.at(i);
+    LatLonDownScale(node);
+
+    int64_t dlat = node.lat - prev.lat;
+    int64_t ddlat = dlat - prev.predict_new_dlat();
+
+    int64_t dlon = node.lon - prev.lon;
+    int64_t ddlon = dlon - prev.predict_new_dlon(dlat);
+    int64_t ddlon_old = dlon - prev.dlon;
+
+    double m = (dlon != 0)
+                   ? static_cast<double>(dlat) / static_cast<double>(dlon)
+                   : 9999.9999;
+
+    LOG_S(INFO) << absl::StrFormat(
+        "shape pos:%u dlat:%ld dlon:%ld ddlat:%ld ddlon:%ld ddlon-old:%ld "
+        "m:%.4f %s",
+        i, dlat, dlon, ddlat, ddlon, ddlon_old, m,
+        RelativeDifference(m, prev_m) < 0.001 ? "equal" : "");
+
+    sum_dlat += std::abs(dlat);
+    sum_dlon += std::abs(dlon);
+    sum_ddlat += std::abs(ddlat);
+    sum_ddlon += std::abs(ddlon);
+
+    prev.push_new(node.lat, node.lon);
+    prev_m = m;
+  }
+
+  int64_t sum_d = sum_dlat + sum_dlon;
+  int64_t sum_dd = sum_ddlat + sum_ddlon;
+
+  LOG_S(INFO) << absl::StrFormat(
+      "shape sums %s len:%ld dlat:%ld dlon:%ld ddlat:%ld ddlon:%ld",
+      sum_dd < sum_d ? "+++" : (sum_dd > sum_d ? "---" : "==="),
+      stop_pos - start_pos - 1, sum_dlat, sum_dlon, sum_ddlat, sum_ddlon);
+
+  return {};
+}
+#endif
+
+// Get the shape coordinates (between start and end point) for edge 'ge'
+// starting at node 'gfrom_idx'
+std::vector<MMLatLon> GetShapeCoordsFromGraph(const Graph& g,
+                                              const DataBlockTable& node_table,
+                                              uint32_t gfrom_idx,
+                                              const GEdge& ge) {
+  std::vector<uint64_t> id_list = g.GetGWayNodeIds(g.ways.at(ge.way_idx));
+
+  if (ge.contra_way) {
+    std::reverse(id_list.begin(), id_list.end());
+  }
+
+  // May be >0 when from node ('gfrom_idx') is a repeated node.
+  uint32_t id_list_start_pos = FindInMapOrDefault(
+      g.edge_in_way_start_pos_map, {gfrom_idx, ge.target_idx, ge.way_idx}, 0);
+
+  const uint64_t id_from = g.nodes.at(gfrom_idx).node_id;
+  const uint64_t id_to = g.nodes.at(ge.target_idx).node_id;
+  uint32_t start_pos = INFU32;
+  uint32_t stop_pos = INFU32;
+  for (uint32_t i = id_list_start_pos; i < id_list.size(); ++i) {
+    uint64_t id = id_list.at(i);
+    if (id == id_from && start_pos == INFU32) {
+      start_pos = i;
+    } else if (start_pos != INFU32 && id == id_to) {
+      // It is important to put this in an "else" clause, because start and stop
+      // can not be at the same position, so they should never trigger on the
+      // same element.
+      stop_pos = i;
+      break;
+    }
+  }
+  LOG_S(INFO) << absl::StrFormat(
+      "shape coords way:%lu pos:%u->%u id:%lu to %lu", g.ways.at(ge.way_idx).id,
+      start_pos, stop_pos, id_from, id_to);
+  CHECK_NE_S(start_pos, INFU32);
+  CHECK_NE_S(stop_pos, INFU32);
+  CHECK_GT_S(stop_pos, start_pos + 1) << start_pos << ":" << stop_pos;
+
+  NodeBuilder::VNode prevn;
+  CHECK_S(NodeBuilder::FindNode(node_table, id_list.at(start_pos), &prevn))
+      << id_list.at(start_pos);
+  CHECK_EQ_S(prevn.lat.v(), g.nodes.at(gfrom_idx).lat.v());
+  CHECK_EQ_S(prevn.lon.v(), g.nodes.at(gfrom_idx).lon.v());
+
+  LatLonDownScale(prevn);
+  double prev_m = 999999999999;
+  int64_t sum_dlat = 0;
+  int64_t sum_dlon = 0;
+  int64_t sum_ddlat = 0;
+  int64_t sum_ddlon = 0;
+  PrevCoord prev(prevn.lat.v(), prevn.lon.v());
+  for (uint32_t i = start_pos + 1; i < stop_pos; ++i) {
+    NodeBuilder::VNode node;
+    CHECK_S(NodeBuilder::FindNode(node_table, id_list.at(i), &node))
+        << id_list.at(i);
+    LatLonDownScale(node);
+
+    int64_t dlat = node.lat.v64() - prev.lat;
+    int64_t ddlat = dlat - prev.predict_new_dlat();
+
+    int64_t dlon = node.lon.v64() - prev.lon;
+    int64_t ddlon = dlon - prev.predict_new_dlon(dlat);
+    int64_t ddlon_old = dlon - prev.dlon;
+
+    double m = (dlon != 0)
+                   ? static_cast<double>(dlat) / static_cast<double>(dlon)
+                   : 9999.9999;
+
+    LOG_S(INFO) << absl::StrFormat(
+        "shape pos:%u dlat:%ld dlon:%ld ddlat:%ld ddlon:%ld ddlon-old:%ld "
+        "m:%.4f %s",
+        i, dlat, dlon, ddlat, ddlon, ddlon_old, m,
+        RelativeDifference(m, prev_m) < 0.001 ? "equal" : "");
+
+    sum_dlat += std::abs(dlat);
+    sum_dlon += std::abs(dlon);
+    sum_ddlat += std::abs(ddlat);
+    sum_ddlon += std::abs(ddlon);
+
+    prev.push_new(node.lat.v(), node.lon.v());
+    prev_m = m;
+  }
+
+  int64_t sum_d = sum_dlat + sum_dlon;
+  int64_t sum_dd = sum_ddlat + sum_ddlon;
+
+  LOG_S(INFO) << absl::StrFormat(
+      "shape sums %s len:%ld dlat:%ld dlon:%ld ddlat:%ld ddlon:%ld",
+      sum_dd < sum_d ? "+++" : (sum_dd > sum_d ? "---" : "==="),
+      stop_pos - start_pos - 1, sum_dlat, sum_dlon, sum_ddlat, sum_ddlon);
+
+  return {};
+}
+
+void WriteShapeCoords(const Graph& g, const DataBlockTable& node_table,
+                      const TmpClusterInfo& tci, MMCluster* mmcluster,
+                      int64_t global_object_offset, int fd) {
+  // LOG_S(INFO) << "HH0";
+  for (uint32_t cnode_idx = 0; cnode_idx < tci.mm_nodes.size(); ++cnode_idx) {
+    const uint32_t gnode_idx = tci.cnode_to_gnode.at(cnode_idx);
+    const GNode& gnode = g.nodes.at(gnode_idx);
+
+    for (uint32_t cedge_idx : cnode_edge_indices(tci, cnode_idx)) {
+      if (!tci.cedge_has_shape_coords.at(cedge_idx)) {
+        // Push "0" to bitset.
+        // LOG_S(INFO) << "HH1";
+        continue;
+      }
+      if (tci.cedge_has_shape_coords_at_reverse_edge.at(cedge_idx)) {
+        // Push "14" to bitset.
+        // LOG_S(INFO) << "HH2";
+        continue;
+      }
+      // LOG_S(INFO) << "HH3";
+      const uint32_t gedge_idx =
+          gnode.edges_start_pos + tci.cedge_to_gedge_offset.at(cedge_idx);
+      const GEdge& ge = g.edges.at(gedge_idx);
+      // const GNode& to_gnode = g.nodes.at(ge.target_idx);
+
+      std::vector<MMLatLon> v =
+          GetShapeCoordsFromGraph(g, node_table, gnode_idx, ge);
+    }
+  }
+}
+
+void WriteMMClusterExpandedPart(const Graph& g,
+                                const DataBlockTable& node_table,
+                                const TmpClusterInfo& tci, MMCluster* mmcluster,
+                                const int64_t global_object_offset, int fd) {
   /*
   mmcluster->cluster_id = tci.cluster_id;
   ComputeClusterNodeNumbers(tci, mmcluster);
@@ -990,8 +1277,10 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
     std::vector<uint32_t> rel_lat;
     rel_lat.reserve(tci.mm_node_to_latlon.size());
     for (const auto& latlon : tci.mm_node_to_latlon) {
-      CHECK_LE_S(tci.mm_bounding_rect.min.lat, latlon.lat);
-      rel_lat.push_back(latlon.lat - tci.mm_bounding_rect.min.lat);
+      CHECK_LE_S(tci.mm_bounding_rect.min.lat.v(), latlon.lat.v());
+      // TODO: handle potential overflow?
+      const DegE6 diff = latlon.lat - tci.mm_bounding_rect.min.lat;
+      rel_lat.push_back(diff.v());
     }
     mmcluster->node_to_rel_lat.WriteDataBlob(
         "node_to_rel_lat",
@@ -1003,8 +1292,10 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
     std::vector<uint32_t> rel_lon;
     rel_lon.reserve(tci.mm_node_to_latlon.size());
     for (const auto& latlon : tci.mm_node_to_latlon) {
-      CHECK_LE_S(tci.mm_bounding_rect.min.lon, latlon.lon);
-      rel_lon.push_back(latlon.lon - tci.mm_bounding_rect.min.lon);
+      CHECK_LE_S(tci.mm_bounding_rect.min.lon.v(), latlon.lon.v());
+      // TODO: handle potential overflow?
+      const DegE6 diff = latlon.lon - tci.mm_bounding_rect.min.lon;
+      rel_lon.push_back(diff.v());
     }
     mmcluster->node_to_rel_lon.WriteDataBlob(
         "node_to_rel_lon",
@@ -1094,17 +1385,21 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
             offsetof(MMCluster, complex_turn_restriction_legs),
         fd, legs);
   }
+
+  WriteShapeCoords(g, node_table, tci, mmcluster, global_object_offset, fd);
 }
 
 // Convert the monolithic graph to a list of clusters and store them in a
 // memory mapped file.
-void WriteGraphToMMFile(const Graph& g, const std::string& path,
-                        bool check_mmgraph = false) {
+// Note that 'node_table' contains - in a compressed way - all node coordinates
+// of nodes referenced by ways. This is needed for shape coordinates.
+void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
+                        const std::string& path, bool check_mmgraph = false) {
   FUNC_TIMER();
   int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) FileAbortOnError("open");
 
-  // Write zeroed data for headedr, bounding rects and clusters.
+  // Write zeroed data for header, bounding rects and clusters.
   MMGraph mmheader = {0};
   const uint32_t num_clusters = g.clusters.size();
   std::vector<MMClusterBoundingRect> sorted_bounding_rects(num_clusters, {0});
@@ -1118,9 +1413,9 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
       "clusters", offsetof(MMGraph, clusters), fd, clusters);
 
   // Start filling data.
-  mmheader.magic = kMagic;
-  mmheader.version_major = kVersionMajor;
-  mmheader.version_minor = kVersionMinor;
+  mmheader.magic = kMMMagic;
+  mmheader.version_major = kMMVersionMajor;
+  mmheader.version_minor = kMMVersionMinor;
   mmheader.file_size = 0;
 
   std::vector<TmpClusterInfo> tmp_cluster_infos;
@@ -1144,14 +1439,11 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
   // Expanded Cluster Data.
   LOG_S(INFO) << "Start WriteMMClusterExpandedPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
-    // FillTmpClusterInfo(g, &tci);
     WriteMMClusterExpandedPart(
-        tci, &clusters.at(tci.cluster_id),
+        g, node_table, tci, &clusters.at(tci.cluster_id),
         // global file offset of this MMCluster object.
         clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)), fd);
 #if 0
-    sorted_bounding_rects.at(tci.cluster_id) = {
-        .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
     if (!check_mmgraph) {
       tci = {};  // Clear all data, release memory.
     }
@@ -1168,6 +1460,7 @@ void WriteGraphToMMFile(const Graph& g, const std::string& path,
 
   LogMemoryUsage();
 
+  // Finalize the memory mapped file.
   // Rewrite the header data and the two vectors belonging to the header.
   mmheader.file_size = GetFileSize(fd);
   WriteDataTo(fd, 0, (const uint8_t*)&mmheader, sizeof(mmheader));
