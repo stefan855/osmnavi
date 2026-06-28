@@ -65,12 +65,9 @@ static std::shared_ptr<MMHybridRouter::RouterData> g_last_router_data;
 static LRUCache<RouteKey, std::string> g_route_result_cache(8);
 
 // Cache the result for 'FindClosestEdges()'.
-inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, double d_lat,
-                                           double d_lon) {
+inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, DegE6 lat,
+                                           DegE6 lon) {
   static LRUCache<uint64_t, GeoAnchor> g_closest_edge_cache(32);
-
-  const DegE6 lat(d_lat);
-  const DegE6 lon(d_lon);
 
   // Combine both lat and lon into one uint64_t, so we don't have to create a
   // hash function.
@@ -321,11 +318,11 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   return {{"code", "Ok"}, {"waypoints", waypoints}, {"routes", routes}};
 }
 
-nlohmann::json ComputeRoute(const MMGraph& mg, double lon1, double lat1,
-                            double lon2, double lat2) {
+nlohmann::json ComputeRoute(const MMGraph& mg, DegE6 lat1, DegE6 lon1,
+                            DegE6 lat2, DegE6 lon2) {
   FUNC_TIMER();
 
-  LOG_S(INFO) << "Search " << lon1 << " " << lat1;
+  LOG_S(INFO) << "Search " << lat1.AsDouble() << " " << lon1.AsDouble();
   GeoAnchor start;
   GeoAnchor target;
   double find_closest_time;
@@ -339,12 +336,10 @@ nlohmann::json ComputeRoute(const MMGraph& mg, double lon1, double lat1,
                                  find_closest_time);
 
   for (const auto& e : start.edge_points()) {
-    LOG_S(INFO) << e.DebugString(mg, std::llround(lat1 * TEN_POW_7_DBL),
-                                 std::llround(lon1 * TEN_POW_7_DBL));
+    LOG_S(INFO) << e.DebugString(mg, lat1, lon1);
   }
   for (const auto& e : target.edge_points()) {
-    LOG_S(INFO) << e.DebugString(mg, std::llround(lat2 * TEN_POW_7_DBL),
-                                 std::llround(lon2 * TEN_POW_7_DBL));
+    LOG_S(INFO) << e.DebugString(mg, lat2, lon2);
   }
   LOG_S(INFO) << absl::StrFormat("Found: start:%d  target:%d",
                                  !start.edge_points().empty(),
@@ -530,7 +525,8 @@ int main(int argc, char* argv[]) {
               LOG_S(INFO) << "Return cached result length " << res_str.size()
                           << " bytes";
             } else {
-              nlohmann::json result = ComputeRoute(mg, lon1, lat1, lon2, lat2);
+              nlohmann::json result = ComputeRoute(mg, DegE6(lat1), DegE6(lon1),
+                                                   DegE6(lat2), DegE6(lon2));
               res_str = result.dump();
               g_route_result_cache.put(route_key, res_str);
             }
@@ -585,8 +581,9 @@ int main(int argc, char* argv[]) {
   // Try something on startup:
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
-  LOG_S(INFO)
-      << ComputeRoute(mg, 8.720121, 47.3476881, 8.7204095, 47.3476057).dump(2);
+  LOG_S(INFO) << ComputeRoute(mg, DegE6(47.3476881), DegE6(8.720121),
+                              DegE6(47.3476057), DegE6(8.7204095))
+                     .dump(2);
 
   mg.PrintInfo();
   LOG_S(INFO) << "Listening...";

@@ -26,18 +26,18 @@ struct EdgePoint {
     return std::max(0.0f, std::min(1.0f, to_fraction));
   }
 
-  std::string DebugString(const MMCluster& mc, uint32_t origin_lat,
-                          uint32_t origin_lon) const {
+  std::string DebugString(const MMCluster& mc, DegE6 origin_lat = {},
+                          DegE6 origin_lon = {}) const {
     CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
     return absl::StrFormat(
         "Closest Edge to (%.7f, %.7f) dist:%.2fm cl:%u n0:%lli n1:%lli fc:%.2f",
-        origin_lat / TEN_POW_7_DBL, origin_lon / TEN_POW_7_DBL,
-        distance_cm / 100.0, fe.cluster_id, mc.get_node_id(fe.from_node_idx),
+        origin_lat.AsDouble(), origin_lon.AsDouble(), distance_cm / 100.0,
+        fe.cluster_id, mc.get_node_id(fe.from_node_idx),
         mc.get_node_id(fe.edge(mc).target_idx()), to_fraction);
   }
 
-  std::string DebugString(const MMGraph& mg, uint32_t origin_lat,
-                          uint32_t origin_lon) const {
+  std::string DebugString(const MMGraph& mg, DegE6 origin_lat = {},
+                          DegE6 origin_lon = {}) const {
     return DebugString(mg.clusters.at(fe.cluster_id), origin_lat, origin_lon);
   }
 };
@@ -157,7 +157,7 @@ class GeoAnchor {
     LOG_S(INFO) << "Adapt edge point to " << new_cluster_id;
     GeoAnchor a(point_);
     for (const EdgePoint& ep : edge_points_) {
-      LOG_S(INFO) << "Adapt edge: " << ep.DebugString(mg, 0, 0);
+      LOG_S(INFO) << "Adapt edge: " << ep.DebugString(mg);
       if (ep.fe.cluster_id == new_cluster_id) {
         // Copy as is.
         LOG_S(INFO) << "Adapt: Copy";
@@ -167,7 +167,7 @@ class GeoAnchor {
         EdgePoint new_ep = ep;
         new_ep.fe = ep.fe.GetDualCrossClusterEdge(mg);
         a.push_edge(new_ep);
-        LOG_S(INFO) << "Adapted edge: " << new_ep.DebugString(mg, 0, 0);
+        LOG_S(INFO) << "Adapted edge: " << new_ep.DebugString(mg);
       } else {
         LOG_S(INFO) << "Adapt: Drop";
       }

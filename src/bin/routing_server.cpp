@@ -142,12 +142,6 @@ struct JsonResult {
   std::string last_name;
 };
 
-// float GetLon(const GNode& n) { return n.lon / static_cast<float>(TEN_POW_7);
-// }
-
-// float GetLat(const GNode& n) { return n.lat / static_cast<float>(TEN_POW_7);
-// }
-
 std::string GetEdgeName(const Graph& g, const CTRList& ctr_list,
                         const EdgeRouter3::VisitedEdge& ve) {
   if (ve.key.GetType() == EdgeRoutingLabel3::CLUSTER) {

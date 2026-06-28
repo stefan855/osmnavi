@@ -8,6 +8,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "base/country_code.h"
+#include "base/deg_coord.h"
 #include "geometry/fast_country_polygons.h"
 #include "geometry/line_clipping.h"
 #include "logging/loguru.h"
@@ -19,7 +20,7 @@
 class TiledCountryLookup {
  public:
   // Units that incoming coordinates must have. This is 100 nanodegrees.
-  static constexpr int32_t kDegreeUnits = TEN_POW_7;
+  static constexpr int32_t kDegreeUnits = DegE6::MulFactor;
 
   // Size of a tile in the lat/lon coordinate system using kDegreeUnits.
   // The default size 1 << 20 is roughly 10^6, i.e. 1/10 degrees.

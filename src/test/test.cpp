@@ -1192,17 +1192,16 @@ void TestArglis() {
 }
 
 void TestCalculateDistance() {
-  constexpr int32_t unit = TEN_POW_7;
-  LOG_S(INFO) << "TestCalculateDistance() started";
-  LOG_S(INFO) << "New:"
-              << calculate_distance(-10 * unit, -20 * unit, 30 * unit,
-                                    40 * unit);
-
-  LOG_S(INFO) << "New:"
-              << calculate_distance(-10 * unit, -20 * unit, 130 * unit,
-                                    140 * unit);
-
-  LOG_S(INFO) << "TestCalculateDistance() finished";
+  DegE6 lat_paris(48.8566);
+  DegE6 lon_paris(2.3522);
+  DegE6 lat_berlin(52.5200);
+  DegE6 lon_berlin(13.4050);
+  const uint32_t dist_cm =
+      calculate_distance(lat_paris, lon_paris, lat_berlin, lon_berlin);
+  CHECK_DOUBLE_EQ_S(dist_cm, 878 * 1000 * 100, 0.001);
+  const uint32_t dist_rev_cm =
+      calculate_distance(lat_berlin, lon_berlin, lat_paris, lon_paris);
+  CHECK_DOUBLE_EQ_S(dist_cm, dist_rev_cm, 0.00001);
 }
 
 uint32_t ComputeAngle(double lat1, double lon1, double lat2, double lon2) {
@@ -1210,10 +1209,8 @@ uint32_t ComputeAngle(double lat1, double lon1, double lat2, double lon2) {
   const DegE6 lon1n(lon1);
   const DegE6 lat2n(lat2);
   const DegE6 lon2n(lon2);
-  const uint32_t length_cm =
-      calculate_distance(lat1n.v(), lon1n.v(), lat2n.v(), lon2n.v());
-  return angle_to_east_degrees(lat1n.v(), lon1n.v(), lat2n.v(), lon2n.v(),
-                               length_cm);
+  const uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
+  return angle_to_east_degrees(lat1n, lon1n, lat2n, lon2n, length_cm);
 }
 
 int32_t TestAngle(double lat1, double lon1, double lat2, double lon2,
@@ -1259,10 +1256,10 @@ void TestEdgeAngles() {
   // circle is shrinking.
   int32_t prev_angle = 45;
   for (uint32_t i = 4; i < 90; i += 5) {
-    const int32_t lat1 = i * TEN_POW_7;
-    const int32_t lon1 = 0;
-    const int32_t lat2 = (i + 1) * TEN_POW_7;
-    const int32_t lon2 = TEN_POW_7;
+    const DegE6 lat1(static_cast<double>(i));
+    const DegE6 lon1(0.0);
+    const DegE6 lat2(static_cast<double>(i + 1));
+    const DegE6 lon2(1.0);
     uint32_t length_cm = calculate_distance(lat1, lon1, lat2, lon2);
     int32_t angle = angle_to_east_degrees(lat1, lon1, lat2, lon2, length_cm);
     LOG_S(INFO) << absl::StrFormat("angle of (%u,%u)->(%u,%u) is %u", i, 0,
@@ -1450,8 +1447,6 @@ void TestClosestPoint() {
     // Random coordinates in the range [-10, +10) degrees.
     DegE6 lat(static_cast<double>((rand() % (2 * 90)) - 90));
     DegE6 lon(static_cast<double>((rand() % (2 * 180)) - 180));
-    // int64_t lat = (rand() % (2 * 90 * TEN_POW_7)) - 90 * TEN_POW_7;
-    // int64_t lon = (rand() % (2 * 180 * TEN_POW_7)) - 180 * TEN_POW_7;
     auto slow = FindClosestNodeSlow(g, lat, lon);
     auto fast = FindClosestNodeFast(g, idx, lat, lon);
     if (slow.dist != fast.dist) {

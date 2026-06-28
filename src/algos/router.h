@@ -210,9 +210,9 @@ class Router {
 
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        static_cast<uint32_t>(
-            1.00 * calculate_distance(node.lat.v(), node.lon.v(),
-                                      ctx.target_lat.v(), ctx.target_lon.v())));
+        static_cast<uint32_t>(1.00 * calculate_distance(node.lat, node.lon,
+                                                        ctx.target_lat,
+                                                        ctx.target_lon)));
   }
 
   // Expand the forward edges.

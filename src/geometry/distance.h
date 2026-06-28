@@ -3,38 +3,37 @@
 #include <cmath>
 
 #include "base/constants.h"
+#include "base/deg_coord.h"
+
+// Compute distance between two points on the surface of the earth, using the
+// haversine formula.
+// Returned distance is in centimeters.
+inline int64_t calculate_distance(DegE6 lat1, DegE6 lon1, DegE6 lat2,
+                                  DegE6 lon2) {
+  double lat1_rad = lat1.AsDouble() * (std::numbers::pi / 180.0);
+  double lon1_rad = lon1.AsDouble() * (std::numbers::pi / 180.0);
+  double lat2_rad = lat2.AsDouble() * (std::numbers::pi / 180.0);
+  double lon2_rad = lon2.AsDouble() * (std::numbers::pi / 180.0);
+  double f_dlat = std::sin((lat2_rad - lat1_rad) / 2.0);
+  double f_dlon = std::sin((lon2_rad - lon1_rad) / 2.0);
+  double a = f_dlat * f_dlat +
+             std::cos(lat1_rad) * std::cos(lat2_rad) * f_dlon * f_dlon;
+  return std::llround(2.0 * kEarthRadiusCm *
+                      std::atan2(std::sqrt(a), std::sqrt(1.0 - a)));
+}
 
 namespace {
 // Length of a segment on a longitude circle in cm, given its size in degrees.
 // This assumes that the earth is a perfect sphere (although it isn't). This is
 // necessary because the calculate_distance() does the same.
-inline int64_t length_lat_segment_cm(int64_t lat_diff_100nano) {
+inline int64_t length_lat_segment_cm(const DegE6 lat_diff) {
   constexpr double kEarthCircumferenceThroughPoles =
       kEarthRadiusCm * std::numbers::pi * 2;
 
-  return std::llround((kEarthCircumferenceThroughPoles * lat_diff_100nano) /
-                      (360ll * TEN_POW_7));
+  return std::llround(kEarthCircumferenceThroughPoles / 360.0 *
+                      lat_diff.AsFloat());
 }
-
 }  // namespace
-
-// Compute distance between two points on the surface of the earth, using the
-// haversine formula. Input coordinates are in units of 10^-7 degrees, i.e. they
-// are multiplied by 10^7. This format is used in openstreetmap. Returned
-// distance is in centimeters.
-inline int64_t calculate_distance(int32_t lat1_100nano, int32_t lon1_100nano,
-                                  int32_t lat2_100nano, int32_t lon2_100nano) {
-  double lat1 = lat1_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
-  double lon1 = lon1_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
-  double lat2 = lat2_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
-  double lon2 = lon2_100nano * (std::numbers::pi / 180.0 / TEN_POW_7_DBL);
-  double f_dlat = std::sin((lat2 - lat1) / 2.0);
-  double f_dlon = std::sin((lon2 - lon1) / 2.0);
-  double a =
-      f_dlat * f_dlat + std::cos(lat1) * std::cos(lat2) * f_dlon * f_dlon;
-  return std::llround(2.0 * kEarthRadiusCm *
-                      std::atan2(std::sqrt(a), std::sqrt(1.0 - a)));
-}
 
 // Return the counterclockwise angle α ([0..359] deg) between an edge and the
 // latitude circle at the starting point of the edge.
@@ -53,16 +52,14 @@ inline int64_t calculate_distance(int32_t lat1_100nano, int32_t lon1_100nano,
 // length_lat_segment_cm()). Angle α is computed from the formula
 //   sin(α) = height / edge_length.
 //
-inline int32_t angle_to_east_degrees(int32_t lat1_100nano, int32_t lon1_100nano,
-                                     int32_t lat2_100nano, int32_t lon2_100nano,
-                                     uint32_t edge_length_cm) {
+inline int32_t angle_to_east_degrees(DegE6 lat1, DegE6 lon1, DegE6 lat2,
+                                     DegE6 lon2, uint32_t edge_length_cm) {
   if (edge_length_cm == 0) {
     return 0;
   }
 
-  const int64_t lat_diff_100nano = std::abs(static_cast<int64_t>(lat2_100nano) -
-                                            static_cast<int64_t>(lat1_100nano));
-  const double height_cm = length_lat_segment_cm(lat_diff_100nano);
+  const DegE6 lat_diff(std::abs(lat2.v64() - lat1.v64()));
+  const double height_cm = length_lat_segment_cm(lat_diff);
 
   int64_t angle = 90;
   // asin is only defined for [-1..1]. Here all numbers are positive, so
@@ -79,14 +76,14 @@ inline int32_t angle_to_east_degrees(int32_t lat1_100nano, int32_t lon1_100nano,
 
   // Compute result, depending on the quadrant the target of the edge is
   // relative to the origin of the edge.
-  if (lat2_100nano >= lat1_100nano) {
-    if (lon2_100nano >= lon1_100nano) {  // 1. Quadrant
+  if (lat2 >= lat1) {
+    if (lon2 >= lon1) {  // 1. Quadrant
       return angle;
     } else {  // 2. Quadrant
       return 180 - angle;
     }
   } else {
-    if (lon2_100nano >= lon1_100nano) {  // 4. Quadrant
+    if (lon2 >= lon1) {  // 4. Quadrant
       return (360 - angle) % 360;
     } else {  // 3. Quadrant
       return 180 + angle;

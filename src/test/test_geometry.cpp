@@ -10,10 +10,9 @@
 
 void TestHelpers() {
   FUNC_TIMER();
-  int32_t km_cm = 1 * 1000 * 100;
-  CHECK_DOUBLE_EQ_S(LatDistanceForLength(km_cm),
-                    (static_cast<double>(km_cm) / kEarthCircumReferenceCm) *
-                        360.0 * TEN_POW_7_DBL,
+  double km_cm = 1.0 * 1000.0 * 100.0;
+  CHECK_DOUBLE_EQ_S(LatDistanceForLength(km_cm).AsDouble(),
+                    (km_cm / kEarthCircumReferenceCm) * 360.0,
                     0.01);
 }
 

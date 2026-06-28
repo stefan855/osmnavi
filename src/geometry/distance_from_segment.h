@@ -19,29 +19,22 @@ struct DistanceToSegment {
   auto operator<=>(const DistanceToSegment&) const = default;
 };
 
-// Convert lat/lon coordinate (given as deg * 10^7) to radians.
-constexpr inline double IntDegToRad(DegE6 int_deg) {
-  return int_deg.AsDouble() * M_PI / 180.0;
-  // return int_deg * (M_PI / 180.0 / TEN_POW_7);
-}
-
 // Compute the length of a specific longitude offset in cm on a circle of
 // latitude at 'lat'.
 constexpr double LonDistanceAtLat(DegE6 lon, DegE6 lat) {
-  const double lat_rad = IntDegToRad(lat);
-  return kEarthRadiusCm * IntDegToRad(lon) * std::cos(lat_rad);
+  return kEarthRadiusCm * lon.ToRad() * std::cos(lat.ToRad());
 }
 
 // Return the length of a circle of longitude of length 'lat'.
 constexpr double CmPerLatitudeDegree(DegE6 lat) {
-  return kEarthRadiusCm * IntDegToRad(lat);
+  return kEarthRadiusCm * lat.ToRad();
 }
 
 // Given a length in centimeters, return the integer lat offset that corresponds
 // to it.
-constexpr int32_t LatDistanceForLength(int32_t length_cm) {
+constexpr DegE6 LatDistanceForLength(int32_t length_cm) {
   double fraction = static_cast<double>(length_cm) / kEarthCircumReferenceCm;
-  return 360 * TEN_POW_7_DBL * fraction;
+  return DegE6(360.0 * fraction);
 }
 
 // Compute the (x, y) distance from (lat0, lon0) to (lat1, lon1) in
@@ -49,10 +42,9 @@ constexpr int32_t LatDistanceForLength(int32_t length_cm) {
 // for computation. Works reasonably well only for small distances.
 constexpr void FastEarthDistanceXY(DegE6 lat0, DegE6 lon0, DegE6 lat1,
                                    DegE6 lon1, double* x, double* y) {
-  double lat0_rad = IntDegToRad(lat0);
-  *x = kEarthRadiusCm * IntDegToRad(DegE6(lon1.v64() - lon0.v64())) *
-       std::cos(lat0_rad);
-  *y = kEarthRadiusCm * IntDegToRad(DegE6(lat1.v64() - lat0.v64()));
+  *x = kEarthRadiusCm * DegE6(lon1.v64() - lon0.v64()).ToRad() *
+       std::cos(lat0.ToRad());
+  *y = kEarthRadiusCm * DegE6(lat1.v64() - lat0.v64()).ToRad();
 }
 
 // Compute distance of (lat_p, lon_p) to segment (lat_a,lon_a) -> (lat_b,lon_b).

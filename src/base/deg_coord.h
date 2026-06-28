@@ -12,16 +12,15 @@ concept TAllowedIntDegE6 =
     std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>;
 };
 
-// Encapsulate a degree coordinate (typically lat or lon) converted to integers
-// in a class.
+// Encapsulate a degree coordinate (typically lat or lon) in a class.
 //
 // To store a floating point coordinate such as 47.341234, it is multiplied by
 // DegE6::MulFactor() and rounded to the next integer.
-// For a MulFactor of 10^6, it yields a resolution of roughly 11 cm at the
-// equator, which is good enough for our purposes.
+// A MulFactor of 10^6 yields a resolution of roughly 11 cm at the equator,
+// which is good enough for our purposes (OSM has 10^7).
 //
-// This class hides the multiplication factor and makes code that uses such
-// coordinates more readable and less error prone.
+// This class mostly hides the multiplication factor and makes code that uses
+// such coordinates shorter, more readable and less error prone.
 class DegE6 {
  public:
   DegE6() : DegE6(0) {}
@@ -53,6 +52,12 @@ class DegE6 {
     // return DegE6((deg_e7 + 5) / 10);
   }
 
+  // TODO DegE6 remove.
+  constexpr int32_t ToOSM() const {
+    return coordinate_;
+    // return coordinate_ * 10;
+  }
+
   // Assignment.
   template <TAllowedIntDegE6 T>
   constexpr inline DegE6& operator=(T v) {
@@ -70,8 +75,14 @@ class DegE6 {
   constexpr float AsFloat() const {
     return static_cast<float>(coordinate_) / static_cast<float>(MUL_FACTOR);
   }
+
   constexpr double AsDouble() const {
     return static_cast<double>(coordinate_) / static_cast<double>(MUL_FACTOR);
+  }
+
+  constexpr double ToRad() const {
+    return static_cast<double>(coordinate_) / static_cast<double>(MUL_FACTOR) *
+           M_PI / 180.0;
   }
 
   static constexpr int32_t MulFactor() { return MUL_FACTOR; }

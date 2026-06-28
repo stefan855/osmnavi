@@ -1,10 +1,7 @@
 #pragma once
 
-// TODO: restart search at beginning of list if necessary (i.e. search 360
-// degrees).
-// TODO: exclude nodes based on latitude if too far away. Otherwise, when we're
-// close to a pole and have to search 360 degrees, we might have to search all
-// nodes.
+// TODO: This code is badly written, and not needed anymore for the new router
+// on memory mapped data. Remove it as soon as possible.
 
 #include <numeric>
 #include <vector>
@@ -27,7 +24,7 @@ inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, DegE6 lat,
   int64_t min_dist = INF64;
   for (uint32_t i = 0; i < g.nodes.size(); ++i) {
     const GNode& n = g.nodes.at(i);
-    int64_t dist = calculate_distance(lat.v(), lon.v(), n.lat.v(), n.lon.v());
+    int64_t dist = calculate_distance(lat, lon, n.lat, n.lon);
     if (dist < min_dist) {
       min_dist = dist;
       found_pos = i;
@@ -88,8 +85,7 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
     return true;
   }
 #endif
-  int64_t dist = calculate_distance(fsdata->lat.v(), fsdata->lon.v(), n.lat.v(),
-                                    n.lon.v());
+  int64_t dist = calculate_distance(fsdata->lat, fsdata->lon, n.lat, n.lon);
   if (dist < fsdata->min_dist) {
     fsdata->min_dist = dist;
     fsdata->found_pos = pos;
@@ -113,9 +109,9 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
 // the north/south pole than when staying on a fixed latitude, which makes the
 // search range larger. Additionally we divide by 2.0, because the point at +180
 // longitude could be very at the pole.
-double ComputeOneDegreeHeuristic(int64_t lat) {
+double ComputeOneDegreeHeuristic(DegE6 lat) {
   return static_cast<double>(
-             calculate_distance(lat, 0, lat, 180ll * TEN_POW_7)) /
+             calculate_distance(lat, DegE6(0.0), lat, DegE6(180.0))) /
          (180.0 * 2.0);
 }
 
@@ -147,7 +143,7 @@ inline ClosestNodeResult FindClosestNodeFast(const Graph& g,
   int64_t posb = posf - 1;
   FastSearchData fsdata = {.lat = lat,
                            .lon = lon,
-                           .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat.v()),
+                           .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat),
                            .min_dist = INF64,
                            .max_dlon = INF64,
                            .found_pos = INFU32};

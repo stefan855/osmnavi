@@ -664,9 +664,9 @@ class MMHybridRouter final {
           GeoAnchor target;
           target.AddEdge(mg, 1.0, out_edge.ToFullEdge(mg));
           LOG_S(INFO) << "Route from start: "
-                      << start.edge_points().front().DebugString(mc, 0, 0);
+                      << start.edge_points().front().DebugString(mc);
           LOG_S(INFO) << "Route to target: "
-                      << target.edge_points().front().DebugString(mc, 0, 0);
+                      << target.edge_points().front().DebugString(mc);
           MMClusterWrapper mcw(mc, VH_MOTORCAR, RoutingMetricTime(),
                                /*include_dead_ends=*/true);
           MMClusterRouter router(mcw, {.handle_restricted_access = true,

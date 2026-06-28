@@ -131,7 +131,7 @@ void RecomputeDistancesForTesting(Graph* g) {
     for (GEdge& e : gnode_all_edges(*g, node_idx)) {
       const GNode& n2 = g->nodes.at(e.target_idx);
       e.distance_cm =
-          calculate_distance(n1.lat.v(), n1.lon.v(), n2.lat.v(), n2.lon.v());
+          calculate_distance(n1.lat, n1.lon, n2.lat, n2.lon);
     }
   }
 }

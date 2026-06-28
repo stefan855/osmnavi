@@ -13,6 +13,7 @@
 
 struct Polygon {
   struct Point {
+    // TODO DegE6
     int32_t x;
     int32_t y;
   };
@@ -32,8 +33,18 @@ inline Polygon LoadPolygon(const std::string& filename) {
     CHECK_EQ_S(row.size(), 4u);
 
     int32_t lat, lon;
-    CHECK_S(absl::SimpleAtoi(row.at(2), &lat)) << row.at(2);
-    CHECK_S(absl::SimpleAtoi(row.at(3), &lon)) << row.at(3);
+    if (row.at(2).contains('.') && row.at(3).contains('.')) {
+      double num;
+      CHECK_S(absl::SimpleAtod(row.at(2), &num)) << line;
+      // TODO DegE6
+      lat = DegE6(num).ToOSM();
+      CHECK_S(absl::SimpleAtod(row.at(3), &num)) << line;
+      lon = DegE6(num).ToOSM();
+    } else {
+      CHECK_S(absl::SimpleAtoi(row.at(2), &lat)) << row.at(2);
+      CHECK_S(absl::SimpleAtoi(row.at(3), &lon)) << row.at(3);
+    }
+
     if (poly.coords.empty()) {
       CHECK_S(row.at(0) == "poly-start") << filename << ":" << row.at(0);
     } else {

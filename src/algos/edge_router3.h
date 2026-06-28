@@ -301,9 +301,9 @@ class EdgeRouter3 {
         WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        static_cast<uint32_t>(
-            1.00 * calculate_distance(node.lat.v(), node.lon.v(),
-                                      ctx.target_lat.v(), ctx.target_lon.v())));
+        static_cast<uint32_t>(1.00 * calculate_distance(node.lat, node.lon,
+                                                        ctx.target_lat,
+                                                        ctx.target_lon)));
   }
 
   // Add turn restrictions that have the initial trigger on edge 'e'.

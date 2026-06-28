@@ -387,12 +387,10 @@ uint32_t CurveCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   const GNode& node1 = n3p.node1(g);
   const GNode& node2 = n3p.node2(g);
 
-  const int32_t edge0_angle =
-      angle_to_east_degrees(node0.lat.v(), node0.lon.v(), node1.lat.v(),
-                            node1.lon.v(), n3p.edge0(g).distance_cm);
-  const int32_t edge1_angle =
-      angle_to_east_degrees(node1.lat.v(), node1.lon.v(), node2.lat.v(),
-                            node2.lon.v(), n3p.edge1(g).distance_cm);
+  const int32_t edge0_angle = angle_to_east_degrees(
+      node0.lat, node0.lon, node1.lat, node1.lon, n3p.edge0(g).distance_cm);
+  const int32_t edge1_angle = angle_to_east_degrees(
+      node1.lat, node1.lon, node2.lat, node2.lon, n3p.edge1(g).distance_cm);
   const int32_t turning_angle = angle_between_edges(edge0_angle, edge1_angle);
 
   return TurnAngleTimeLoss(g, vt, n3p.edge0(g), n3p.edge1(g), turning_angle);

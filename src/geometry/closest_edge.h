@@ -58,15 +58,14 @@ uint32_t DistanceToBoundingRect(DegE6 lat, DegE6 lon, MMBoundingRect br) {
   return min_dist;
 }
 
-// At latitude 'lat', how many degrees (in 10^-7 degrees units) do we travel for
-// 10 km?
-int64_t Get10kmLongitudeAtLatitude(DegE6 lat) {
+// At latitude 'lat', how many longitude degrees do we travel for 10 km?
+DegE6 Get10kmLongitudeAtLatitude(DegE6 lat) {
   // Compute an estimate of how long one kilometer of longitude is (in 10^-7
   // degrees) at a specific latitude.
   // Compute length for one degree longitude at 'lat'.
-  double length_one_deg_in_km =
-      calculate_distance(lat.v(), 0, lat.v(), TEN_POW_7) / (100.0 * 1000.0);
-  return 1'000'00000 / length_one_deg_in_km;
+  const double distance_cm_for_one_degree =
+      calculate_distance(lat, DegE6(0.0), lat, DegE6(1.0));
+  return DegE6(1.0 / (distance_cm_for_one_degree / (100.0 * 1000.0 * 10.0)));
 }
 
 // Find clusters that are within a 10km range of the point (lat, lon).
@@ -79,27 +78,28 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, DegE6 lat,
   std::vector<ClusterInfo> result;
 
   // Roughly ten kilometers in lat direction.
-  constexpr int64_t lat_10km = 111'1111;
+  // constexpr int64_t lat_10km = 1'111'111;
+  constexpr DegE6 lat_10km(360.0 * kEarthRadiusCm / (100.0 * 1000.0 * 10.0));
   // Roughly ten kilometers in lon direction.
-  const int64_t lon_10km = Get10kmLongitudeAtLatitude(lat);
+  const DegE6 lon_10km = Get10kmLongitudeAtLatitude(lat);
 
   for (const MMClusterBoundingRect& cl_br : mg.sorted_bounding_rects.span()) {
     const MMBoundingRect& br = cl_br.bounding_rect;
-    if (lat.v64() < br.min.lat.v64() - lat_10km ||
-        lat.v64() > br.max.lat.v64() + lat_10km) {
+    if (lat.v64() < br.min.lat.v64() - lat_10km.v64() ||
+        lat.v64() > br.max.lat.v64() + lat_10km.v64()) {
       continue;
     }
-    if (std::abs(lat.v()) < 85ll * TEN_POW_7 &&
-        (lon.v64() < br.min.lon.v64() - lon_10km ||
-         lon.v64() > br.max.lon.v64() + lon_10km)) {
+    if (std::abs(lat.AsDouble()) < 85.0 &&
+        (lon.v64() < br.min.lon.v64() - lon_10km.v64() ||
+         lon.v64() > br.max.lon.v64() + lon_10km.v64())) {
       continue;
     }
 
     ClusterInfo ci = {.cluster_id = cl_br.cluster_id};
     ci.point_to_border_cm = DistanceToBoundingRect(lat, lon, br);
     ci.point_to_center_cm = calculate_distance(
-        lat.v(), lon.v(), (br.min.lat.v64() + br.max.lat.v64()) / 2,
-        (br.min.lon.v64() + br.max.lon.v64()) / 2);
+        lat, lon, DegE6((br.min.lat.AsDouble() + br.max.lat.AsDouble()) / 2.0),
+        DegE6((br.min.lon.AsDouble() + br.max.lon.AsDouble()) / 2.0));
 
     if (ci.point_to_border_cm < 10 * 1000 * 100) {  // 10 km
       // LOG_S(INFO) << absl::StrFormat(

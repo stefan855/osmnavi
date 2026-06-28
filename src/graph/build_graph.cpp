@@ -1121,8 +1121,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
         }
         // Sum up distance so far.
         if (prev_node.id != 0) {
-          sum += calculate_distance(prev_node.lat.v(), prev_node.lon.v(),
-                                    node.lat.v(), node.lon.v());
+          sum += calculate_distance(prev_node.lat, prev_node.lon, node.lat,
+                                    node.lon);
 #if 0
           LOG_S(INFO) << "delta-lat:" << (node.lat - prev_node.lat);
           LOG_S(INFO) << "delta-lon:" << (node.lon - prev_node.lon);

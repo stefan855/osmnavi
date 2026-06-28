@@ -10,6 +10,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
+#include "base/deg_coord.h"
 #include "base/argli.h"
 #include "base/constants.h"
 #include "base/thread_pool.h"
@@ -126,7 +127,7 @@ double ConvertToDouble(std::string_view numstr) {
     if (!absl::SimpleAtoi(numstr, &num)) {
       LOG_S(INFO) << "Can not convert string to int64: <" << numstr << ">";
     }
-    return num / TEN_POW_7_DBL;
+    return DegE6(num).AsDouble();
   }
 }
 

@@ -421,7 +421,7 @@ class MMClusterRouter final {
         res.target.to_fraction = 1.0;
       }
       LOG_S(INFO) << "target_is_anchor=" << res.target_is_anchor << " "
-                  << res.target.DebugString(mc_, 0, 0);
+                  << res.target.DebugString(mc_);
     }
 
     res.final_metric = GetVEdge(last_v_idx).min_metric;
