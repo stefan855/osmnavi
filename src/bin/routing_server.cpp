@@ -14,10 +14,10 @@
 #include "base/argli.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
-#include "cpp-httplib/httplib.h"
 #include "geometry/closest_node.h"
 #include "graph/build_graph.h"
 #include "graph/graph_serialize.h"
+#include "httplib.h"
 
 namespace {
 

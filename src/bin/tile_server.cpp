@@ -10,14 +10,14 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/str_split.h"
-#include "base/deg_coord.h"
 #include "base/argli.h"
 #include "base/constants.h"
+#include "base/deg_coord.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
-#include "cpp-httplib/httplib.h"
 #include "gd.h"
 #include "geometry/line_clipping.h"
+#include "httplib.h"
 
 namespace {
 

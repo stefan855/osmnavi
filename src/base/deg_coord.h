@@ -48,14 +48,8 @@ class DegE6 {
 
   // Create from OSM coordinate, which is deg * 10^7.
   constexpr static DegE6 FromOSM(int64_t deg_e7) {
-    return DegE6(deg_e7);
-    // return DegE6((deg_e7 + 5) / 10);
-  }
-
-  // TODO DegE6 remove.
-  constexpr int32_t ToOSM() const {
-    return coordinate_;
-    // return coordinate_ * 10;
+    // return DegE6(deg_e7);
+    return DegE6((deg_e7 + 5) / 10);
   }
 
   // Assignment.
@@ -72,15 +66,15 @@ class DegE6 {
     return static_cast<int64_t>(coordinate_);
   }
 
-  constexpr float AsFloat() const {
+  constexpr inline float AsFloat() const {
     return static_cast<float>(coordinate_) / static_cast<float>(MUL_FACTOR);
   }
 
-  constexpr double AsDouble() const {
+  constexpr inline double AsDouble() const {
     return static_cast<double>(coordinate_) / static_cast<double>(MUL_FACTOR);
   }
 
-  constexpr double ToRad() const {
+  constexpr inline double ToRad() const {
     return static_cast<double>(coordinate_) / static_cast<double>(MUL_FACTOR) *
            M_PI / 180.0;
   }
@@ -107,7 +101,7 @@ class DegE6 {
 
  private:
   int32_t coordinate_;
-  static constexpr int32_t MUL_FACTOR = 10'000'000;
+  static constexpr int32_t MUL_FACTOR = 1'000'000;
 };
 static_assert(sizeof(DegE6) == 4);
 CHECK_IS_MM_OK(DegE6);

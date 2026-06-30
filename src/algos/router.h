@@ -149,9 +149,10 @@ class Router {
           const GNode& sfrom = g_.nodes.at(from.node_idx);
           bool shortest = from.shortest_route && n.shortest_route;
           if (shortest == (output_shortest > 0)) {
-            myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
-                                      shortest ? "red" : "black", sfrom.lat.v(),
-                                      sfrom.lon.v(), sn.lat.v(), sn.lon.v());
+            myfile << absl::StrFormat(
+                "line,%s,%.6f,%.6f,%.6f,%.6f\n", shortest ? "red" : "black",
+                sfrom.lat.AsDouble(), sfrom.lon.AsDouble(), sn.lat.AsDouble(),
+                sn.lon.AsDouble());
           }
         }
       }

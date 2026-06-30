@@ -359,7 +359,7 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
       *missing_nodes = true;
       continue;
     }
-    uint16_t ncc = meta.tiler->GetCountryNum(node.lon.v(), node.lat.v());
+    uint16_t ncc = meta.tiler->GetCountryNum(node.lon, node.lat);
     way_nodes.push_back({.id = running_id,
                          .ncc = ncc,
                          .dup_earlier = false,
@@ -1003,8 +1003,8 @@ void AllocateGNodes(GraphMetaData* meta) {
       // n.simple_turn_restriction_via_node = 0;
       n.is_pedestrian_crossing = 0;
       n.cluster_skeleton = 0;
-      n.lat = node->lat.v();
-      n.lon = node->lon.v();
+      n.lat = node->lat;
+      n.lon = node->lon;
       meta->graph.nodes.push_back(n);
     }
   }
@@ -1014,7 +1014,7 @@ void SetCountryInGNodes(GraphMetaData* meta) {
   FUNC_TIMER();
   // TODO: run with thread pool.
   for (GNode& n : meta->graph.nodes) {
-    n.ncc = meta->tiler->GetCountryNum(n.lon.v(), n.lat.v());
+    n.ncc = meta->tiler->GetCountryNum(n.lon, n.lat);
   }
 }
 

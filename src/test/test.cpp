@@ -8,6 +8,7 @@
 #include "base/argli.h"
 #include "base/country_code.h"
 #include "base/deduper_with_ids.h"
+#include "base/deg_coord.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
 #include "base/small_vector.h"
@@ -954,7 +955,7 @@ void TestTiledCountryLookup() {
     // is partially assigned to 'country, and tile 0,3) has no country.
     p.AddLine(tile_size + 1, -1, tile_size + 1, 2 * tile_size + 1000, country);
     TiledCountryLookup tiler(p, tile_size);
-    CHECK_EQ_S(tiler.GetCountryNum(1, 1), country);
+    CHECK_EQ_S(tiler.GetCountryNum(DegE6(1), DegE6(1)), country);
 
     // CHECK_EQ_S(p.CountIntersections(0, 50), 1);
   }
@@ -1455,10 +1456,12 @@ void TestClosestPoint() {
       int64_t slow_qdist = qdist(lat, lon, nslow);
       int64_t fast_qdist = qdist(lat, lon, nfast);
       LOG_S(INFO) << absl::StrFormat(
-          "Searching for (%d,%d)\nslow (%d,%d) qdist:%d cm:%d\nfast (%d,%d) "
+          "Searching for (%.6f,%.6f)\nslow (%.6f,%.6f) qdist:%d cm:%d\nfast "
+          "(%.6f,%.6f) "
           "qdist:%d cm:%d",
-          lat.v(), lon.v(), nslow.lat.v(), nslow.lon.v(), slow_qdist, slow.dist,
-          nfast.lat.v(), nfast.lon.v(), fast_qdist, fast.dist);
+          lat.AsDouble(), lon.AsDouble(), nslow.lat.AsDouble(),
+          nslow.lon.AsDouble(), slow_qdist, slow.dist, nfast.lat.AsDouble(),
+          nfast.lon.AsDouble(), fast_qdist, fast.dist);
     }
   }
 }

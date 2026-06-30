@@ -34,7 +34,7 @@ class FastCountryPolygons {
 
   FastCountryPolygons()
     // TODO DegE6
-      : max_height_({100, 1000, 10000, 100000, 1000000,
+      : max_height_({10, 100, 1000, 10000, 100000,
                      std::numeric_limits<uint32_t>::max()}),
         limited_lines_(max_height_.size()) {}
 

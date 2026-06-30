@@ -27,6 +27,15 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 set(ABSL_PROPAGATE_CXX_STD OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(abseil)
 ################# abseil Library Import ######################
+################# httplib Library Import ######################
+FetchContent_Declare(
+    cpp_httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG v0.24.0  # Replace with the version you want
+)
+
+FetchContent_MakeAvailable(cpp_httplib)
+################# abseil Library Import ######################
 
 # add_subdirectory(abseil-cpp)
 include_directories("${CMAKE_SOURCE_DIR}")
@@ -149,7 +158,7 @@ target_include_directories(test_serialize SYSTEM PRIVATE)
 target_link_libraries(test_serialize PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
 
 add_executable(tile_server src/bin/tile_server.cpp)
-target_include_directories(tile_server SYSTEM PRIVATE)
+target_include_directories(tile_server SYSTEM PRIVATE ${cpp_httplib_SOURCE_DIR})
 target_link_libraries(tile_server PRIVATE libgd.a libpng.a ZLIB::ZLIB freetype fontconfig absl::strings absl::str_format loguru_lib absl::time)
 
 add_executable(extract_admin src/bin/extract_admin.cpp)
@@ -161,13 +170,13 @@ target_include_directories(poi_traffic SYSTEM PRIVATE ${ZLIB_INCLUDE_DIR})
 target_link_libraries(poi_traffic PRIVATE osmpbf ZLIB::ZLIB protobuf::libprotobuf absl::strings absl::str_format loguru_lib absl::time build_graph_lib)
 
 add_executable(routing_server src/bin/routing_server.cpp)
-target_include_directories(routing_server SYSTEM PRIVATE)
+target_include_directories(routing_server SYSTEM PRIVATE ${cpp_httplib_SOURCE_DIR})
 target_link_libraries(routing_server PRIVATE ZLIB::ZLIB absl::strings absl::str_format loguru_lib absl::time absl::time build_graph_lib)
 
 find_package(OpenSSL REQUIRED)
 add_executable(mm_routing_server src/bin/mm_routing_server.cpp)
 # The following line switches between https and http.
 # target_compile_definitions(mm_routing_server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
-target_include_directories(mm_routing_server SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_include_directories(mm_routing_server SYSTEM PRIVATE ${OPENSSL_INCLUDE_DIR} ${cpp_httplib_SOURCE_DIR})
 target_link_libraries(mm_routing_server PRIVATE libgd.a libpng.a ZLIB::ZLIB absl::btree absl::flat_hash_map absl::strings absl::str_format loguru_lib absl::time absl::time OpenSSL::SSL OpenSSL::Crypto)
 

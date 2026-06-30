@@ -269,9 +269,9 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
           color = "green";
         }
       }
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
-                                n.lat.v(), n.lon.v(), other.lat.v(),
-                                other.lon.v());
+      myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
+                                n.lat.AsDouble(), n.lon.AsDouble(),
+                                other.lat.AsDouble(), other.lon.AsDouble());
       count++;
     }
   }
@@ -296,9 +296,9 @@ void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
       if (e.car_label_strange != strange) continue;
 
       const GNode& other = g.nodes.at(e.target_idx);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
-                                n.lat.v(), n.lon.v(), other.lat.v(),
-                                other.lon.v());
+      myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
+                                n.lat.AsDouble(), n.lon.AsDouble(),
+                                other.lat.AsDouble(), other.lon.AsDouble());
       count++;
     }
   }
@@ -326,9 +326,9 @@ void WriteClusterSkeletonEdges(const Graph& g, const std::string& color,
       }
 
       const GNode& target = g.nodes.at(e.target_idx);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
-                                n.lat.v(), n.lon.v(), target.lat.v(),
-                                target.lon.v());
+      myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
+                                n.lat.AsDouble(), n.lon.AsDouble(),
+                                target.lat.AsDouble(), target.lon.AsDouble());
       count++;
     }
   }
@@ -383,9 +383,9 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
         CHECK_S(false);
       }
       const GNode& other = g.nodes.at(e.target_idx);
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color.c_str(),
-                                n.lat.v(), n.lon.v(), other.lat.v(),
-                                other.lon.v());
+      myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
+                                n.lat.AsDouble(), n.lon.AsDouble(),
+                                other.lat.AsDouble(), other.lon.AsDouble());
       count++;
     }
   }
@@ -412,8 +412,9 @@ void WriteCrossCountryEdges(const build_graph::GraphMetaData& meta,
       const GNode& n2 = meta.graph.nodes.at(node_idx.at(pos + 1));
       if (n1.ncc != n2.ncc) {
         count++;
-        myfile << absl::StrFormat("line,black,%d,%d,%d,%d\n", n1.lat.v(),
-                                  n1.lon.v(), n2.lat.v(), n2.lon.v());
+        myfile << absl::StrFormat("line,black,%.6f,%.6f,%.6f,%.6f\n",
+                                  n1.lat.AsDouble(), n1.lon.AsDouble(),
+                                  n2.lat.AsDouble(), n2.lon.AsDouble());
         // LOG_S(INFO) << absl::StrFormat("cross country %lld -> %lld",
         //                                n1.node_id, n2.node_id);
       }
@@ -471,8 +472,9 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
         color = colors[g.clusters.at(n0.cluster_id).color_no % kMaxColor];
       }
 
-      myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", color, n0.lat.v(),
-                                n0.lon.v(), n1.lat.v(), n1.lon.v());
+      myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color,
+                                n0.lat.AsDouble(), n0.lon.AsDouble(),
+                                n1.lat.AsDouble(), n1.lon.AsDouble());
       count++;
     }
   }
@@ -699,12 +701,15 @@ int main(int argc, char* argv[]) {
   {
     // Write files in parallel.
     ThreadPool pool;
+#if 0
     pool.AddWork([&g](int thread_idx) {
       WriteGraphToCSV(g, VH_MOTORCAR, "/tmp/graph_motorcar.csv");
     });
 
     pool.AddWork(
         [&g](int thread_idx) { WriteLouvainGraph(g, "/tmp/louvain.csv"); });
+#endif
+
     pool.AddWork([&meta](int thread_idx) {
       WriteCrossCountryEdges(meta, "/tmp/cross.csv");
     });

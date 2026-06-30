@@ -19,8 +19,8 @@
 // determine the country of the given point.
 class TiledCountryLookup {
  public:
-  // Units that incoming coordinates must have. This is 100 nanodegrees.
-  static constexpr int32_t kDegreeUnits = DegE6::MulFactor;
+  // Units that incoming coordinates must have. This is microdegrees.
+  static constexpr int32_t kDegreeUnits = DegE6::MulFactor();
 
   // Size of a tile in the lat/lon coordinate system using kDegreeUnits.
   // The default size 1 << 20 is roughly 10^6, i.e. 1/10 degrees.
@@ -48,15 +48,16 @@ class TiledCountryLookup {
 
   // Get country code (INVALID_NCC) for a point in lon/lat coordinates. The
   // coordinates are in 'kDegreeUnits', see above.
-  uint16_t GetCountryNum(const int32_t p_x, const int32_t p_y,
+  // TODO DegE6: use DegE6 for coordinates.
+  uint16_t GetCountryNum(const DegE6 p_x, const DegE6 p_y,
                          const int64_t debug_id = 0) const {
-    auto it = tile_to_country_.find(TileKey(p_x, p_y));
+    auto it = tile_to_country_.find(TileKey(p_x.v(), p_y.v()));
     if (it == tile_to_country_.end()) {
       return INVALID_NCC;
     } else if (it->second > 0) {
       return it->second;
     }
-    return fast_contains_.GetCountryNum(p_x, p_y);
+    return fast_contains_.GetCountryNum(p_x.v(), p_y.v());
   }
 
  private:

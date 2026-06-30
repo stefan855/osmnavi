@@ -16,7 +16,7 @@
 
 constexpr uint64_t kMMMagic = 7715514337782280064ull;
 constexpr uint32_t kMMVersionMajor = 0;
-constexpr uint32_t kMMVersionMinor = 5;
+constexpr uint32_t kMMVersionMinor = 6;
 
 // Stores basic node data in an uint64_t.
 struct MMNode {
@@ -135,11 +135,6 @@ struct MMComplexTurnRestriction {
   uint32_t first_leg_pos;
   uint16_t num_legs;
   uint16_t forbidden : 1;
-};
-
-struct MMLatLon {
-  DegE6 lat;
-  DegE6 lon;
 };
 
 struct MMBoundingRect {

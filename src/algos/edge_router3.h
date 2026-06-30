@@ -146,9 +146,10 @@ class EdgeRouter3 {
         if (ve.shortest_route == (output_shortest > 0)) {
           const GNode a = ve.key.FromNode(g_, ctr_list_);
           const GNode b = ve.key.ToNode(g_, ctr_list_);
-          myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n",
+          myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n",
                                     ve.shortest_route ? "red" : "black",
-                                    a.lat.v(), a.lon.v(), b.lat.v(), b.lon.v());
+                                    a.lat.AsDouble(), a.lon.AsDouble(),
+                                    b.lat.AsDouble(), b.lon.AsDouble());
         }
       }
     }

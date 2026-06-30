@@ -32,17 +32,19 @@ inline Polygon LoadPolygon(const std::string& filename) {
     std::vector<std::string_view> row = absl::StrSplit(line, ',');
     CHECK_EQ_S(row.size(), 4u);
 
-    int32_t lat, lon;
+    DegE6 lat, lon;
     if (row.at(2).contains('.') && row.at(3).contains('.')) {
       double num;
       CHECK_S(absl::SimpleAtod(row.at(2), &num)) << line;
-      // TODO DegE6
-      lat = DegE6(num).ToOSM();
+      lat = DegE6(num);
       CHECK_S(absl::SimpleAtod(row.at(3), &num)) << line;
-      lon = DegE6(num).ToOSM();
+      lon = DegE6(num);
     } else {
-      CHECK_S(absl::SimpleAtoi(row.at(2), &lat)) << row.at(2);
-      CHECK_S(absl::SimpleAtoi(row.at(3), &lon)) << row.at(3);
+      int32_t num;
+      CHECK_S(absl::SimpleAtoi(row.at(2), &num)) << row.at(2);
+      lat = DegE6(num);
+      CHECK_S(absl::SimpleAtoi(row.at(3), &num)) << row.at(3);
+      lon = DegE6(num);
     }
 
     if (poly.coords.empty()) {
@@ -50,7 +52,7 @@ inline Polygon LoadPolygon(const std::string& filename) {
     } else {
       CHECK_S(row.at(0) == "pt") << filename << ":" << row.at(0);
     }
-    poly.coords.push_back({.x = lon, .y = lat});
+    poly.coords.push_back({.x = lon.v(), .y = lat.v()});
   }
   return poly;
 }

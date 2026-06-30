@@ -50,10 +50,11 @@ void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
             const GNode& fast = g.nodes.at(res.node_pos);
             const GNode& slow = g.nodes.at(res2.node_pos);
             LOG_S(INFO) << absl::StrFormat(
-                "%d DIFF for POI %c %d lat:%d lon:%d fast id:%d dist:%d slow "
+                "%d DIFF for POI %c %d lat:%.6f lon:%.6f fast id:%d dist:%d "
+                "slow "
                 "id:%d dist:%d",
-                i, poi.obj_type, poi.id, poi.lat.v(), poi.lon.v(), fast.node_id,
-                res.dist, slow.node_id, res2.dist);
+                i, poi.obj_type, poi.id, poi.lat.AsDouble(), poi.lon.AsDouble(),
+                fast.node_id, res.dist, slow.node_id, res2.dist);
           }
         }
       }
@@ -124,16 +125,16 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
       // Check if the edge is fully in a dead end or a bridge.
       bool dead_end = n1.dead_end || n2.dead_end;
       if (!export_file.empty()) {
-        myfile << absl::StrFormat("%lld,%d,%d,%d,%d,%lld,%d\n", way_id,
-                                  n1.lat.v(), n1.lon.v(), n2.lat.v(),
-                                  n2.lon.v(), edge_traffic.at(i), dead_end);
+        myfile << absl::StrFormat("%lld,%.6f,%.6f,%.6f,%.6f,%lld,%d\n", way_id,
+                                  n1.lat.AsDouble(), n1.lon.AsDouble(), n2.lat.AsDouble(),
+                                  n2.lon.AsDouble(), edge_traffic.at(i), dead_end);
       } else {
         int div = edge_traffic.at(i) / traffic_div;
         int idx = div < 1 ? 0 : div < 10 ? 1 : div < 100 ? 2 : 3;
         CHECK_LT_S(idx, 4);
-        myfile << absl::StrFormat("line,%s,%d,%d,%d,%d\n", colors[idx],
-                                  n1.lat.v(), n1.lon.v(), n2.lat.v(),
-                                  n2.lon.v());
+        myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", colors[idx],
+                                  n1.lat.AsDouble(), n1.lon.AsDouble(), n2.lat.AsDouble(),
+                                  n2.lon.AsDouble());
       }
     }
   }

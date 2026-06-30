@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "absl/strings/str_cat.h"
+#include "base/deg_coord.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/graph_def.h"
@@ -22,6 +23,11 @@
 // ARM. This is needed because we memory-map C++ POD (plain old data = "simple",
 // C-style) structs into files and want to read them across platforms.
 static_assert(std::endian::native == std::endian::little);
+
+struct MMLatLon {
+  DegE6 lat;
+  DegE6 lon;
+};
 
 template <typename T>
 size_t VectorDataSizeInBytes(const std::vector<T>& v) {
@@ -599,6 +605,19 @@ struct MMShapeCoords {
 
  public:
   MMShapeCoords() : mmgroups__(){};
+
+  void EncodeShapeCoordGroup(const std::span<uint16_t>& length,
+                             const std::span<bool>& use_reverse_edge,
+                             const std::span<MMLatLon>& latlon,
+                             std::vector<uint8_t>* header_bits,
+                             WriteBuff* buff);
+
+  void WriteDataBlob(const std::string& name, int64_t global_object_offset,
+                     const std::vector<MMLatLon>& latlon, int fd,
+                     const std::vector<uint16_t>& length,
+                     const std::vector<bool>& use_reverse_edge) {
+    ;
+  }
 
 #if 0
   // Initialise the memory mapped vector with the data from 'ids'.

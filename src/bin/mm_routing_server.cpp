@@ -19,7 +19,7 @@
 #include "base/lru_cache.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
-#include "cpp-httplib/httplib.h"
+#include "httplib.h"
 #include "geometry/closest_edge.h"
 #include "geometry/tiles.h"
 #include "graph/mmgraph_def.h"
