@@ -15,10 +15,23 @@ find_package(ZLIB REQUIRED)
 # find_package(LIBGD REQUIRED)
 find_package(Threads)
 
-add_subdirectory(abseil-cpp)
+################# abseil Library Import ######################
+include(FetchContent)
+FetchContent_Declare(
+    abseil
+    GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+    GIT_TAG 20250512.2
+)
+# Create isolated build environment
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+set(ABSL_PROPAGATE_CXX_STD OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(abseil)
+################# abseil Library Import ######################
+
+# add_subdirectory(abseil-cpp)
 include_directories("${CMAKE_SOURCE_DIR}")
 include_directories("${CMAKE_SOURCE_DIR}/src")
-include_directories("${CMAKE_SOURCE_DIR}/abseil-cpp")
+# include_directories("${CMAKE_SOURCE_DIR}/abseil-cpp")
 include_directories(${CMAKE_BINARY_DIR})
 
 message(CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -42,6 +55,21 @@ add_compile_options(-O3)
 
 # add_compile_options(-mno-avx2)
 add_compile_options(-Wall)
+add_compile_options(-Wlogical-op)
+####################################################
+# Seem good to have:
+# add_compile_options(-Wold-style-cast)
+# add_compile_options(-Wshadow)
+####################################################
+
+####################################################
+# Seem too complicated/costly to have:
+# add_compile_options(-Wmissing-field-initializers)
+# add_compile_options(-Wextra)
+# add_compile_options(-Wconversion)
+# add_compile_options(-Werror)
+####################################################
+
 add_compile_options(-Wclobbered -Wcast-function-type -Wdangling-reference
   -Wdeprecated-copy -Wempty-body -Wignored-qualifiers  -Wimplicit-fallthrough=3
   -Wstring-compare  -Wredundant-move -Wtype-limits
