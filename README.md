@@ -48,9 +48,10 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 * Remove the serialized graph, it is replaced by the memory mapped graph. 
 
 ## Tasks ahead
-1. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
-2. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
-3. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
+1. Add A* to the new cluster based routing algorithm.
+2. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
+3. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
+4. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
 1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 2. Make the routing server use https instead of http.
