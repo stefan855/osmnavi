@@ -44,6 +44,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 ## Current Tasks
 * Implement a routing engine using the memory mapped file. Prototype up and running, working on edge cases.
 * Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
+* Add shape node coordinates to the memory mapped file. Shape nodes exist in OSM data to "shape" the curvature of a street. They are omitted from the routing graph itself, because they are not needed to find shortest routes.
 * Remove the serialized graph, it is replaced by the memory mapped graph. 
 
 ## Tasks ahead
@@ -81,7 +82,6 @@ tar xf ~/Downloads/leaflet-routing-machine-3.2.12.tar.gz
 
 git clone https://github.com/stefan855/osmnavi
 cd osmnavi
-git submodule update --init --recursive
 mkdir release
 cd release/
 cmake -DCMAKE_BUILD_TYPE=Release ..
