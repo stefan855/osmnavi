@@ -40,11 +40,13 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Store the routing graph in a file, see [graph_serialize.h](./src/graph/graph_serialize.h). With this, the serialized graph for a country such as Switzerland is ~70Mb.
 1. Ported the code to Raspberry Pi, i.e. to another architecture more similar to phone hardware. The port was actually very easy. Only one test started to fail due to comparing double values that were marginally different.
 1. Replace the serialized graph that is loaded fully into memory by the memory mapped file containing the routing graph.
+1. Implement a routing engine using the memory mapped file.
+1. Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
+1. Add shape node coordinates to the memory mapped file. Shape nodes exist in OSM data to "shape" the curvature of a street. They are omitted from the routing graph itself, because they are not needed to find shortest routes.
   
 ## Current Tasks
-* Implement a routing engine using the memory mapped file. Prototype up and running, working on edge cases.
-* Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
-* Add shape node coordinates to the memory mapped file. Shape nodes exist in OSM data to "shape" the curvature of a street. They are omitted from the routing graph itself, because they are not needed to find shortest routes.
+* Use shape coordinates in routing server, enabling route display following street curvature.
+* Add more tests for shape coordinate storage.
 * Remove the serialized graph, it is replaced by the memory mapped graph. 
 
 ## Tasks ahead
