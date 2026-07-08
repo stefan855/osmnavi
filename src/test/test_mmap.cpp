@@ -354,8 +354,7 @@ void TestMMGroupedOSMIds() {
   ids.push_back(0);
   uint64_t rand_state = 123456789999;
   for (size_t i = 0; i < 1000; ++i) {
-    rand_state = PseudoRandom64(rand_state);
-    ids.push_back(((int64_t)rand_state));
+    ids.push_back(PseudoRandomInt64(&rand_state));
   }
 
   int fd = OpenTempFile();
@@ -383,14 +382,70 @@ void TestMMGroupedOSMIds() {
 
     uint64_t rand_state = 1;
     for (size_t i = 0; i < 1000; ++i) {
-      rand_state = PseudoRandom64(rand_state);
-      int64_t idx = mm->gi.find_idx((int64_t)rand_state);
-      CHECK_S(idx < 0 || ids.at(idx) == (int64_t)rand_state);
+      int64_t val = PseudoRandomInt64(&rand_state);
+      int64_t idx = mm->gi.find_idx(val);
+      CHECK_S(idx < 0 || ids.at(idx) == val);
     }
 
     munmap((void*)base_ptr, GetFileSize(fd));
   }
 
+  CloseTempFile(fd);
+}
+
+void TestMMShapeCoords() {
+  FUNC_TIMER();
+  struct MM {
+    MMShapeCoords sc;
+  };
+  const std::vector<uint16_t> length = {3, 0, 4, 0};
+  const std::vector<bool> use_reverse_edge = {false, true, false, false};
+  uint64_t rand = 13;
+  std::vector<MMLatLon> latlon;
+  for (size_t i = 0; i < 7; ++i) {
+    latlon.emplace_back(DegE6(PseudoRandomInt32(&rand)),
+                        DegE6(PseudoRandomInt32(&rand)));
+  }
+
+  // Build file.
+  int fd = OpenTempFile();
+  std::vector<uint32_t> idx_to_pos;
+  {
+    MM mm;
+    AppendData("mm-struct", fd, (const uint8_t*)&mm, sizeof(mm));
+    mm.sc.WriteDataBlob("shape coords blob", offsetof(MM, sc), fd, length,
+                        use_reverse_edge, latlon);
+    WriteDataTo(fd, 0, (const uint8_t*)&mm, sizeof(mm));
+  }
+
+  // MMap and compare.
+  {
+    const uint8_t* base_ptr = (const uint8_t*)MMapTempFile(fd);
+    const MM* mm = (MM*)base_ptr;
+    uint32_t latlon_pos = 0;
+    for (size_t i = 0; i < length.size(); ++i) {
+      if (length.at(i) == 0) {
+        MMShapeCoords::Result res;
+        mm->sc.get({DegE6(0), DegE6(0)}, i, &res);
+        CHECK_EQ_S(res.latlon.size(), 0) << i;
+        CHECK_EQ_S(use_reverse_edge.at(i), res.use_reverse_edge) << i;
+      } else {
+        MMLatLon base = latlon.at(latlon_pos);
+        MMShapeCoords::Result res;
+
+        mm->sc.get(base, i, &res);
+
+        CHECK_EQ_S(res.latlon.size(), length.at(i) - 2);
+        for (size_t off = 0; off + 2 < length.at(i); ++off) {
+          MMLatLon expected = latlon.at(latlon_pos + 1 + off);
+          CHECK_EQ_S(res.latlon.at(off).lat.v(), expected.lat.v()) << i;
+          CHECK_EQ_S(res.latlon.at(off).lon.v(), expected.lon.v()) << i;
+        }
+        latlon_pos += length.at(i);  // length including start and end node.
+      }
+    }
+    munmap((void*)base_ptr, GetFileSize(fd));
+  }
   CloseTempFile(fd);
 }
 
@@ -408,6 +463,7 @@ int main(int argc, char* argv[]) {
   TestMMTurnCostsTable();
   TestMMStringsTable();
   TestMMGroupedOSMIds();
+  TestMMShapeCoords();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

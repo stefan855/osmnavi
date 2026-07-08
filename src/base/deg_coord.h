@@ -105,3 +105,9 @@ class DegE6 {
 };
 static_assert(sizeof(DegE6) == 4);
 CHECK_IS_MM_OK(DegE6);
+
+struct MMLatLon {
+  DegE6 lat;
+  DegE6 lon;
+};
+

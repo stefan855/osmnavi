@@ -76,7 +76,7 @@ inline double RelativeDifference(double a, double b) {
   return capacity == 0.0 ? 0.0 : std::abs(a - b) / capacity;
 }
 
-#define CHECK_DOUBLE_EQ_S(a, b, tolerance)      \
+#define CHECK_DOUBLE_EQ_S(a, b, tolerance)       \
   CHECK_S(RelativeDifference(a, b) <= tolerance) \
       << absl::StrFormat("a=%.19f and b=%.19f are different", a, b);
 
@@ -241,6 +241,13 @@ auto FindInMapOrDefault(const Map& container, const typename Map::key_type& key,
   return dflt;
 }
 
+template <typename TVec>
+constexpr auto VectorElementMaxLimit(const TVec& vec) {
+  using ValueType = typename TVec::value_type;
+  static_assert(std::is_integral_v<ValueType>, "not integral");
+  return std::numeric_limits<ValueType>::max();
+}
+
 inline void LogMemoryUsage() {
   struct mallinfo2 info;
   info = mallinfo2();
@@ -251,6 +258,22 @@ inline void LogMemoryUsage() {
   LOG_S(INFO) << "Total heap free: " << info.fordblks;
 }
 
+#if 0
 inline uint64_t PseudoRandom64(uint64_t state) {
   return state * 6364136223846793005ULL + 1ULL;
 }
+#endif
+
+inline uint64_t PseudoRandomUInt64(uint64_t* state) {
+  *state = *state * 6364136223846793005ULL + 1ULL;
+  return *state;
+}
+
+inline int64_t PseudoRandomInt64(uint64_t* state) {
+  return static_cast<int64_t>(PseudoRandomUInt64(state));
+}
+
+inline int32_t PseudoRandomInt32(uint64_t* state) {
+  return static_cast<int32_t>(PseudoRandomUInt64(state));
+}
+

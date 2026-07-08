@@ -9,6 +9,8 @@
 #include "base/deduper_with_ids.h"
 #include "base/deg_coord.h"
 #include "base/mmap_base.h"
+#include "geometry/distance.h"
+#include "geometry/distance_from_segment.h"
 #include "geometry/geometry.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
@@ -42,9 +44,15 @@ struct TmpClusterInfo {
   // Way index of edges in graph, indexed by cluster edge index.
   std::vector<uint32_t> cedge_to_gway_idx;
 
-  // true if the edge
-  std::vector<bool> cedge_has_shape_coords;
+  // The length of the shape coord list, indexed by edge_idx. Either 0 or >= 3,
+  // because it contains also start- and end-node for non-empty lists.
+  std::vector<std::uint16_t> cedge_shape_coord_length;
+  // true iff the list for edge 'edge_idx' is empty but one should use the list
+  // of the reverse edge.
   std::vector<bool> cedge_has_shape_coords_at_reverse_edge;
+  // Array of latlon coordinate pairs. The list contains all arrays of coords
+  // according to 'cedge_shape_coord_length', in continuous order.
+  std::vector<MMLatLon> shape_coords_arr;
 
   std::vector<uint32_t> cedge_to_turn_cost_idx;
   std::vector<TurnCostData> turn_costs;
@@ -80,7 +88,7 @@ struct TmpClusterInfo {
 };
 
 // For each cluster, initialise TmpClusterInfo and collect the nodes belonging
-// to the cluster in ci.cnode_to_gnode.
+// to the cluster in tci.cnode_to_gnode.
 //
 // This includes dead-ends, that is every dead-end belongs to exactly one
 // cluster.
@@ -93,11 +101,11 @@ inline void CollectClusterNodes(const Graph& g,
   cluster_infos->assign(g.clusters.size(), {0});
   for (uint32_t cluster_id = 0; cluster_id < g.clusters.size(); ++cluster_id) {
     const GCluster& gc = g.clusters.at(cluster_id);
-    TmpClusterInfo* ci = &cluster_infos->at(cluster_id);
-    ci->cluster_id = cluster_id;
-    ci->color_no = gc.color_no;
+    TmpClusterInfo* tci = &cluster_infos->at(cluster_id);
+    tci->cluster_id = cluster_id;
+    tci->color_no = gc.color_no;
     // +500 to accommodate the border nodes of connected clusters.
-    ci->cnode_to_gnode.reserve(gc.num_nodes + gc.num_deadend_nodes + 500);
+    tci->cnode_to_gnode.reserve(gc.num_nodes + gc.num_deadend_nodes + 500);
   }
 
   // Iterate over graph nodes and store node indices for each cluster.
@@ -127,17 +135,17 @@ inline void CollectClusterNodes(const Graph& g,
   //   3. "normal nodes"
   //   4. "dead-end nodes"
   // Within each category, nodes are sorted by both idx and osm id
-  for (TmpClusterInfo& ci : *cluster_infos) {
+  for (TmpClusterInfo& tci : *cluster_infos) {
     // Sort.
-    std::sort(ci.cnode_to_gnode.begin(), ci.cnode_to_gnode.end(),
-              [&g, &ci](const uint32_t a, const uint32_t b) {
+    std::sort(tci.cnode_to_gnode.begin(), tci.cnode_to_gnode.end(),
+              [&g, &tci](const uint32_t a, const uint32_t b) {
                 const GNode& na = g.nodes.at(a);
                 const GNode& nb = g.nodes.at(b);
                 if (na.cluster_border_node != nb.cluster_border_node) {
                   return na.cluster_border_node == 1;
                 }
                 if (na.cluster_id != nb.cluster_id) {
-                  return na.cluster_id == ci.cluster_id;
+                  return na.cluster_id == tci.cluster_id;
                 }
                 if (na.dead_end != nb.dead_end) {
                   return na.dead_end == 0;
@@ -146,45 +154,44 @@ inline void CollectClusterNodes(const Graph& g,
               });
     // De-duplicate (only works when it is sorted).
     // See above why this is needed.
-    auto last = std::unique(ci.cnode_to_gnode.begin(), ci.cnode_to_gnode.end());
-    if (last != ci.cnode_to_gnode.end()) {
-      ci.cnode_to_gnode.erase(last, ci.cnode_to_gnode.end());
+    auto last =
+        std::unique(tci.cnode_to_gnode.begin(), tci.cnode_to_gnode.end());
+    if (last != tci.cnode_to_gnode.end()) {
+      tci.cnode_to_gnode.erase(last, tci.cnode_to_gnode.end());
     }
   }
 }
 
-// Add edges from g to the cluster and fill 'ci->cedge_to_gedge_offset' and
-// 'ci->cedge_to_gway_idx'.
-void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
-  const GCluster& gcl = g.clusters.at(ci->cluster_id);
+// Add edges from g to the cluster and fill 'tci->cedge_to_gedge_offset' and
+// 'tci->cedge_to_gway_idx'.
+void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
+  const GCluster& gcl = g.clusters.at(tci->cluster_id);
   const uint32_t expected_num_edges =
       gcl.num_inner_edges + gcl.num_deadend_edges + 500;
   // Edges.
-  ci->mm_edges.reserve(expected_num_edges);
+  tci->mm_edges.reserve(expected_num_edges);
   uint32_t edge_start_idx = 0;
-  ci->cedge_to_gedge_offset.reserve(expected_num_edges);
-  ci->cedge_to_gway_idx.reserve(expected_num_edges);
-  ci->cedge_has_shape_coords.reserve(expected_num_edges);
-  ci->cedge_has_shape_coords_at_reverse_edge.reserve(expected_num_edges);
-  ci->mm_edge_to_distance.reserve(expected_num_edges);
-  for (uint32_t c_pos = 0; c_pos < ci->cnode_to_gnode.size(); ++c_pos) {
-    uint32_t gn_idx = ci->cnode_to_gnode.at(c_pos);
+  tci->cedge_to_gedge_offset.reserve(expected_num_edges);
+  tci->cedge_to_gway_idx.reserve(expected_num_edges);
+  tci->mm_edge_to_distance.reserve(expected_num_edges);
+  for (uint32_t c_pos = 0; c_pos < tci->cnode_to_gnode.size(); ++c_pos) {
+    uint32_t gn_idx = tci->cnode_to_gnode.at(c_pos);
     const GNode& n = g.nodes.at(gn_idx);
-    // CHECK_EQ_S(n.cluster_id, ci->cluster_id);
-    MM_NODE_RW(ci->mm_nodes.at(c_pos)).set_edge_start_idx(edge_start_idx);
-    CHECK_EQ_S(MM_NODE(ci->mm_nodes.at(c_pos)).edge_start_idx(),
+    // CHECK_EQ_S(n.cluster_id, tci->cluster_id);
+    MM_NODE_RW(tci->mm_nodes.at(c_pos)).set_edge_start_idx(edge_start_idx);
+    CHECK_EQ_S(MM_NODE(tci->mm_nodes.at(c_pos)).edge_start_idx(),
                edge_start_idx);
     for (const GEdge& e : gnode_forward_edges(g, gn_idx)) {
       const GNode& target = g.nodes.at(e.target_idx);
       // We're interested in the edge if one of the two nodes is in-cluster.
-      if (n.cluster_id == ci->cluster_id ||
-          target.cluster_id == ci->cluster_id) {
-        CHECK_EQ_S((n.cluster_id == ci->cluster_id) !=
-                       (target.cluster_id == ci->cluster_id),
+      if (n.cluster_id == tci->cluster_id ||
+          target.cluster_id == tci->cluster_id) {
+        CHECK_EQ_S((n.cluster_id == tci->cluster_id) !=
+                       (target.cluster_id == tci->cluster_id),
                    e.cross_cluster_edge);
         // Add edge;
         uint32_t ctarget_idx =
-            FindInMapOrFail(ci->gnode_to_cnode, e.target_idx);
+            FindInMapOrFail(tci->gnode_to_cnode, e.target_idx);
         // CHECK_LT_S(ctarget_idx, 1u << MMTargetIdxBits);
         MMEdge eb{0};
         eb.set_target_idx(ctarget_idx);
@@ -195,16 +202,17 @@ void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
         eb.set_cross_cluster_edge(e.cross_cluster_edge);
         eb.set_complex_turn_restriction_trigger(
             e.complex_turn_restriction_trigger);
-        ci->mm_edges.push_back(eb.data__);
+        tci->mm_edges.push_back(eb.data__);
 
         edge_start_idx++;
-        ci->mm_edge_to_distance.push_back(e.distance_cm);
-        ci->cedge_to_gedge_offset.push_back(gnode_edge_offset(g, gn_idx, e));
-        ci->cedge_to_gway_idx.push_back(e.way_idx);
-        ci->cedge_has_shape_coords.push_back(e.has_shapes);
-        ci->cedge_has_shape_coords_at_reverse_edge.push_back(
-            e.has_reverse_shapes);
+        tci->mm_edge_to_distance.push_back(e.distance_cm);
+        tci->cedge_to_gedge_offset.push_back(gnode_edge_offset(g, gn_idx, e));
+        tci->cedge_to_gway_idx.push_back(e.way_idx);
+
 #if 0
+        tci->cedge_has_shape_coords.push_back(e.has_shapes);
+        tci->cedge_has_shape_coords_at_reverse_edge.push_back(
+            e.has_reverse_shapes);
         rc->num_shape_nodes += g.GetGWayShadowNodes(
             g.ways.at(e.way_idx), e.contra_way ? e.target_idx : gn_idx,
             e.contra_way ? gn_idx : e.target_idx);
@@ -214,45 +222,45 @@ void ClusterAddEdges(const Graph& g, TmpClusterInfo* ci) {
   }
   // CHECK_LE_S(edge_start_idx, 1u << MMEdgeStartPosBits);
   // CHECK_EQ_S(rc->edges.size(), rc->num_inner_edges + rc->num_deadend_edges);
-  CHECK_EQ_S(ci->mm_edges.size(), ci->cedge_to_gedge_offset.size());
-  CHECK_EQ_S(ci->mm_edges.size(), ci->cedge_to_gway_idx.size());
+  CHECK_EQ_S(tci->mm_edges.size(), tci->cedge_to_gedge_offset.size());
+  CHECK_EQ_S(tci->mm_edges.size(), tci->cedge_to_gway_idx.size());
 }
 
-void ClusterAddWayData(const Graph& g, TmpClusterInfo* ci) {
+void FillTmpClusterWayData(const Graph& g, TmpClusterInfo* tci) {
   // Determine the unique ways (given as gway_idx).
   DeDuperWithIds<uint32_t> dd_gway_idx;
-  ci->mm_edge_to_way.reserve(ci->cedge_to_gway_idx.size());
-  for (uint32_t e_idx = 0; e_idx < ci->cedge_to_gway_idx.size(); ++e_idx) {
-    ci->mm_edge_to_way.push_back(
-        dd_gway_idx.Add(ci->cedge_to_gway_idx.at(e_idx)));
+  tci->mm_edge_to_way.reserve(tci->cedge_to_gway_idx.size());
+  for (uint32_t e_idx = 0; e_idx < tci->cedge_to_gway_idx.size(); ++e_idx) {
+    tci->mm_edge_to_way.push_back(
+        dd_gway_idx.Add(tci->cedge_to_gway_idx.at(e_idx)));
   }
 
   const std::vector<uint32_t> uniq_gway_idx = dd_gway_idx.GetObjVector();
-  CHECK_S(ci->gway_to_cway.empty());
+  CHECK_S(tci->gway_to_cway.empty());
   for (uint32_t cway_idx = 0; cway_idx < uniq_gway_idx.size(); ++cway_idx) {
-    ci->gway_to_cway[uniq_gway_idx.at(cway_idx)] = cway_idx;
+    tci->gway_to_cway[uniq_gway_idx.at(cway_idx)] = cway_idx;
   }
   dd_gway_idx.clear();
 
   DeDuperWithIds<WaySharedAttrs> dd_way_shared_attrs;
   DeDuperWithIds<std::string> dd_way_streetnames;
-  ci->mm_way_to_wsa.reserve(uniq_gway_idx.size());
-  ci->mm_way_to_osm_id.reserve(uniq_gway_idx.size());
-  ci->cway_to_streetname_idx.reserve(uniq_gway_idx.size());
+  tci->mm_way_to_wsa.reserve(uniq_gway_idx.size());
+  tci->mm_way_to_osm_id.reserve(uniq_gway_idx.size());
+  tci->cway_to_streetname_idx.reserve(uniq_gway_idx.size());
   for (uint32_t way_idx : uniq_gway_idx) {
     const GWay& w = g.ways.at(way_idx);
 
     uint32_t wsa_idx = dd_way_shared_attrs.Add(g.way_shared_attrs.at(w.wsa_id));
-    ci->mm_way_to_wsa.push_back(wsa_idx);
+    tci->mm_way_to_wsa.push_back(wsa_idx);
 
     uint32_t streetname_idx =
         dd_way_streetnames.Add(g.streetnames.at(w.streetname_idx));
-    ci->cway_to_streetname_idx.push_back(streetname_idx);
+    tci->cway_to_streetname_idx.push_back(streetname_idx);
 
-    ci->mm_way_to_osm_id.push_back(w.id);
+    tci->mm_way_to_osm_id.push_back(w.id);
   }
-  ci->mm_way_shared_attrs = dd_way_shared_attrs.GetObjVector();
-  ci->streetnames = dd_way_streetnames.GetObjVector();
+  tci->mm_way_shared_attrs = dd_way_shared_attrs.GetObjVector();
+  tci->streetnames = dd_way_streetnames.GetObjVector();
 }
 
 inline std::ranges::iota_view<uint32_t, uint32_t> cnode_edge_indices(
@@ -265,26 +273,26 @@ inline std::ranges::iota_view<uint32_t, uint32_t> cnode_edge_indices(
   return std::views::iota(start, stop);
 }
 
-// Add turn costs to edges. Sets edge.turn_cost_idx and fills ci->turn_costs.
-void ClusterAddTurnCosts(const Graph& g, TmpClusterInfo* ci) {
-  ci->cedge_to_turn_cost_idx.reserve(ci->mm_edges.size());
+// Add turn costs to edges. Sets edge.turn_cost_idx and fills tci->turn_costs.
+void FillTmpClusterTurnCosts(const Graph& g, TmpClusterInfo* tci) {
+  tci->cedge_to_turn_cost_idx.reserve(tci->mm_edges.size());
   DeDuperWithIds<TurnCostData> deduper;
-  for (uint32_t cn0_idx = 0; cn0_idx < ci->mm_nodes.size(); ++cn0_idx) {
-    for (uint32_t ce0_idx : cnode_edge_indices(*ci, cn0_idx)) {
+  for (uint32_t cn0_idx = 0; cn0_idx < tci->mm_nodes.size(); ++cn0_idx) {
+    for (uint32_t ce0_idx : cnode_edge_indices(*tci, cn0_idx)) {
       TurnCostData tcd;
-      const uint32_t cn1_idx = MM_EDGE(ci->mm_edges.at(ce0_idx)).target_idx();
-      for (uint32_t ce1_idx : cnode_edge_indices(*ci, cn1_idx)) {
+      const uint32_t cn1_idx = MM_EDGE(tci->mm_edges.at(ce0_idx)).target_idx();
+      for (uint32_t ce1_idx : cnode_edge_indices(*tci, cn1_idx)) {
         // Now we have two edges representing a turn:
         //   (cn0_idx, ce0_idx) and (cn1_idx, ce1_idx).
         // Get the turn cost for this turn that were computed in 'graph'.
-        const uint32_t gn0_idx = ci->cnode_to_gnode.at(cn0_idx);
-        const uint32_t ge0_off = ci->cedge_to_gedge_offset.at(ce0_idx);
-        const uint32_t gn1_idx = ci->cnode_to_gnode.at(cn1_idx);
-        const uint32_t ge1_off = ci->cedge_to_gedge_offset.at(ce1_idx);
+        const uint32_t gn0_idx = tci->cnode_to_gnode.at(cn0_idx);
+        const uint32_t ge0_off = tci->cedge_to_gedge_offset.at(ce0_idx);
+        const uint32_t gn1_idx = tci->cnode_to_gnode.at(cn1_idx);
+        const uint32_t ge1_off = tci->cedge_to_gedge_offset.at(ce1_idx);
         const FullEdge fe0(gn0_idx, ge0_off);
         const FullEdge fe1(gn1_idx, ge1_off);
         if (fe0.start_idx() == fe1.target_idx(g) &&
-            fe1.start_node(g).cluster_id != ci->cluster_id) {
+            fe1.start_node(g).cluster_id != tci->cluster_id) {
           // U-turn og_edge -> ic_edge is always disallowed, because this should
           // be evaluated on the target cluster, i.e. incoming to outgoing edge.
           tcd.turn_costs.push_back(TURN_COST_INFINITY_COMPRESSED);
@@ -294,33 +302,33 @@ void ClusterAddTurnCosts(const Graph& g, TmpClusterInfo* ci) {
         }
       }
       // Check we're iterating all edges from 0 to size.
-      CHECK_EQ_S(ci->cedge_to_turn_cost_idx.size(), ce0_idx);
-      ci->cedge_to_turn_cost_idx.push_back(deduper.Add(tcd));
+      CHECK_EQ_S(tci->cedge_to_turn_cost_idx.size(), ce0_idx);
+      tci->cedge_to_turn_cost_idx.push_back(deduper.Add(tcd));
     }
   }
-  ci->turn_costs = deduper.GetObjVector();
+  tci->turn_costs = deduper.GetObjVector();
 }
 
-TmpComplexTR ConvertToComplexTr(const Graph& g, const TmpClusterInfo& ci,
+TmpComplexTR ConvertToComplexTr(const Graph& g, const TmpClusterInfo& tci,
                                 const TurnRestriction& tr) {
   CHECK_S(!tr.path.empty());
   TmpComplexTR res;
   res.forbidden = tr.forbidden;
   res.first_node_idx = MAXU32;  // invalid.
   for (const TurnRestriction::TREdge& tr_edge : tr.path) {
-    const auto iter_cfrom = ci.gnode_to_cnode.find(tr_edge.from_node_idx);
-    const auto iter_cto = ci.gnode_to_cnode.find(tr_edge.to_node_idx);
-    if (iter_cfrom == ci.gnode_to_cnode.end() ||
-        iter_cto == ci.gnode_to_cnode.end()) {
+    const auto iter_cfrom = tci.gnode_to_cnode.find(tr_edge.from_node_idx);
+    const auto iter_cto = tci.gnode_to_cnode.find(tr_edge.to_node_idx);
+    if (iter_cfrom == tci.gnode_to_cnode.end() ||
+        iter_cto == tci.gnode_to_cnode.end()) {
       ABORT_S() << "Can't find from/to node";
     }
     uint32_t cfrom_idx = iter_cfrom->second;
     uint32_t cto_idx = iter_cto->second;
 
     // Locate edge at node.
-    for (uint32_t cedge_idx : cnode_edge_indices(ci, cfrom_idx)) {
-      if (MM_EDGE(ci.mm_edges.at(cedge_idx)).target_idx() == cto_idx) {
-        if (ci.cedge_to_gway_idx.at(cedge_idx) == tr_edge.way_idx) {
+    for (uint32_t cedge_idx : cnode_edge_indices(tci, cfrom_idx)) {
+      if (MM_EDGE(tci.mm_edges.at(cedge_idx)).target_idx() == cto_idx) {
+        if (tci.cedge_to_gway_idx.at(cedge_idx) == tr_edge.way_idx) {
           if (res.path.empty()) {
             res.first_node_idx = cfrom_idx;
           }
@@ -335,15 +343,15 @@ TmpComplexTR ConvertToComplexTr(const Graph& g, const TmpClusterInfo& ci,
   return res;
 }
 
-void ClusterAddComplexTRs(const Graph& g, TmpClusterInfo* ci) {
-  for (uint32_t cfrom_idx = 0; cfrom_idx < ci->mm_nodes.size(); ++cfrom_idx) {
-    for (uint32_t cedge_idx : cnode_edge_indices(*ci, cfrom_idx)) {
-      const MMEdge eb = MM_EDGE(ci->mm_edges.at(cedge_idx));
+void FillTmpClusterComplexTRs(const Graph& g, TmpClusterInfo* tci) {
+  for (uint32_t cfrom_idx = 0; cfrom_idx < tci->mm_nodes.size(); ++cfrom_idx) {
+    for (uint32_t cedge_idx : cnode_edge_indices(*tci, cfrom_idx)) {
+      const MMEdge eb = MM_EDGE(tci->mm_edges.at(cedge_idx));
       if (eb.complex_turn_restriction_trigger()) {
         const uint32_t cto_idx = eb.target_idx();
-        const uint32_t gfrom_idx = ci->cnode_to_gnode.at(cfrom_idx);
-        const uint32_t gto_idx = ci->cnode_to_gnode.at(cto_idx);
-        const uint32_t gway_idx = ci->cedge_to_gway_idx.at(cedge_idx);
+        const uint32_t gfrom_idx = tci->cnode_to_gnode.at(cfrom_idx);
+        const uint32_t gto_idx = tci->cnode_to_gnode.at(cto_idx);
+        const uint32_t gway_idx = tci->cedge_to_gway_idx.at(cedge_idx);
 
         // Find triggering turn restrictions.
         TurnRestriction::TREdge key = {.from_node_idx = gfrom_idx,
@@ -359,25 +367,25 @@ void ClusterAddComplexTRs(const Graph& g, TmpClusterInfo* ci) {
             CHECK_GT_S(ctr_idx, it->second);
             break;
           }
-          ci->complex_tr.push_back(ConvertToComplexTr(g, *ci, tr));
-          CHECK_EQ_S(cedge_idx, ci->complex_tr.back().path.front());
+          tci->complex_tr.push_back(ConvertToComplexTr(g, *tci, tr));
+          CHECK_EQ_S(cedge_idx, tci->complex_tr.back().path.front());
         } while (++ctr_idx < g.complex_turn_restrictions.size());
       }
     }
   }
   // Sort lexicographically by the content of the vector.
-  std::sort(ci->complex_tr.begin(), ci->complex_tr.end(),
+  std::sort(tci->complex_tr.begin(), tci->complex_tr.end(),
             [](const auto& a, const auto& b) { return a.path < b.path; });
 }
 
-void ClusterAddInEdges(const Graph& g, TmpClusterInfo* ci) {
-  const GCluster& gcl = g.clusters.at(ci->cluster_id);
+void FillTmpClusterInEdges(const Graph& g, TmpClusterInfo* tci) {
+  const GCluster& gcl = g.clusters.at(tci->cluster_id);
   for (const GCluster::EdgeDescriptor& gi : gcl.border_in_edges) {
     const GEdge& g_edge = g.edges.at(gi.g_edge_idx);
-    const auto iter_from = ci->gnode_to_cnode.find(gi.g_from_idx);
-    const auto iter_to = ci->gnode_to_cnode.find(g_edge.target_idx);
-    if (iter_from == ci->gnode_to_cnode.end() ||
-        iter_to == ci->gnode_to_cnode.end()) {
+    const auto iter_from = tci->gnode_to_cnode.find(gi.g_from_idx);
+    const auto iter_to = tci->gnode_to_cnode.find(g_edge.target_idx);
+    if (iter_from == tci->gnode_to_cnode.end() ||
+        iter_to == tci->gnode_to_cnode.end()) {
       ABORT_S() << "Can't find from/to node";
     }
     uint32_t cfrom_idx = iter_from->second;
@@ -388,21 +396,21 @@ void ClusterAddInEdges(const Graph& g, TmpClusterInfo* ci) {
     */
 
     bool found = false;
-    for (uint32_t c_edge_idx : cnode_edge_indices(*ci, cfrom_idx)) {
+    for (uint32_t c_edge_idx : cnode_edge_indices(*tci, cfrom_idx)) {
       const uint32_t c_target_idx =
-          MM_EDGE(ci->mm_edges.at(c_edge_idx)).target_idx();
-      const uint32_t g_way_idx = ci->cedge_to_gway_idx.at(c_edge_idx);
+          MM_EDGE(tci->mm_edges.at(c_edge_idx)).target_idx();
+      const uint32_t g_way_idx = tci->cedge_to_gway_idx.at(c_edge_idx);
       if (c_target_idx == cto_idx && g_edge.way_idx == g_way_idx) {
         found = true;
-        CHECK_LT_S(ci->mm_in_edges.size(),
+        CHECK_LT_S(tci->mm_in_edges.size(),
                    std::numeric_limits<uint16_t>::max());
-        ci->mm_in_edges.push_back({
+        tci->mm_in_edges.push_back({
             .from_cluster_id = g.nodes.at(gi.g_from_idx).cluster_id,
             .from_node_idx = cfrom_idx,
-            .to_cluster_id = ci->cluster_id,
+            .to_cluster_id = tci->cluster_id,
             .to_node_idx = cto_idx,
             .edge_idx = c_edge_idx,
-            .in_edge_pos = static_cast<uint16_t>(ci->mm_in_edges.size()),
+            .in_edge_pos = static_cast<uint16_t>(tci->mm_in_edges.size()),
             .from_node_id = g.nodes.at(gi.g_from_idx).node_id,
             .to_node_id = g.nodes.at(g_edge.target_idx).node_id,
             .way_id = g.ways.at(g_way_idx).id,
@@ -412,17 +420,17 @@ void ClusterAddInEdges(const Graph& g, TmpClusterInfo* ci) {
     }
     CHECK_S(found);  // Sanity check, by constriction it must be found.
   }
-  CHECK_EQ_S(gcl.border_in_edges.size(), ci->mm_in_edges.size());
+  CHECK_EQ_S(gcl.border_in_edges.size(), tci->mm_in_edges.size());
 }
 
-void ClusterAddOutEdges(const Graph& g, TmpClusterInfo* ci) {
-  const GCluster& gcl = g.clusters.at(ci->cluster_id);
+void FillTmpClusterOutEdges(const Graph& g, TmpClusterInfo* tci) {
+  const GCluster& gcl = g.clusters.at(tci->cluster_id);
   for (const GCluster::EdgeDescriptor& gi : gcl.border_out_edges) {
     const GEdge& g_edge = g.edges.at(gi.g_edge_idx);
-    const auto iter_from = ci->gnode_to_cnode.find(gi.g_from_idx);
-    const auto iter_to = ci->gnode_to_cnode.find(g_edge.target_idx);
-    if (iter_from == ci->gnode_to_cnode.end() ||
-        iter_to == ci->gnode_to_cnode.end()) {
+    const auto iter_from = tci->gnode_to_cnode.find(gi.g_from_idx);
+    const auto iter_to = tci->gnode_to_cnode.find(g_edge.target_idx);
+    if (iter_from == tci->gnode_to_cnode.end() ||
+        iter_to == tci->gnode_to_cnode.end()) {
       ABORT_S() << "Can't find from/to node";
     }
     uint32_t cfrom_idx = iter_from->second;
@@ -433,21 +441,21 @@ void ClusterAddOutEdges(const Graph& g, TmpClusterInfo* ci) {
     */
 
     bool found = false;
-    for (uint32_t c_edge_idx : cnode_edge_indices(*ci, cfrom_idx)) {
+    for (uint32_t c_edge_idx : cnode_edge_indices(*tci, cfrom_idx)) {
       const uint32_t c_target_idx =
-          MM_EDGE(ci->mm_edges.at(c_edge_idx)).target_idx();
-      const uint32_t g_way_idx = ci->cedge_to_gway_idx.at(c_edge_idx);
+          MM_EDGE(tci->mm_edges.at(c_edge_idx)).target_idx();
+      const uint32_t g_way_idx = tci->cedge_to_gway_idx.at(c_edge_idx);
       if (c_target_idx == cto_idx && g_edge.way_idx == g_way_idx) {
         found = true;
-        CHECK_LT_S(ci->mm_out_edges.size(),
+        CHECK_LT_S(tci->mm_out_edges.size(),
                    std::numeric_limits<uint16_t>::max());
-        ci->mm_out_edges.push_back({
-            .from_cluster_id = ci->cluster_id,
+        tci->mm_out_edges.push_back({
+            .from_cluster_id = tci->cluster_id,
             .from_node_idx = cfrom_idx,
             .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
             .to_node_idx = cto_idx,
             .edge_idx = c_edge_idx,
-            .out_edge_pos = static_cast<uint16_t>(ci->mm_out_edges.size()),
+            .out_edge_pos = static_cast<uint16_t>(tci->mm_out_edges.size()),
             .from_node_id = g.nodes.at(gi.g_from_idx).node_id,
             .to_node_id = g.nodes.at(g_edge.target_idx).node_id,
             .way_id = g.ways.at(g_way_idx).id,
@@ -457,82 +465,296 @@ void ClusterAddOutEdges(const Graph& g, TmpClusterInfo* ci) {
     }
     CHECK_S(found);  // Sanity check, by constriction it must be found.
   }
-  CHECK_EQ_S(gcl.border_out_edges.size(), ci->mm_out_edges.size());
+  CHECK_EQ_S(gcl.border_out_edges.size(), tci->mm_out_edges.size());
 }
 
-void ClusterAddNodes(const Graph& g, TmpClusterInfo* ci) {
-  CHECK_LT_S(ci->cnode_to_gnode.size(), std::numeric_limits<uint32_t>::max());
-  CHECK_S(ci->gnode_to_cnode.empty());
+void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
+  CHECK_LT_S(tci->cnode_to_gnode.size(), std::numeric_limits<uint32_t>::max());
+  CHECK_S(tci->gnode_to_cnode.empty());
 
   // Mapping table from cluster node idx to graph node idx.
-  for (uint32_t pos = 0; pos < ci->cnode_to_gnode.size(); ++pos) {
-    ci->gnode_to_cnode[ci->cnode_to_gnode.at(pos)] = pos;
+  for (uint32_t pos = 0; pos < tci->cnode_to_gnode.size(); ++pos) {
+    tci->gnode_to_cnode[tci->cnode_to_gnode.at(pos)] = pos;
   }
 
-  ci->mm_nodes.reserve(ci->cnode_to_gnode.size());
-  for (uint32_t idx : ci->cnode_to_gnode) {
+  tci->mm_nodes.reserve(tci->cnode_to_gnode.size());
+  for (uint32_t idx : tci->cnode_to_gnode) {
     const GNode& n = g.nodes.at(idx);
     MMNode nb = {0};
     nb.set_border_node(n.cluster_border_node);
     nb.set_dead_end(n.dead_end);
-    nb.set_off_cluster_node(n.cluster_id != ci->cluster_id);
+    nb.set_off_cluster_node(n.cluster_id != tci->cluster_id);
     // Off cluster nodes must be border nodes.
     CHECK_S(!nb.off_cluster_node() || nb.border_node());
-    ci->mm_nodes.push_back(nb.data__);
-    ci->mm_node_to_osm_id.push_back(n.node_id);
-    ci->mm_node_to_latlon.push_back({.lat = n.lat, .lon = n.lon});
+    tci->mm_nodes.push_back(nb.data__);
+    tci->mm_node_to_osm_id.push_back(n.node_id);
+    tci->mm_node_to_latlon.push_back({.lat = n.lat, .lon = n.lon});
     // LOG_S(INFO) << "lat:" << n.lat << " lon:" << n.lon;
   }
 
-  ci->mm_bounding_rect = {};
-  if (!ci->mm_node_to_latlon.empty()) {
-    ci->mm_bounding_rect.min = ci->mm_node_to_latlon.front();
-    ci->mm_bounding_rect.max = ci->mm_node_to_latlon.front();
-    for (const auto& x : ci->mm_node_to_latlon) {
-      ci->mm_bounding_rect.min.lat =
-          std::min(ci->mm_bounding_rect.min.lat, x.lat);
-      ci->mm_bounding_rect.min.lon =
-          std::min(ci->mm_bounding_rect.min.lon, x.lon);
-      ci->mm_bounding_rect.max.lat =
-          std::max(ci->mm_bounding_rect.max.lat, x.lat);
-      ci->mm_bounding_rect.max.lon =
-          std::max(ci->mm_bounding_rect.max.lon, x.lon);
+  tci->mm_bounding_rect = {};
+  if (!tci->mm_node_to_latlon.empty()) {
+    tci->mm_bounding_rect.min = tci->mm_node_to_latlon.front();
+    tci->mm_bounding_rect.max = tci->mm_node_to_latlon.front();
+    for (const auto& x : tci->mm_node_to_latlon) {
+      tci->mm_bounding_rect.min.lat =
+          std::min(tci->mm_bounding_rect.min.lat, x.lat);
+      tci->mm_bounding_rect.min.lon =
+          std::min(tci->mm_bounding_rect.min.lon, x.lon);
+      tci->mm_bounding_rect.max.lat =
+          std::max(tci->mm_bounding_rect.max.lat, x.lat);
+      tci->mm_bounding_rect.max.lon =
+          std::max(tci->mm_bounding_rect.max.lon, x.lon);
     }
   }
 }
 
-void FillTmpClusterInfo(const Graph& g, TmpClusterInfo* ci) {
-  ClusterAddNodes(g, ci);
-  ClusterAddEdges(g, ci);
-  ClusterAddWayData(g, ci);
-  ClusterAddTurnCosts(g, ci);
-  ClusterAddComplexTRs(g, ci);
+inline std::vector<NodeBuilder::VNode> GetCoords(
+    const Graph& g, const DataBlockTable& node_table, uint32_t from_idx,
+    uint32_t target_idx, uint32_t way_idx) {
+  std::vector<uint64_t> id_list = g.GetGWayNodeIds(g.ways.at(way_idx));
+  // May be >0 when from node ('from_idx') is a repeated node.
+  uint32_t start_pos = FindInMapOrDefault(g.edge_in_way_start_pos_map,
+                                          {from_idx, target_idx, way_idx}, 0);
 
-  ClusterAddInEdges(g, ci);
-  ClusterAddOutEdges(g, ci);
+  const uint64_t id_from = g.nodes.at(from_idx).node_id;
+  const uint64_t id_to = g.nodes.at(target_idx).node_id;
+  std::vector<NodeBuilder::VNode> coords;
+  for (uint32_t i = start_pos; i < id_list.size(); ++i) {
+    uint64_t id = id_list.at(i);
+    if ((id == id_from && coords.empty()) || !coords.empty()) {
+      NodeBuilder::VNode vn;
+      CHECK_S(NodeBuilder::FindNode(node_table, id, &vn)) << id;
+      coords.push_back(vn);
+      if (coords.size() > 1 && id == id_to) {
+        break;
+      }
+    }
+  }
+  // We expect at least start/end node and one shape node in between.
+  CHECK_GT_S(coords.size(), 2);
+  return coords;
 }
 
-void ComputeClusterNodeNumbers(const TmpClusterInfo& ci, MMCluster* mmcluster) {
+// Simplify a polyline by removing points that only deviate marginally from a
+// straight line. For this, for each sequence of three points, the perpendicular
+// distance of the middle point is computed, and also the angle
+void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
+  const bool debug = false;
+  for (uint32_t pos = 0; pos < coords->size() - 2;) {
+    NodeBuilder::VNode A = coords->at(pos);
+    NodeBuilder::VNode M = coords->at(pos + 1);
+    NodeBuilder::VNode B = coords->at(pos + 2);
+
+    DistanceToSegment dist_to_seg =
+        FastPointToSegmentDistance(M.lat, M.lon, A.lat, A.lon, B.lat, B.lon);
+
+    int64_t len1 = calculate_distance(A.lat, A.lon, M.lat, M.lon);
+    int64_t len2 = calculate_distance(M.lat, M.lon, B.lat, B.lon);
+    int32_t angle1 = angle_to_east_degrees(A.lat, A.lon, M.lat, M.lon, len1);
+    int32_t angle2 = angle_to_east_degrees(M.lat, M.lon, B.lat, B.lon, len2);
+    int32_t angle_at_m = std::abs(angle1 - angle2);
+    if (angle_at_m > 180) {
+      angle_at_m = std::abs(angle_at_m - 360);
+    }
+
+    if (debug) {
+      LOG_S(INFO) << absl::StrFormat(
+          "Distance of middle point d1:(%7d,%7d) d2:(%7d,%7d): %5.2fm "
+          "len1:%5.2fm len2:%5.2f angle:%d",
+          M.lat.v() - A.lat.v(), M.lon.v() - A.lon.v(), B.lat.v() - M.lat.v(),
+          B.lon.v() - M.lon.v(), dist_to_seg.distance_cm / 100.0, len1 / 100.0,
+          len2 / 100.0, angle_at_m);
+      LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", A.id, M.id,
+                                     B.id);
+    }
+
+    if ((dist_to_seg.distance_cm <= 15 && angle_at_m <= 3) ||
+        (dist_to_seg.distance_cm <= 19 && angle_at_m <= 1) ||
+        (dist_to_seg.distance_cm <= 5 && angle_at_m <= 5)) {
+      if (debug) {
+        LOG_S(INFO) << "  Remove shape coord " << coords->size() << " -> "
+                    << coords->size() - 1;
+      }
+      coords->erase(coords->begin() + pos + 1);
+      // Stay at 'pos'
+    } else {
+      if (debug) {
+        LOG_S(INFO) << "  Keep shape coord " << coords->size();
+      }
+      ++pos;
+    }
+  }
+
+#if 0
+  if (coords->size() != 3) {
+    return;
+  }
+
+  // Check if the middle point is close to the straight line from start to end.
+  DegE6 lat_a = coords->front().lat;
+  DegE6 lon_a = coords->front().lon;
+  DegE6 lat_b = coords->back().lat;
+  DegE6 lon_b = coords->back().lon;
+  DegE6 lat_pt = coords->at(1).lat;
+  DegE6 lon_pt = coords->at(1).lon;
+
+  DistanceToSegment d =
+      FastPointToSegmentDistance(lat_pt, lon_pt, lat_a, lon_a, lat_b, lon_b);
+
+  int64_t len1 = calculate_distance(lat_a, lon_a, lat_pt, lon_pt);
+  int64_t len2 = calculate_distance(lat_pt, lon_pt, lat_b, lon_b);
+  int32_t angle1 = angle_to_east_degrees(lat_a, lon_a, lat_pt, lon_pt, len1);
+  int32_t angle2 = angle_to_east_degrees(lat_pt, lon_pt, lat_b, lon_b, len2);
+
+  LOG_S(INFO) << absl::StrFormat(
+      "Distance of middle point d1:(%7d,%7d) d2:(%7d,%7d): %5.2fm len1:%5.2fm "
+      "len2:%5.2f angle:%d",
+      lat_pt.v() - lat_a.v(), lon_pt.v() - lon_a.v(), lat_b.v() - lat_pt.v(),
+      lon_b.v() - lon_pt.v(), d.distance_cm / 100.0, len1 / 100.0, len2 / 100.0,
+      angle1 - angle2);
+  LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", coords->at(0).id,
+                                 coords->at(1).id, coords->at(2).id);
+#endif
+}
+
+// Store the shape coords of edges in the temporary cluster information.
+inline void FillTmpClusterShapeCoords(const Graph& g,
+                                      const DataBlockTable& node_table,
+                                      TmpClusterInfo* tci) {
+  struct DelShape {
+    uint32_t cfrom_node_idx;
+    uint32_t cedge_idx;
+  };
+
+  // This vector contains edges with shape lists that have been deleted (because
+  // of simplification, see SimplifyPolyline()).
+  //
+  // This is needed to fix edges that use the shapes of the reverse edge, but
+  // the target shapes have been deleted.
+  std::vector<DelShape> shape_was_deleted;
+
+  uint32_t num_edges = tci->cedge_to_gedge_offset.size();
+  tci->cedge_has_shape_coords_at_reverse_edge.reserve(num_edges);
+  tci->cedge_shape_coord_length.reserve(num_edges);
+
+  for (uint32_t cnode_idx = 0; cnode_idx < tci->mm_nodes.size(); ++cnode_idx) {
+    const uint32_t gfrom_idx = tci->cnode_to_gnode.at(cnode_idx);
+    const GNode& gfrom_node = g.nodes.at(gfrom_idx);
+
+    for (uint32_t cedge_idx : cnode_edge_indices(*tci, cnode_idx)) {
+      const uint32_t gedge_idx =
+          gfrom_node.edges_start_pos + tci->cedge_to_gedge_offset.at(cedge_idx);
+      const GEdge& ge = g.edges.at(gedge_idx);
+
+      CHECK_EQ_S(tci->cedge_has_shape_coords_at_reverse_edge.size(), cedge_idx);
+      CHECK_EQ_S(tci->cedge_shape_coord_length.size(), cedge_idx);
+      CHECK_S(!(ge.has_shapes && ge.has_reverse_shapes));
+
+      tci->cedge_has_shape_coords_at_reverse_edge.push_back(
+          ge.has_reverse_shapes);
+      if (ge.has_reverse_shapes || !ge.has_shapes) {
+        tci->cedge_shape_coord_length.push_back(0);
+      } else {
+        // Store coords for this edge.
+        std::vector<NodeBuilder::VNode> coords =
+            GetCoords(g, node_table, ge.contra_way ? ge.target_idx : gfrom_idx,
+                      ge.contra_way ? gfrom_idx : ge.target_idx, ge.way_idx);
+        CHECK_GT_S(coords.size(), 2);
+        SimplifyPolyline(&coords);
+        if (coords.size() <= 2) {
+          // Shape data is empty.
+          CHECK_EQ_S(coords.size(), 2);
+          tci->cedge_shape_coord_length.push_back(0);
+          // Keep the inverted edge the check use_reverse afterwards.
+          shape_was_deleted.emplace_back(cnode_idx, cedge_idx);
+          // MM_EDGE(tci.mm_edges.at(cedge_idx)).target_idx(),
+          //                      cnode_idx, tci->mm_edge_to_way(cedge_idx));
+
+        } else {
+          if (ge.contra_way) {
+            std::reverse(coords.begin(), coords.end());
+          }
+          CHECK_LT_S(coords.size(),
+                     VectorElementMaxLimit(tci->cedge_shape_coord_length));
+          tci->cedge_shape_coord_length.push_back(coords.size());
+          for (const NodeBuilder::VNode& nc : coords) {
+            tci->shape_coords_arr.emplace_back(nc.lat, nc.lon);
+          }
+        }
+      }
+    }
+  }
+
+  for (const DelShape ds : shape_was_deleted) {
+    // Check if there is a reverse edge that has 'use_reverse' set.
+    const uint32_t rev_cstart_idx =
+        MM_EDGE(tci->mm_edges.at(ds.cedge_idx)).target_idx();
+    for (uint32_t rev_cedge_idx : cnode_edge_indices(*tci, rev_cstart_idx)) {
+      if (MM_EDGE(tci->mm_edges.at(rev_cedge_idx)).target_idx() ==
+              ds.cfrom_node_idx &&
+          tci->mm_edge_to_way.at(rev_cedge_idx) ==
+              tci->mm_edge_to_way.at(ds.cedge_idx)) {
+        if (tci->cedge_has_shape_coords_at_reverse_edge.at(rev_cedge_idx)) {
+          CHECK_EQ_S(tci->cedge_shape_coord_length.at(rev_cedge_idx), 0);
+          tci->cedge_has_shape_coords_at_reverse_edge.at(rev_cedge_idx) = false;
+        }
+      }
+    }
+  }
+}
+
+void FillTmpClusterInfo(const Graph& g, const DataBlockTable& node_table,
+                        TmpClusterInfo* tci) {
+  FillTmpClusterNodes(g, tci);
+  FillTmpClusterEdges(g, tci);
+  FillTmpClusterWayData(g, tci);
+  FillTmpClusterTurnCosts(g, tci);
+  FillTmpClusterComplexTRs(g, tci);
+
+  FillTmpClusterInEdges(g, tci);
+  FillTmpClusterOutEdges(g, tci);
+
+  FillTmpClusterShapeCoords(g, node_table, tci);
+}
+
+void ComputeTmpClusterInfos(const Graph& g, const DataBlockTable& node_table,
+                            int n_threads,
+                            std::vector<TmpClusterInfo>* tmp_cluster_infos) {
+  FUNC_TIMER();
+  // Create input data.
+  ThreadPool pool;
+  for (TmpClusterInfo& tci : *tmp_cluster_infos) {
+    pool.AddWork([&g, &node_table, &tci](int) {
+      FillTmpClusterInfo(g, node_table, &tci);
+    });
+  }
+  pool.Start(n_threads);
+  pool.WaitAllFinished();
+}
+
+void ComputeClusterNodeNumbers(const TmpClusterInfo& tci,
+                               MMCluster* mmcluster) {
   mmcluster->num_border_nodes = 0;
   mmcluster->num_off_cluster_nodes = 0;
   mmcluster->num_inner_nodes = 0;
   mmcluster->num_dead_end_nodes = 0;
-  for (size_t i = 0; i < ci.mm_nodes.size(); ++i) {
-    if (MM_NODE(ci.mm_nodes.at(i)).off_cluster_node()) {
+  for (size_t i = 0; i < tci.mm_nodes.size(); ++i) {
+    if (MM_NODE(tci.mm_nodes.at(i)).off_cluster_node()) {
       mmcluster->num_off_cluster_nodes++;
       CHECK_LT_S(mmcluster->num_off_cluster_nodes, INFU16);
-    } else if (MM_NODE(ci.mm_nodes.at(i)).border_node()) {
+    } else if (MM_NODE(tci.mm_nodes.at(i)).border_node()) {
       mmcluster->num_border_nodes++;
       CHECK_LT_S(mmcluster->num_border_nodes, INFU16);
-    } else if (MM_NODE(ci.mm_nodes.at(i)).dead_end()) {
+    } else if (MM_NODE(tci.mm_nodes.at(i)).dead_end()) {
       mmcluster->num_dead_end_nodes++;
     } else {
       mmcluster->num_inner_nodes++;
     }
   }
   // Verify.
-  for (size_t i = 0; i < ci.mm_nodes.size(); ++i) {
-    auto n = MM_NODE(ci.mm_nodes.at(i));
+  for (size_t i = 0; i < tci.mm_nodes.size(); ++i) {
+    auto n = MM_NODE(tci.mm_nodes.at(i));
     if (i < mmcluster->start_off_cluster_nodes()) {
       CHECK_S(n.border_node() && !n.off_cluster_node() && !n.dead_end());
     } else if (i < mmcluster->start_inner_nodes()) {
@@ -540,7 +762,7 @@ void ComputeClusterNodeNumbers(const TmpClusterInfo& ci, MMCluster* mmcluster) {
     } else if (i < mmcluster->start_dead_end_nodes()) {
       CHECK_S(!n.border_node() && !n.off_cluster_node() && !n.dead_end());
     } else {
-      CHECK_LT_S(i, ci.mm_nodes.size());
+      CHECK_LT_S(i, tci.mm_nodes.size());
       CHECK_S(!n.border_node() && !n.off_cluster_node() && n.dead_end());
     }
   }
@@ -561,26 +783,26 @@ void compare_check_vectors(const std::string& name, const T1& v1,
 //   - exists in g.
 //   - is in expected cluster or a border node.
 void CheckGNodePlausible(const Graph& g, const TmpClusterInfo& tci,
-                         const MMCluster& mmc, uint32_t node_idx) {
-  CHECK_LT_S(node_idx, mmc.nodes.size());
-  int64_t osm_id = mmc.get_node_id(node_idx);
+                         const MMCluster& mc, uint32_t node_idx) {
+  CHECK_LT_S(node_idx, mc.nodes.size());
+  int64_t osm_id = mc.get_node_id(node_idx);
   size_t gnode_idx = g.FindNodeIndex(osm_id);
   CHECK_LT_S(gnode_idx, g.nodes.size()) << osm_id;
   const GNode& n = g.nodes.at(gnode_idx);
-  CHECK_S(n.cluster_id == mmc.cluster_id || n.cluster_border_node)
-      << mmc.cluster_id;
+  CHECK_S(n.cluster_id == mc.cluster_id || n.cluster_border_node)
+      << mc.cluster_id;
 
-  MMLatLon latlon = mmc.node_to_latlon(node_idx);
+  MMLatLon latlon = mc.node_to_latlon(node_idx);
   CHECK_EQ_S(latlon.lat.v(), n.lat.v());
   CHECK_EQ_S(latlon.lon.v(), n.lon.v());
 }
 
-void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mmc,
+void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mc,
                 uint32_t cfrom_idx, uint32_t cedge_idx) {
   // LOG_S(INFO) << "AA " << cfrom_idx << ":" << cedge_idx;
-  const MMEdge e(mmc.edges.at(cedge_idx));
+  const MMEdge e(mc.edges.at(cedge_idx));
   uint32_t cto_idx = e.target_idx();
-  uint32_t cway_idx = mmc.edge_to_way.at(cedge_idx);
+  uint32_t cway_idx = mc.edge_to_way.at(cedge_idx);
 
   int64_t from_id = tci.mm_node_to_osm_id.at(cfrom_idx);
   int64_t to_id = tci.mm_node_to_osm_id.at(cto_idx);
@@ -594,25 +816,25 @@ void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mmc,
   CHECK_EQ_S(gway_idx, tci.cedge_to_gway_idx.at(cedge_idx));
 
   FullEdge fe = gnode_find_full_edge(g, gfrom_idx, gto_idx, gway_idx);
-  auto cwsa = mmc.get_wsa(cway_idx);
+  auto cwsa = mc.get_wsa(cway_idx);
   auto gwsa = GetWSA(g, gway_idx);
   CHECK_S(cwsa == gwsa);
 
-  std::string_view cstreet_name = mmc.get_streetname(cway_idx);
+  std::string_view cstreet_name = mc.get_streetname(cway_idx);
   std::string gstreet_name =
       g.streetnames.at(g.ways.at(gway_idx).streetname_idx);
   CHECK_EQ_S(cstreet_name, gstreet_name);
 
-  auto dist = mmc.edge_to_distance.at(cedge_idx);
+  auto dist = mc.edge_to_distance.at(cedge_idx);
   CHECK_EQ_S(dist, fe.gedge(g).distance_cm);
 }
 
 FullEdge find_full_gedge(const Graph& g, const TmpClusterInfo& tci,
-                         const MMCluster& mmc, uint32_t cfrom_idx,
+                         const MMCluster& mc, uint32_t cfrom_idx,
                          uint32_t cedge_idx) {
-  const MMEdge e(mmc.edges.at(cedge_idx));
+  const MMEdge e(mc.edges.at(cedge_idx));
   uint32_t cto_idx = e.target_idx();
-  uint32_t cway_idx = mmc.edge_to_way.at(cedge_idx);
+  uint32_t cway_idx = mc.edge_to_way.at(cedge_idx);
 
   uint32_t gfrom_idx = tci.cnode_to_gnode.at(cfrom_idx);
   uint32_t gto_idx = tci.cnode_to_gnode.at(cto_idx);
@@ -623,33 +845,33 @@ FullEdge find_full_gedge(const Graph& g, const TmpClusterInfo& tci,
 }
 
 void CheckTurnCosts(const Graph& g, const TmpClusterInfo& tci,
-                    const MMCluster& mmc, uint32_t cfrom_idx,
+                    const MMCluster& mc, uint32_t cfrom_idx,
                     uint32_t cedge_idx) {
-  FullEdge fe1 = find_full_gedge(g, tci, mmc, cfrom_idx, cedge_idx);
+  FullEdge fe1 = find_full_gedge(g, tci, mc, cfrom_idx, cedge_idx);
   // Now iterate the edges at the target node and check the turn costs between
   // the two edges.
-  uint32_t ctarget_idx = mmc.get_edge(cedge_idx).target_idx();
-  std::span<const uint8_t> tcarr = mmc.get_turn_costs(cedge_idx);
-  CHECK_EQ_S(tcarr.size(), mmc.get_num_edges(ctarget_idx));
+  uint32_t ctarget_idx = mc.get_edge(cedge_idx).target_idx();
+  std::span<const uint8_t> tcarr = mc.get_turn_costs(cedge_idx);
+  CHECK_EQ_S(tcarr.size(), mc.get_num_edges(ctarget_idx));
 
-  for (uint32_t edge2_idx : mmc.edge_indices(ctarget_idx)) {
-    FullEdge fe2 = find_full_gedge(g, tci, mmc, ctarget_idx, edge2_idx);
+  for (uint32_t edge2_idx : mc.edge_indices(ctarget_idx)) {
+    FullEdge fe2 = find_full_gedge(g, tci, mc, ctarget_idx, edge2_idx);
     N3Path n3p = N3Path::Create(g, fe1, fe2);
     auto gturn_cost = n3p.get_compressed_turn_cost_0to1(g);
 
-    CHECK_GE_S(edge2_idx, mmc.edge_start_idx(ctarget_idx));
-    uint32_t off = edge2_idx - mmc.edge_start_idx(ctarget_idx);
+    CHECK_GE_S(edge2_idx, mc.edge_start_idx(ctarget_idx));
+    uint32_t off = edge2_idx - mc.edge_start_idx(ctarget_idx);
     auto cturn_cost = tcarr[off];
     if (gturn_cost != cturn_cost) {
-      LOG_S(INFO) << "edge1: " << mmc.DebugStringEdge(cfrom_idx, cedge_idx);
-      LOG_S(INFO) << "edge2: " << mmc.DebugStringEdge(ctarget_idx, edge2_idx);
+      LOG_S(INFO) << "edge1: " << mc.DebugStringEdge(cfrom_idx, cedge_idx);
+      LOG_S(INFO) << "edge2: " << mc.DebugStringEdge(ctarget_idx, edge2_idx);
       if (fe1.start_idx() == fe2.target_idx(g) &&
           fe2.start_idx() == fe1.target_idx(g) &&
           fe1.start_node(g).cluster_id != fe2.start_node(g).cluster_id &&
           gturn_cost != TURN_COST_INFINITY_COMPRESSED &&
           cturn_cost == TURN_COST_INFINITY_COMPRESSED) {
-        // Known case, see ClusterAddTurnCosts(). We set the uturn for outgoing
-        // edges.
+        // Known case, see FillTmpClusterTurnCosts(). We set the uturn for
+        // outgoing edges.
         ;
       } else {
         CHECK_EQ_S((int)gturn_cost, (int)cturn_cost);
@@ -659,48 +881,254 @@ void CheckTurnCosts(const Graph& g, const TmpClusterInfo& tci,
 }
 
 void VerifyComplexTurnRestrictions(const Graph& g, const TmpClusterInfo& tci,
-                                   const MMCluster& mmc) {
+                                   const MMCluster& mc) {
   LOG_S(INFO) << "  VerifyComplexTurnRestrictions:"
-              << mmc.complex_turn_restrictions.size();
+              << mc.complex_turn_restrictions.size();
   // Count the triggered ctrs. Note that one edge can trigger multiple ctrs.
   uint32_t num_triggers = 0;
-  for (uint32_t edge_idx = 0; edge_idx < mmc.edges.size(); ++edge_idx) {
-    if (mmc.get_edge(edge_idx).complex_turn_restriction_trigger()) {
-      uint32_t ctr_start_idx = mmc.find_complex_turn_restriction_idx(edge_idx);
-      for (uint32_t i = ctr_start_idx; i < mmc.complex_turn_restrictions.size();
+  for (uint32_t edge_idx = 0; edge_idx < mc.edges.size(); ++edge_idx) {
+    if (mc.get_edge(edge_idx).complex_turn_restriction_trigger()) {
+      uint32_t ctr_start_idx = mc.find_complex_turn_restriction_idx(edge_idx);
+      for (uint32_t i = ctr_start_idx; i < mc.complex_turn_restrictions.size();
            ++i) {
-        const MMComplexTurnRestriction& tr =
-            mmc.complex_turn_restrictions.at(i);
+        const MMComplexTurnRestriction& tr = mc.complex_turn_restrictions.at(i);
         if (tr.trigger_edge_idx != edge_idx) {
           CHECK_GT_S(i, ctr_start_idx);  // At least one tr has been consumed.
           break;
         }
         std::span<const uint32_t> legs =
-            mmc.get_complex_turn_restriction_legs(tr);
+            mc.get_complex_turn_restriction_legs(tr);
         CHECK_EQ_S(legs.size(), tr.num_legs);
         CHECK_EQ_S(tr.trigger_edge_idx, edge_idx);
         CHECK_EQ_S(tr.trigger_edge_idx, legs.front());
-        CHECK_GE_S(edge_idx, mmc.edge_start_idx(tr.first_node_idx));
-        CHECK_LT_S(edge_idx, mmc.edge_stop_idx(tr.first_node_idx));
+        CHECK_GE_S(edge_idx, mc.edge_start_idx(tr.first_node_idx));
+        CHECK_LT_S(edge_idx, mc.edge_stop_idx(tr.first_node_idx));
         num_triggers++;
 
         // Check that each leg start at the target_idx of the previous leg.
         uint32_t head_node = tr.first_node_idx;
         for (auto leg_idx : legs) {
-          CHECK_GE_S(leg_idx, mmc.edge_start_idx(head_node));
-          CHECK_LT_S(leg_idx, mmc.edge_stop_idx(head_node));
-          head_node = mmc.get_edge(leg_idx).target_idx();
+          CHECK_GE_S(leg_idx, mc.edge_start_idx(head_node));
+          CHECK_LT_S(leg_idx, mc.edge_stop_idx(head_node));
+          head_node = mc.get_edge(leg_idx).target_idx();
         }
       }
     }
   }
-  CHECK_EQ_S(num_triggers, mmc.complex_turn_restrictions.size());
+  CHECK_EQ_S(num_triggers, mc.complex_turn_restrictions.size());
 }
 
-void CheckMMGraph(const std::string& path, const Graph& g,
-                  const std::vector<TmpClusterInfo>& tmp_cluster_infos) {
+void CheckShapeCoords(const TmpClusterInfo& tci, const MMCluster& mc) {
+  MMShapeCoords::Result res;
+  uint32_t coord_pos = 0;
+  for (uint32_t node_idx = 0; node_idx < mc.nodes.size(); ++node_idx) {
+    MMLatLon base = mc.node_to_latlon(node_idx);
+    for (uint32_t edge_idx : mc.edge_indices(node_idx)) {
+      mc.edge_shape_coords.get(base, edge_idx, &res);
+      if (res.latlon.empty()) {
+        CHECK_EQ_S(tci.cedge_shape_coord_length.at(edge_idx), 0);
+        CHECK_EQ_S(res.use_reverse_edge,
+                   tci.cedge_has_shape_coords_at_reverse_edge.at(edge_idx));
+      } else {
+        CHECK_EQ_S(res.latlon.size() + 2,
+                   tci.cedge_shape_coord_length.at(edge_idx));
+        for (uint32_t i = 0; i < res.latlon.size(); ++i) {
+          CHECK_EQ_S(res.latlon.at(i).lat.v(),
+                     tci.shape_coords_arr.at(coord_pos + i + 1).lat.v());
+          CHECK_EQ_S(res.latlon.at(i).lon.v(),
+                     tci.shape_coords_arr.at(coord_pos + i + 1).lon.v());
+        }
+        coord_pos += tci.cedge_shape_coord_length.at(edge_idx);
+      }
+
+    }
+  }
+}
+
+void CheckMMCluster(const Graph& g, const MMCluster& mc,
+                    const TmpClusterInfo& tci) {
   FUNC_TIMER();
-  int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC, 0644);
+
+  LOG_S(INFO) << "Check cluster " << mc.cluster_id;
+  CHECK_EQ_S(tci.cluster_id, mc.cluster_id);
+  LOG_S(INFO) << " num_border_nodes:" << mc.num_border_nodes;
+  LOG_S(INFO) << " num_off_cluster_nodes:" << mc.num_off_cluster_nodes;
+  LOG_S(INFO) << " num_inner_nodes:" << mc.num_inner_nodes;
+  LOG_S(INFO) << " num_dead_end_nodes:" << mc.num_dead_end_nodes;
+
+  // Check OSM ids first, because other checks use them.
+  compare_check_vectors("grouped_node_to_osm_id", mc.grouped_node_to_osm_id,
+                        tci.mm_node_to_osm_id);
+  CHECK_EQ_S(mc.grouped_node_to_osm_id.size(), tci.mm_nodes.size());
+
+  // way osm ids
+  compare_check_vectors("grouped_way_to_osm_id", mc.grouped_way_to_osm_id,
+                        tci.mm_way_to_osm_id);
+  CHECK_EQ_S(mc.grouped_way_to_osm_id.size(), tci.mm_way_to_wsa.size());
+  CHECK_EQ_S(mc.grouped_way_to_osm_id.size(), tci.gway_to_cway.size());
+
+  // in_edges
+  LOG_S(INFO) << "  Check in_edges:" << mc.in_edges.size();
+  CHECK_EQ_S(mc.in_edges.size(), tci.mm_in_edges.size());
+  for (uint32_t i = 0; i < mc.in_edges.size(); ++i) {
+    CHECK_EQ_S(mc.in_edges.at(i).from_cluster_id,
+               tci.mm_in_edges.at(i).from_cluster_id);
+    CHECK_EQ_S(mc.in_edges.at(i).from_node_idx,
+               tci.mm_in_edges.at(i).from_node_idx);
+    CHECK_EQ_S(mc.in_edges.at(i).to_node_idx,
+               tci.mm_in_edges.at(i).to_node_idx);
+    CHECK_EQ_S(mc.in_edges.at(i).edge_idx, tci.mm_in_edges.at(i).edge_idx);
+    CHECK_EQ_S(mc.in_edges.at(i).in_edge_pos,
+               tci.mm_in_edges.at(i).in_edge_pos);
+  }
+
+  // out_edges
+  LOG_S(INFO) << "  Check out_edges:" << mc.out_edges.size();
+  CHECK_EQ_S(mc.out_edges.size(), tci.mm_out_edges.size());
+  for (uint32_t i = 0; i < mc.out_edges.size(); ++i) {
+    CHECK_EQ_S(mc.out_edges.at(i).from_node_idx,
+               tci.mm_out_edges.at(i).from_node_idx);
+    CHECK_EQ_S(mc.out_edges.at(i).to_node_idx,
+               tci.mm_out_edges.at(i).to_node_idx);
+    CHECK_EQ_S(mc.out_edges.at(i).edge_idx, tci.mm_out_edges.at(i).edge_idx);
+    CHECK_EQ_S(mc.out_edges.at(i).to_cluster_id,
+               tci.mm_out_edges.at(i).to_cluster_id);
+    CHECK_EQ_S(mc.out_edges.at(i).out_edge_pos,
+               tci.mm_out_edges.at(i).out_edge_pos);
+  }
+
+  // nodes
+  LOG_S(INFO) << "  Check nodes:" << mc.nodes.size();
+  CHECK_EQ_S(mc.nodes.size(), tci.mm_nodes.size());
+  for (uint32_t i = 0; i < mc.nodes.size(); ++i) {
+    CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).border_node(),
+               MM_NODE(tci.mm_nodes.at(i)).border_node());
+    CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).dead_end(),
+               MM_NODE(tci.mm_nodes.at(i)).dead_end());
+    CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).off_cluster_node(),
+               MM_NODE(tci.mm_nodes.at(i)).off_cluster_node());
+    CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).edge_start_idx(),
+               MM_NODE(tci.mm_nodes.at(i)).edge_start_idx());
+    CheckGNodePlausible(g, tci, mc, i);
+  }
+
+  // edges
+  LOG_S(INFO) << "  Check edges:" << mc.edges.size();
+  CHECK_EQ_S(mc.edges.size(), tci.mm_edges.size());
+  for (uint32_t i = 0; i < mc.edges.size(); ++i) {
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).dead_end(),
+               MM_EDGE(tci.mm_edges.at(i)).dead_end());
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).bridge(),
+               MM_EDGE(tci.mm_edges.at(i)).bridge());
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).restricted(),
+               MM_EDGE(tci.mm_edges.at(i)).restricted());
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).contra_way(),
+               MM_EDGE(tci.mm_edges.at(i)).contra_way());
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).cross_cluster_edge(),
+               MM_EDGE(tci.mm_edges.at(i)).cross_cluster_edge());
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).complex_turn_restriction_trigger(),
+               MM_EDGE(tci.mm_edges.at(i)).complex_turn_restriction_trigger());
+    CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).target_idx(),
+               MM_EDGE(tci.mm_edges.at(i)).target_idx());
+    CheckGNodePlausible(g, tci, mc, MM_EDGE(mc.edges.at(i)).target_idx());
+  }
+
+  // full edges
+  LOG_S(INFO) << "  Check full edges:" << mc.edges.size();
+  for (uint32_t from_idx = 0; from_idx < mc.nodes.size(); ++from_idx) {
+    for (uint32_t edge_idx = mc.edge_start_idx(from_idx);
+         edge_idx < mc.edge_stop_idx(from_idx); ++edge_idx) {
+      CheckGEdge(g, tci, mc, from_idx, edge_idx);
+      CheckTurnCosts(g, tci, mc, from_idx, edge_idx);
+    }
+  }
+
+  compare_check_vectors("edge_to_distance", mc.edge_to_distance,
+                        tci.mm_edge_to_distance);
+
+  // edge_to_way
+  compare_check_vectors("edge_to_way", mc.edge_to_way, tci.mm_edge_to_way);
+  CHECK_EQ_S(mc.edge_to_way.size(), tci.mm_edges.size());
+
+  // way_to_wsa
+  compare_check_vectors("way_to_wsa", mc.way_to_wsa, tci.mm_way_to_wsa);
+  CHECK_EQ_S(mc.way_to_wsa.size(), tci.gway_to_cway.size());
+
+  // way shared attrs
+  LOG_S(INFO) << "  Check way_shared_attrs:" << mc.way_shared_attrs.size();
+  CHECK_EQ_S(mc.way_shared_attrs.size(), tci.mm_way_shared_attrs.size());
+  for (uint32_t i = 0; i < mc.way_shared_attrs.size(); ++i) {
+    CHECK_S(mc.way_shared_attrs.at(i) == tci.mm_way_shared_attrs.at(i));
+  }
+
+  // This is a little bit complicated. Turn costs are handled almost
+  // identical to streetnames, please check comment below.
+  LOG_S(INFO) << "  Check turn costs of edges:"
+              << mc.edge_to_turn_costs_pos.size();
+  CHECK_EQ_S(mc.edge_to_turn_costs_pos.size(),
+             tci.cedge_to_turn_cost_idx.size());
+  for (uint32_t i = 0; i < mc.edge_to_turn_costs_pos.size(); ++i) {
+    std::span<const uint8_t> tcd1 =
+        mc.turn_costs_table.at(mc.edge_to_turn_costs_pos.at(i));
+    TurnCostData tcd2 = tci.turn_costs.at(tci.cedge_to_turn_cost_idx.at(i));
+    CHECK_EQ_S(tcd1.size(), tcd2.turn_costs.size());
+    for (uint32_t i = 0; i < tcd1.size(); ++i) {
+      CHECK_EQ_S(tcd1[i], tcd2.turn_costs.at(i));
+    }
+  }
+
+  // node_to_latlon
+  LOG_S(INFO) << "  Check node_to_lat/lon:" << mc.node_to_rel_lat.size();
+  CHECK_EQ_S(mc.node_to_rel_lat.size(), tci.mm_node_to_latlon.size());
+  CHECK_EQ_S(mc.node_to_rel_lon.size(), tci.mm_node_to_latlon.size());
+  for (uint32_t i = 0; i < mc.node_to_rel_lat.size(); ++i) {
+    const auto latlon1 = mc.node_to_latlon(i);
+    const auto latlon2 = tci.mm_node_to_latlon.at(i);
+    CHECK_EQ_S(latlon1.lat.v(), latlon2.lat.v());
+    CHECK_EQ_S(latlon1.lon.v(), latlon2.lon.v());
+  }
+
+  // This is a little bit complicated, because the incoming data has a
+  // vector of indexes into a vector of strings, and the memory mapped data
+  // has a vector of positions pointing into a table of chars. The strings
+  // in the second table are 0-terminated.
+  LOG_S(INFO) << "  Check streetnames of ways:"
+              << mc.way_to_streetname_pos.size();
+  CHECK_EQ_S(mc.way_to_streetname_pos.size(),
+             tci.cway_to_streetname_idx.size());
+  for (uint32_t i = 0; i < mc.way_to_streetname_pos.size(); ++i) {
+    const std::string s1(
+        mc.streetnames_table.at(mc.way_to_streetname_pos.at(i)));
+    const std::string s2 = tci.streetnames.at(tci.cway_to_streetname_idx.at(i));
+    CHECK_EQ_S(s1, s2);
+  }
+
+  VerifyComplexTurnRestrictions(g, tci, mc);
+  CheckShapeCoords(tci, mc);
+}
+
+void CheckMMClusters(const Graph& g, const MMGraph& mg,
+                     const std::vector<TmpClusterInfo>& tmp_infos,
+                     int n_threads) {
+  FUNC_TIMER();
+  LOG_S(INFO) << "Check " << mg.clusters.size() << " clusters";
+  CHECK_EQ_S(mg.clusters.size(), g.clusters.size());
+
+  ThreadPool pool;
+  for (uint32_t cluster_id = 0; cluster_id < mg.clusters.size(); ++cluster_id) {
+    const TmpClusterInfo& tci = tmp_infos.at(cluster_id);
+    const MMCluster& mc = mg.clusters.at(cluster_id);
+    pool.AddWork([&g, &mc, &tci](int) { CheckMMCluster(g, mc, tci); });
+  }
+  pool.Start(n_threads);
+  pool.WaitAllFinished();
+}
+
+void CheckMMGraph(const Graph& g, const std::string& mm_path,
+                  const std::vector<TmpClusterInfo>& tmp_cluster_infos,
+                  int n_threads) {
+  FUNC_TIMER();
+  int fd = ::open(mm_path.c_str(), O_RDONLY | O_CLOEXEC, 0644);
   if (fd < 0) FileAbortOnError("open");
 
   const uint64_t file_size = GetFileSize(fd);
@@ -723,11 +1151,11 @@ void CheckMMGraph(const std::string& path, const Graph& g,
   CHECK_EQ_S(mmheader.sorted_bounding_rects.size(), g.clusters.size());
   for (uint32_t idx = 0; idx < mmheader.sorted_bounding_rects.size(); ++idx) {
     const MMClusterBoundingRect& cbr = mmheader.sorted_bounding_rects.at(idx);
-    const MMCluster& mmc = mmheader.clusters.at(cbr.cluster_id);
-    CHECK_EQ_S(cbr.bounding_rect.min.lat.v(), mmc.bounding_rect.min.lat.v());
-    CHECK_EQ_S(cbr.bounding_rect.min.lon.v(), mmc.bounding_rect.min.lon.v());
-    CHECK_EQ_S(cbr.bounding_rect.max.lat.v(), mmc.bounding_rect.max.lat.v());
-    CHECK_EQ_S(cbr.bounding_rect.max.lon.v(), mmc.bounding_rect.max.lon.v());
+    const MMCluster& mc = mmheader.clusters.at(cbr.cluster_id);
+    CHECK_EQ_S(cbr.bounding_rect.min.lat.v(), mc.bounding_rect.min.lat.v());
+    CHECK_EQ_S(cbr.bounding_rect.min.lon.v(), mc.bounding_rect.min.lon.v());
+    CHECK_EQ_S(cbr.bounding_rect.max.lat.v(), mc.bounding_rect.max.lat.v());
+    CHECK_EQ_S(cbr.bounding_rect.max.lon.v(), mc.bounding_rect.max.lon.v());
     if (idx > 0) {
       // Check that it is sorted.
       CHECK_GE_S(
@@ -736,135 +1164,142 @@ void CheckMMGraph(const std::string& path, const Graph& g,
     }
   }
 
+  CheckMMClusters(g, mmheader, tmp_cluster_infos, n_threads);
+
+#if 0
   LOG_S(INFO) << "Check " << mmheader.clusters.size() << " clusters";
   CHECK_EQ_S(mmheader.clusters.size(), g.clusters.size());
   for (uint32_t cluster_id = 0; cluster_id < mmheader.clusters.size();
        ++cluster_id) {
     LOG_S(INFO) << "Check cluster " << cluster_id;
     const TmpClusterInfo& tci = tmp_cluster_infos.at(cluster_id);
-    const MMCluster& mmc = mmheader.clusters.at(tci.cluster_id);
+    const MMCluster& mc = mmheader.clusters.at(tci.cluster_id);
+    CHECK_EQ_S(mc.cluster_id, cluster_id);
+    CheckMMCluster(g, mmheader, mc, tci, n_threads);
+#endif
+
+#if 0
     CHECK_EQ_S(tci.cluster_id, cluster_id);
-    CHECK_EQ_S(mmc.cluster_id, cluster_id);
-    LOG_S(INFO) << " num_border_nodes:" << mmc.num_border_nodes;
-    LOG_S(INFO) << " num_off_cluster_nodes:" << mmc.num_off_cluster_nodes;
-    LOG_S(INFO) << " num_inner_nodes:" << mmc.num_inner_nodes;
-    LOG_S(INFO) << " num_dead_end_nodes:" << mmc.num_dead_end_nodes;
+    LOG_S(INFO) << " num_border_nodes:" << mc.num_border_nodes;
+    LOG_S(INFO) << " num_off_cluster_nodes:" << mc.num_off_cluster_nodes;
+    LOG_S(INFO) << " num_inner_nodes:" << mc.num_inner_nodes;
+    LOG_S(INFO) << " num_dead_end_nodes:" << mc.num_dead_end_nodes;
 
     // Check OSM ids first, because other checks use them.
-    compare_check_vectors("grouped_node_to_osm_id", mmc.grouped_node_to_osm_id,
+    compare_check_vectors("grouped_node_to_osm_id", mc.grouped_node_to_osm_id,
                           tci.mm_node_to_osm_id);
-    CHECK_EQ_S(mmc.grouped_node_to_osm_id.size(), tci.mm_nodes.size());
+    CHECK_EQ_S(mc.grouped_node_to_osm_id.size(), tci.mm_nodes.size());
 
     // way osm ids
-    compare_check_vectors("grouped_way_to_osm_id", mmc.grouped_way_to_osm_id,
+    compare_check_vectors("grouped_way_to_osm_id", mc.grouped_way_to_osm_id,
                           tci.mm_way_to_osm_id);
-    CHECK_EQ_S(mmc.grouped_way_to_osm_id.size(), tci.mm_way_to_wsa.size());
-    CHECK_EQ_S(mmc.grouped_way_to_osm_id.size(), tci.gway_to_cway.size());
+    CHECK_EQ_S(mc.grouped_way_to_osm_id.size(), tci.mm_way_to_wsa.size());
+    CHECK_EQ_S(mc.grouped_way_to_osm_id.size(), tci.gway_to_cway.size());
 
     // in_edges
-    LOG_S(INFO) << "  Check in_edges:" << mmc.in_edges.size();
-    CHECK_EQ_S(mmc.in_edges.size(), tci.mm_in_edges.size());
-    for (uint32_t i = 0; i < mmc.in_edges.size(); ++i) {
-      CHECK_EQ_S(mmc.in_edges.at(i).from_cluster_id,
+    LOG_S(INFO) << "  Check in_edges:" << mc.in_edges.size();
+    CHECK_EQ_S(mc.in_edges.size(), tci.mm_in_edges.size());
+    for (uint32_t i = 0; i < mc.in_edges.size(); ++i) {
+      CHECK_EQ_S(mc.in_edges.at(i).from_cluster_id,
                  tci.mm_in_edges.at(i).from_cluster_id);
-      CHECK_EQ_S(mmc.in_edges.at(i).from_node_idx,
+      CHECK_EQ_S(mc.in_edges.at(i).from_node_idx,
                  tci.mm_in_edges.at(i).from_node_idx);
-      CHECK_EQ_S(mmc.in_edges.at(i).to_node_idx,
+      CHECK_EQ_S(mc.in_edges.at(i).to_node_idx,
                  tci.mm_in_edges.at(i).to_node_idx);
-      CHECK_EQ_S(mmc.in_edges.at(i).edge_idx, tci.mm_in_edges.at(i).edge_idx);
-      CHECK_EQ_S(mmc.in_edges.at(i).in_edge_pos,
+      CHECK_EQ_S(mc.in_edges.at(i).edge_idx, tci.mm_in_edges.at(i).edge_idx);
+      CHECK_EQ_S(mc.in_edges.at(i).in_edge_pos,
                  tci.mm_in_edges.at(i).in_edge_pos);
     }
 
     // out_edges
-    LOG_S(INFO) << "  Check out_edges:" << mmc.out_edges.size();
-    CHECK_EQ_S(mmc.out_edges.size(), tci.mm_out_edges.size());
-    for (uint32_t i = 0; i < mmc.out_edges.size(); ++i) {
-      CHECK_EQ_S(mmc.out_edges.at(i).from_node_idx,
+    LOG_S(INFO) << "  Check out_edges:" << mc.out_edges.size();
+    CHECK_EQ_S(mc.out_edges.size(), tci.mm_out_edges.size());
+    for (uint32_t i = 0; i < mc.out_edges.size(); ++i) {
+      CHECK_EQ_S(mc.out_edges.at(i).from_node_idx,
                  tci.mm_out_edges.at(i).from_node_idx);
-      CHECK_EQ_S(mmc.out_edges.at(i).to_node_idx,
+      CHECK_EQ_S(mc.out_edges.at(i).to_node_idx,
                  tci.mm_out_edges.at(i).to_node_idx);
-      CHECK_EQ_S(mmc.out_edges.at(i).edge_idx, tci.mm_out_edges.at(i).edge_idx);
-      CHECK_EQ_S(mmc.out_edges.at(i).to_cluster_id,
+      CHECK_EQ_S(mc.out_edges.at(i).edge_idx, tci.mm_out_edges.at(i).edge_idx);
+      CHECK_EQ_S(mc.out_edges.at(i).to_cluster_id,
                  tci.mm_out_edges.at(i).to_cluster_id);
-      CHECK_EQ_S(mmc.out_edges.at(i).out_edge_pos,
+      CHECK_EQ_S(mc.out_edges.at(i).out_edge_pos,
                  tci.mm_out_edges.at(i).out_edge_pos);
     }
 
     // nodes
-    LOG_S(INFO) << "  Check nodes:" << mmc.nodes.size();
-    CHECK_EQ_S(mmc.nodes.size(), tci.mm_nodes.size());
-    for (uint32_t i = 0; i < mmc.nodes.size(); ++i) {
-      CHECK_EQ_S(MM_NODE(mmc.nodes.at(i)).border_node(),
+    LOG_S(INFO) << "  Check nodes:" << mc.nodes.size();
+    CHECK_EQ_S(mc.nodes.size(), tci.mm_nodes.size());
+    for (uint32_t i = 0; i < mc.nodes.size(); ++i) {
+      CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).border_node(),
                  MM_NODE(tci.mm_nodes.at(i)).border_node());
-      CHECK_EQ_S(MM_NODE(mmc.nodes.at(i)).dead_end(),
+      CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).dead_end(),
                  MM_NODE(tci.mm_nodes.at(i)).dead_end());
-      CHECK_EQ_S(MM_NODE(mmc.nodes.at(i)).off_cluster_node(),
+      CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).off_cluster_node(),
                  MM_NODE(tci.mm_nodes.at(i)).off_cluster_node());
-      CHECK_EQ_S(MM_NODE(mmc.nodes.at(i)).edge_start_idx(),
+      CHECK_EQ_S(MM_NODE(mc.nodes.at(i)).edge_start_idx(),
                  MM_NODE(tci.mm_nodes.at(i)).edge_start_idx());
-      CheckGNodePlausible(g, tci, mmc, i);
+      CheckGNodePlausible(g, tci, mc, i);
     }
 
     // edges
-    LOG_S(INFO) << "  Check edges:" << mmc.edges.size();
-    CHECK_EQ_S(mmc.edges.size(), tci.mm_edges.size());
-    for (uint32_t i = 0; i < mmc.edges.size(); ++i) {
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).dead_end(),
+    LOG_S(INFO) << "  Check edges:" << mc.edges.size();
+    CHECK_EQ_S(mc.edges.size(), tci.mm_edges.size());
+    for (uint32_t i = 0; i < mc.edges.size(); ++i) {
+      CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).dead_end(),
                  MM_EDGE(tci.mm_edges.at(i)).dead_end());
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).bridge(),
+      CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).bridge(),
                  MM_EDGE(tci.mm_edges.at(i)).bridge());
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).restricted(),
+      CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).restricted(),
                  MM_EDGE(tci.mm_edges.at(i)).restricted());
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).contra_way(),
+      CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).contra_way(),
                  MM_EDGE(tci.mm_edges.at(i)).contra_way());
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).cross_cluster_edge(),
+      CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).cross_cluster_edge(),
                  MM_EDGE(tci.mm_edges.at(i)).cross_cluster_edge());
       CHECK_EQ_S(
-          MM_EDGE(mmc.edges.at(i)).complex_turn_restriction_trigger(),
+          MM_EDGE(mc.edges.at(i)).complex_turn_restriction_trigger(),
           MM_EDGE(tci.mm_edges.at(i)).complex_turn_restriction_trigger());
-      CHECK_EQ_S(MM_EDGE(mmc.edges.at(i)).target_idx(),
+      CHECK_EQ_S(MM_EDGE(mc.edges.at(i)).target_idx(),
                  MM_EDGE(tci.mm_edges.at(i)).target_idx());
-      CheckGNodePlausible(g, tci, mmc, MM_EDGE(mmc.edges.at(i)).target_idx());
+      CheckGNodePlausible(g, tci, mc, MM_EDGE(mc.edges.at(i)).target_idx());
     }
 
     // full edges
-    LOG_S(INFO) << "  Check full edges:" << mmc.edges.size();
-    for (uint32_t from_idx = 0; from_idx < mmc.nodes.size(); ++from_idx) {
-      for (uint32_t edge_idx = mmc.edge_start_idx(from_idx);
-           edge_idx < mmc.edge_stop_idx(from_idx); ++edge_idx) {
-        CheckGEdge(g, tci, mmc, from_idx, edge_idx);
-        CheckTurnCosts(g, tci, mmc, from_idx, edge_idx);
+    LOG_S(INFO) << "  Check full edges:" << mc.edges.size();
+    for (uint32_t from_idx = 0; from_idx < mc.nodes.size(); ++from_idx) {
+      for (uint32_t edge_idx = mc.edge_start_idx(from_idx);
+           edge_idx < mc.edge_stop_idx(from_idx); ++edge_idx) {
+        CheckGEdge(g, tci, mc, from_idx, edge_idx);
+        CheckTurnCosts(g, tci, mc, from_idx, edge_idx);
       }
     }
 
-    compare_check_vectors("edge_to_distance", mmc.edge_to_distance,
+    compare_check_vectors("edge_to_distance", mc.edge_to_distance,
                           tci.mm_edge_to_distance);
 
     // edge_to_way
-    compare_check_vectors("edge_to_way", mmc.edge_to_way, tci.mm_edge_to_way);
-    CHECK_EQ_S(mmc.edge_to_way.size(), tci.mm_edges.size());
+    compare_check_vectors("edge_to_way", mc.edge_to_way, tci.mm_edge_to_way);
+    CHECK_EQ_S(mc.edge_to_way.size(), tci.mm_edges.size());
 
     // way_to_wsa
-    compare_check_vectors("way_to_wsa", mmc.way_to_wsa, tci.mm_way_to_wsa);
-    CHECK_EQ_S(mmc.way_to_wsa.size(), tci.gway_to_cway.size());
+    compare_check_vectors("way_to_wsa", mc.way_to_wsa, tci.mm_way_to_wsa);
+    CHECK_EQ_S(mc.way_to_wsa.size(), tci.gway_to_cway.size());
 
     // way shared attrs
-    LOG_S(INFO) << "  Check way_shared_attrs:" << mmc.way_shared_attrs.size();
-    CHECK_EQ_S(mmc.way_shared_attrs.size(), tci.mm_way_shared_attrs.size());
-    for (uint32_t i = 0; i < mmc.way_shared_attrs.size(); ++i) {
-      CHECK_S(mmc.way_shared_attrs.at(i) == tci.mm_way_shared_attrs.at(i));
+    LOG_S(INFO) << "  Check way_shared_attrs:" << mc.way_shared_attrs.size();
+    CHECK_EQ_S(mc.way_shared_attrs.size(), tci.mm_way_shared_attrs.size());
+    for (uint32_t i = 0; i < mc.way_shared_attrs.size(); ++i) {
+      CHECK_S(mc.way_shared_attrs.at(i) == tci.mm_way_shared_attrs.at(i));
     }
 
     // This is a little bit complicated. Turn costs are handled almost
     // identical to streetnames, please check comment below.
     LOG_S(INFO) << "  Check turn costs of edges:"
-                << mmc.edge_to_turn_costs_pos.size();
-    CHECK_EQ_S(mmc.edge_to_turn_costs_pos.size(),
+                << mc.edge_to_turn_costs_pos.size();
+    CHECK_EQ_S(mc.edge_to_turn_costs_pos.size(),
                tci.cedge_to_turn_cost_idx.size());
-    for (uint32_t i = 0; i < mmc.edge_to_turn_costs_pos.size(); ++i) {
+    for (uint32_t i = 0; i < mc.edge_to_turn_costs_pos.size(); ++i) {
       std::span<const uint8_t> tcd1 =
-          mmc.turn_costs_table.at(mmc.edge_to_turn_costs_pos.at(i));
+          mc.turn_costs_table.at(mc.edge_to_turn_costs_pos.at(i));
       TurnCostData tcd2 = tci.turn_costs.at(tci.cedge_to_turn_cost_idx.at(i));
       CHECK_EQ_S(tcd1.size(), tcd2.turn_costs.size());
       for (uint32_t i = 0; i < tcd1.size(); ++i) {
@@ -873,11 +1308,11 @@ void CheckMMGraph(const std::string& path, const Graph& g,
     }
 
     // node_to_latlon
-    LOG_S(INFO) << "  Check node_to_lat/lon:" << mmc.node_to_rel_lat.size();
-    CHECK_EQ_S(mmc.node_to_rel_lat.size(), tci.mm_node_to_latlon.size());
-    CHECK_EQ_S(mmc.node_to_rel_lon.size(), tci.mm_node_to_latlon.size());
-    for (uint32_t i = 0; i < mmc.node_to_rel_lat.size(); ++i) {
-      const auto latlon1 = mmc.node_to_latlon(i);
+    LOG_S(INFO) << "  Check node_to_lat/lon:" << mc.node_to_rel_lat.size();
+    CHECK_EQ_S(mc.node_to_rel_lat.size(), tci.mm_node_to_latlon.size());
+    CHECK_EQ_S(mc.node_to_rel_lon.size(), tci.mm_node_to_latlon.size());
+    for (uint32_t i = 0; i < mc.node_to_rel_lat.size(); ++i) {
+      const auto latlon1 = mc.node_to_latlon(i);
       const auto latlon2 = tci.mm_node_to_latlon.at(i);
       CHECK_EQ_S(latlon1.lat.v(), latlon2.lat.v());
       CHECK_EQ_S(latlon1.lon.v(), latlon2.lon.v());
@@ -885,27 +1320,26 @@ void CheckMMGraph(const std::string& path, const Graph& g,
 
     // This is a little bit complicated, because the incoming data has a
     // vector of indexes into a vector of strings, and the memory mapped data
-    // has a vector of positions pointing into a table of chars. The strings in
-    // the second table are 0-terminated.
+    // has a vector of positions pointing into a table of chars. The strings
+    // in the second table are 0-terminated.
     LOG_S(INFO) << "  Check streetnames of ways:"
-                << mmc.way_to_streetname_pos.size();
-    CHECK_EQ_S(mmc.way_to_streetname_pos.size(),
+                << mc.way_to_streetname_pos.size();
+    CHECK_EQ_S(mc.way_to_streetname_pos.size(),
                tci.cway_to_streetname_idx.size());
-    for (uint32_t i = 0; i < mmc.way_to_streetname_pos.size(); ++i) {
+    for (uint32_t i = 0; i < mc.way_to_streetname_pos.size(); ++i) {
       const std::string s1(
-          mmc.streetnames_table.at(mmc.way_to_streetname_pos.at(i)));
+          mc.streetnames_table.at(mc.way_to_streetname_pos.at(i)));
       const std::string s2 =
           tci.streetnames.at(tci.cway_to_streetname_idx.at(i));
       CHECK_EQ_S(s1, s2);
     }
 
-    VerifyComplexTurnRestrictions(g, tci, mmc);
+    VerifyComplexTurnRestrictions(g, tci, mc);
   }
+#endif
 
   munmap((void*)ptr, file_size);
 }
-
-}  // namespace
 
 void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
                               int64_t global_object_offset, int fd) {
@@ -945,303 +1379,8 @@ void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
   }
 }
 
-// Manages lat/lon and deltas that we have seen for the previous point.
-// Predicts the current delta.
-struct PrevCoord {
-  PrevCoord(DegE6 lat, DegE6 lon) : lat(lat), lon(lon), dlat(0), dlon(0) {}
-  DegE6 lat;
-  DegE6 lon;
-  int64_t dlat;
-  int64_t dlon;
-
-  // Simply predicts that the new dlat is the same as the old one/
-  int64_t predict_new_dlat() const { return dlat; }
-
-  // Given a new dlat, estimate the new dlon.
-  int64_t predict_new_dlon(int64_t new_dlat) const {
-    int64_t abs_dlat = std::abs(dlat);
-    int64_t abs_new_dlat = std::abs(new_dlat);
-    int64_t abs_dlon = std::abs(dlon);
-    if (abs_dlat == 0) return dlon;
-
-    if (abs_dlat < 40) {
-      return dlon;
-    }
-    double factor = static_cast<double>(new_dlat) / static_cast<double>(dlat);
-    if (std::abs(factor) > std::abs(abs_dlat / 100.0)) {
-      factor = factor < 0.0 ? -std::abs(abs_dlat / 100.0)
-                            : std::abs(abs_dlat / 100.0);
-    }
-
-#if 0
-    if (abs_dlat < 40) {
-      return dlon;
-    }
-    double factor = static_cast<double>(new_dlat) / static_cast<double>(dlat);
-    if (std::abs(factor) > 6.0) {
-      factor = factor < 0.0 ? -6.0 : 6.0;
-    }
-#endif
-
-    return std::lround(factor * dlon);
-  }
-
-  void push_new(DegE6 new_lat, DegE6 new_lon) {
-    dlat = new_lat.v64() - lat.v64();
-    dlon = new_lon.v64() - lon.v64();
-    lat = new_lat;
-    lon = new_lon;
-  }
-};
-
-std::vector<NodeBuilder::VNode> GetCoords(const Graph& g,
-                                          const DataBlockTable& node_table,
-                                          uint32_t from_idx,
-                                          uint32_t target_idx,
-                                          uint32_t way_idx) {
-  std::vector<uint64_t> id_list = g.GetGWayNodeIds(g.ways.at(way_idx));
-  // May be >0 when from node ('from_idx') is a repeated node.
-  uint32_t start_pos = FindInMapOrDefault(g.edge_in_way_start_pos_map,
-                                          {from_idx, target_idx, way_idx}, 0);
-
-  const uint64_t id_from = g.nodes.at(from_idx).node_id;
-  const uint64_t id_to = g.nodes.at(target_idx).node_id;
-  std::vector<NodeBuilder::VNode> coords;
-  for (uint32_t i = start_pos; i < id_list.size(); ++i) {
-    uint64_t id = id_list.at(i);
-    if ((id == id_from && coords.empty()) || !coords.empty()) {
-      NodeBuilder::VNode vn;
-      CHECK_S(NodeBuilder::FindNode(node_table, id, &vn)) << id;
-      coords.push_back(vn);
-      if (coords.size() > 1 && id == id_to) {
-        break;
-      }
-    }
-  }
-  // We expect at least start/end node and one shape node in between.
-  CHECK_GT_S(coords.size(), 2);
-  return coords;
-}
-
-// Get the shape coordinates (between start and end point) for edge 'ge'
-// starting at node 'gfrom_idx'
-std::vector<MMLatLon> GetShapeCoordsFromGraph(const Graph& g,
-                                              const DataBlockTable& node_table,
-                                              uint32_t gfrom_idx,
-                                              const GEdge& ge,
-                                              WriteBuff* buff) {
-  std::vector<NodeBuilder::VNode> coords =
-      GetCoords(g, node_table, ge.contra_way ? ge.target_idx : gfrom_idx,
-                ge.contra_way ? gfrom_idx : ge.target_idx, ge.way_idx);
-  CHECK_GT_S(coords.size(), 2);
-
-  // The list we get is always stored in forward direction, reverse it of
-  // contra_way is true.
-  if (ge.contra_way) {
-    std::reverse(coords.begin(), coords.end());
-  }
-
-  LOG_S(INFO) << absl::StrFormat(
-      "shape coords way:%9lu len:%4lu id:%10lu to:%10lu",
-      g.ways.at(ge.way_idx).id, coords.size(), coords.front().id,
-      coords.back().id);
-  CHECK_EQ_S(coords.front().lat.v(), g.nodes.at(gfrom_idx).lat.v());
-  CHECK_EQ_S(coords.front().lon.v(), g.nodes.at(gfrom_idx).lon.v());
-  CHECK_EQ_S(coords.back().lat.v(), g.nodes.at(ge.target_idx).lat.v());
-  CHECK_EQ_S(coords.back().lon.v(), g.nodes.at(ge.target_idx).lon.v());
-
-  double prev_m = 999999999999;
-  int64_t sum_dlat = 0;
-  int64_t sum_dlon = 0;
-  int64_t sum_ddlat = 0;
-  int64_t sum_ddlon = 0;
-  PrevCoord prev(coords.front().lat, coords.front().lon);
-  for (uint32_t i = 1; i < coords.size() - 1; ++i) {
-    NodeBuilder::VNode node = coords.at(i);
-
-    int64_t dlat = node.lat.v64() - prev.lat.v64();
-    int64_t ddlat = dlat - prev.predict_new_dlat();
-
-    int64_t dlon = node.lon.v64() - prev.lon.v64();
-    int64_t ddlon = dlon - prev.predict_new_dlon(dlat);
-    int64_t ddlon_old = dlon - prev.dlon;
-
-    double m = (dlon != 0)
-                   ? static_cast<double>(dlat) / static_cast<double>(dlon)
-                   : 9999.9999;
-
-    LOG_S(INFO) << absl::StrFormat(
-        "shape pos:%3u dlat:%4ld dlon:%4ld ddlat:%4ld ddlon:%4ld "
-        "ddlon-old:%4ld m:%.4f %s",
-        i, dlat, dlon, ddlat, ddlon, ddlon_old, m,
-        RelativeDifference(m, prev_m) < 0.001 ? "equal" : "");
-
-    if (coords.size() >= 13) {
-      EncodeUInt(coords.size(), buff);
-    }
-    EncodeInt(ddlat, buff);
-    EncodeInt(ddlon, buff);
-
-    sum_dlat += std::abs(dlat);
-    sum_dlon += std::abs(dlon);
-    sum_ddlat += std::abs(ddlat);
-    sum_ddlon += std::abs(ddlon);
-
-    prev.push_new(node.lat, node.lon);
-    prev_m = m;
-  }
-
-  int64_t sum_d = sum_dlat + sum_dlon;
-  int64_t sum_dd = sum_ddlat + sum_ddlon;
-
-  LOG_S(INFO) << absl::StrFormat(
-      "shape sums %s len:%3lu dlat:%5ld dlon:%5ld ddlat:%5ld ddlon:%5ld",
-      sum_dd < sum_d ? "+++" : (sum_dd > sum_d ? "---" : "==="),
-      coords.size() - 1, sum_dlat, sum_dlon, sum_ddlat, sum_ddlon);
-
-  return {};
-}
-
-#if 0
-// Get the shape coordinates (between start and end point) for edge 'ge'
-// starting at node 'gfrom_idx'
-std::vector<MMLatLon> GetShapeCoordsFromGraph(const Graph& g,
-                                              const DataBlockTable& node_table,
-                                              uint32_t gfrom_idx,
-                                              const GEdge& ge) {
-  std::vector<uint64_t> id_list = g.GetGWayNodeIds(g.ways.at(ge.way_idx));
-
-  if (ge.contra_way) {
-    std::reverse(id_list.begin(), id_list.end());
-  }
-
-  // May be >0 when from node ('gfrom_idx') is a repeated node.
-  uint32_t id_list_start_pos = FindInMapOrDefault(
-      g.edge_in_way_start_pos_map, {gfrom_idx, ge.target_idx, ge.way_idx}, 0);
-
-  const uint64_t id_from = g.nodes.at(gfrom_idx).node_id;
-  const uint64_t id_to = g.nodes.at(ge.target_idx).node_id;
-  uint32_t start_pos = INFU32;
-  uint32_t stop_pos = INFU32;
-  for (uint32_t i = id_list_start_pos; i < id_list.size(); ++i) {
-    uint64_t id = id_list.at(i);
-    if (id == id_from && start_pos == INFU32) {
-      start_pos = i;
-    } else if (start_pos != INFU32 && id == id_to) {
-      // It is important to put this in an "else" clause, because start and stop
-      // can not be at the same position, so they should never trigger on the
-      // same element.
-      stop_pos = i;
-      break;
-    }
-  }
-  LOG_S(INFO) << absl::StrFormat(
-      "shape coords way:%lu pos:%u->%u id:%lu to %lu", g.ways.at(ge.way_idx).id,
-      start_pos, stop_pos, id_from, id_to);
-  CHECK_NE_S(start_pos, INFU32);
-  CHECK_NE_S(stop_pos, INFU32);
-  CHECK_GT_S(stop_pos, start_pos + 1) << start_pos << ":" << stop_pos;
-
-  NodeBuilder::VNode prevn;
-  CHECK_S(NodeBuilder::FindNode(node_table, id_list.at(start_pos), &prevn))
-      << id_list.at(start_pos);
-  CHECK_EQ_S(prevn.lat.v(), g.nodes.at(gfrom_idx).lat.v());
-  CHECK_EQ_S(prevn.lon.v(), g.nodes.at(gfrom_idx).lon.v());
-
-  double prev_m = 999999999999;
-  int64_t sum_dlat = 0;
-  int64_t sum_dlon = 0;
-  int64_t sum_ddlat = 0;
-  int64_t sum_ddlon = 0;
-  PrevCoord prev(prevn.lat.v(), prevn.lon.v());
-  for (uint32_t i = start_pos + 1; i < stop_pos; ++i) {
-    NodeBuilder::VNode node;
-    CHECK_S(NodeBuilder::FindNode(node_table, id_list.at(i), &node))
-        << id_list.at(i);
-
-    int64_t dlat = node.lat.v64() - prev.lat;
-    int64_t ddlat = dlat - prev.predict_new_dlat();
-
-    int64_t dlon = node.lon.v64() - prev.lon;
-    int64_t ddlon = dlon - prev.predict_new_dlon(dlat);
-    int64_t ddlon_old = dlon - prev.dlon;
-
-    double m = (dlon != 0)
-                   ? static_cast<double>(dlat) / static_cast<double>(dlon)
-                   : 9999.9999;
-
-    LOG_S(INFO) << absl::StrFormat(
-        "shape pos:%3u dlat:%4ld dlon:%4ld ddlat:%4ld ddlon:%4ld "
-        "ddlon-old:%4ld m:%.4f %s",
-        i, dlat, dlon, ddlat, ddlon, ddlon_old, m,
-        RelativeDifference(m, prev_m) < 0.001 ? "equal" : "");
-
-    sum_dlat += std::abs(dlat);
-    sum_dlon += std::abs(dlon);
-    sum_ddlat += std::abs(ddlat);
-    sum_ddlon += std::abs(ddlon);
-
-    prev.push_new(node.lat.v(), node.lon.v());
-    prev_m = m;
-  }
-
-  int64_t sum_d = sum_dlat + sum_dlon;
-  int64_t sum_dd = sum_ddlat + sum_ddlon;
-
-  LOG_S(INFO) << absl::StrFormat(
-      "shape sums %s len:%ld dlat:%ld dlon:%ld ddlat:%ld ddlon:%ld",
-      sum_dd < sum_d ? "+++" : (sum_dd > sum_d ? "---" : "==="),
-      stop_pos - start_pos - 1, sum_dlat, sum_dlon, sum_ddlat, sum_ddlon);
-
-  return {};
-}
-#endif
-
-void WriteShapeCoords(const Graph& g, const DataBlockTable& node_table,
-                      const TmpClusterInfo& tci, MMCluster* mmcluster,
-                      int64_t global_object_offset, int fd) {
-  // LOG_S(INFO) << "HH0";
-  WriteBuff buff;
-  for (uint32_t cnode_idx = 0; cnode_idx < tci.mm_nodes.size(); ++cnode_idx) {
-    const uint32_t gnode_idx = tci.cnode_to_gnode.at(cnode_idx);
-    const GNode& gnode = g.nodes.at(gnode_idx);
-
-    for (uint32_t cedge_idx : cnode_edge_indices(tci, cnode_idx)) {
-      if (!tci.cedge_has_shape_coords.at(cedge_idx)) {
-        // Push "0" to bitset.
-        // LOG_S(INFO) << "HH1";
-        continue;
-      }
-      if (tci.cedge_has_shape_coords_at_reverse_edge.at(cedge_idx)) {
-        // Push "14" to bitset.
-        // LOG_S(INFO) << "HH2";
-        continue;
-      }
-      // LOG_S(INFO) << "HH3";
-      const uint32_t gedge_idx =
-          gnode.edges_start_pos + tci.cedge_to_gedge_offset.at(cedge_idx);
-      const GEdge& ge = g.edges.at(gedge_idx);
-      // const GNode& to_gnode = g.nodes.at(ge.target_idx);
-
-      std::vector<MMLatLon> v =
-          GetShapeCoordsFromGraph(g, node_table, gnode_idx, ge, &buff);
-    }
-  }
-  LOG_S(INFO) << absl::StrFormat(
-      "Cluster %i size of shape cords buff:%.3f kb", tci.cluster_id,
-      (tci.cedge_to_gedge_offset.size() / 2.0 + buff.used()) / 1000.0);
-}
-
-void WriteMMClusterExpandedPart(const Graph& g,
-                                const DataBlockTable& node_table,
-                                const TmpClusterInfo& tci, MMCluster* mmcluster,
+void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
                                 const int64_t global_object_offset, int fd) {
-  /*
-  mmcluster->cluster_id = tci.cluster_id;
-  ComputeClusterNodeNumbers(tci, mmcluster);
-  mmcluster->bounding_rect = tci.mm_bounding_rect;
-  */
-
   LOG_S(INFO) << absl::StrFormat(
       "Write cl:%u ic:%llu og:%llu n:%llu e:%llu w:%llu wsa:%llu tc:%llu "
       "ctrs:%llu",
@@ -1400,17 +1539,24 @@ void WriteMMClusterExpandedPart(const Graph& g,
         fd, legs);
   }
 
-  WriteShapeCoords(g, node_table, tci, mmcluster, global_object_offset, fd);
+  mmcluster->edge_shape_coords.WriteDataBlob(
+      "edge_shape_coords",
+      global_object_offset + offsetof(MMCluster, edge_shape_coords), fd,
+      tci.cedge_shape_coord_length, tci.cedge_has_shape_coords_at_reverse_edge,
+      tci.shape_coords_arr);
 }
+
+}  // namespace
 
 // Convert the monolithic graph to a list of clusters and store them in a
 // memory mapped file.
 // Note that 'node_table' contains - in a compressed way - all node coordinates
 // of nodes referenced by ways. This is needed for shape coordinates.
 void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
-                        const std::string& path, bool check_mmgraph = false) {
+                        const std::string& mm_path, int n_threads = 4,
+                        bool check_mmgraph = false) {
   FUNC_TIMER();
-  int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+  int fd = ::open(mm_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) FileAbortOnError("open");
 
   // Write zeroed data for header, bounding rects and clusters.
@@ -1436,12 +1582,15 @@ void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
   CollectClusterNodes(g, &tmp_cluster_infos);
   CHECK_EQ_S(g.clusters.size(), tmp_cluster_infos.size());
 
+  // Create input data.
+  ComputeTmpClusterInfos(g, node_table, n_threads, &tmp_cluster_infos);
+
   LogMemoryUsage();
 
   // Hybrid Cluster Data
   LOG_S(INFO) << "Start WriteMMClusterHybridPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
-    FillTmpClusterInfo(g, &tci);
+    // FillTmpClusterInfo(g, node_table, &tci);
     WriteMMClusterHybridPart(
         tci, &clusters.at(tci.cluster_id),
         // global file offset of this MMCluster object.
@@ -1454,7 +1603,7 @@ void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
   LOG_S(INFO) << "Start WriteMMClusterExpandedPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
     WriteMMClusterExpandedPart(
-        g, node_table, tci, &clusters.at(tci.cluster_id),
+        tci, &clusters.at(tci.cluster_id),
         // global file offset of this MMCluster object.
         clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)), fd);
 #if 0
@@ -1489,6 +1638,6 @@ void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
   if (::close(fd) != 0) FileAbortOnError("close");
 
   if (check_mmgraph) {
-    CheckMMGraph(path, g, tmp_cluster_infos);
+    CheckMMGraph(g, mm_path, tmp_cluster_infos, n_threads);
   }
 }

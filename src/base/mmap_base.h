@@ -12,6 +12,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "base/deg_coord.h"
+#include "base/encode_coords.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/graph_def.h"
@@ -24,10 +25,12 @@
 // C-style) structs into files and want to read them across platforms.
 static_assert(std::endian::native == std::endian::little);
 
+#if 0
 struct MMLatLon {
   DegE6 lat;
   DegE6 lon;
 };
+#endif
 
 template <typename T>
 size_t VectorDataSizeInBytes(const std::vector<T>& v) {
@@ -554,29 +557,88 @@ struct MMGroupedOSMIds {
 };
 CHECK_IS_MM_OK(MMGroupedOSMIds);
 
-constexpr size_t kShapeCoordsGroupSize = 64;
+// constexpr size_t kShapeCoordsGroupSize = 64;
 struct MMShapeCoords {
  public:
+  struct Result {
+    std::vector<MMLatLon> latlon;
+    bool use_reverse_edge;  // When true then search at reverse edge.
+  };
+
 #if 0
-  int64_t at(uint32_t pos) const {
-    CHECK_LT_S(pos, num__);
-    size_t gidx = pos / kOSMIdsGroupSize;
-    const IdGroup& group = mmgroups__.at(gidx);
-    int64_t prev_id = group.first_id;
-    uint32_t skip = pos % kOSMIdsGroupSize;
-    uint32_t cnt = 0;
-    const uint8_t* ptr = ABS_BLOB_PTR(this, group.relative_blob_offset__);
-    // const uint8_t* ptr = base_ptr + (mmgroups__.end_offset() +
-    // group.blob_offset);
-    while (skip > 0) {
-      skip--;
-      int64_t id;
-      cnt += DeltaDecodeInt64(ptr + cnt, prev_id, &id);
-      prev_id = id;
+  enum EmptyReason {Empty = 1, UseReverseEdge = 2, NoVal = 3};
+
+  // Check if an entry has an empty shape coord list and return true if so,
+  // false if the list is non-empty.
+  // 'reason': If the function returns true, than this is the reason (unset
+  //           otherwise).
+  //
+  // Note: The test for emptiness is faster then retrieving empty lists with
+  // 'get()', because you don't have to provide base-latlon.
+  bool is_empty(uint32_t edge_idx, EmptyReason* reason) {
+    CHECK_LT_S(edge_idx, num__);
+    size_t gidx = edge_idx / kShapeCoordsGroupSize;
+    const CoordGroup& group = mmgroups__.at(gidx);
+    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    if (hval == 0 || hval == CoordGroup::STORED_AT_REVERSE_EDGE) {
+      *reason = hval == 0 ? Empty : CoordGroup::STORED_AT_REVERSE_EDGE;
+      return true;
     }
-    return prev_id;
+    *reason = NoVal;
+    return false;
   }
 #endif
+
+  // Gets the list of shape coordinates (excluding start and end node) for
+  // edge 'edge_idx'.
+  // 'base':       The latlon of the start node of the edge 'edge_idx'.
+  // 'edge_idx':   Edge we want to get the shape coordinates from.
+  // 'res':        Result of the operation.
+  // If res->use_reverse_edge is true, then the latlon from the reverse edge has
+  // to be retrieved.
+  // Otherwise, res->latlon is either empty or contains the list of shadow
+  // coordinates without start/end nodes.
+  void get(const MMLatLon base, uint32_t edge_idx, Result* res) const {
+    CHECK_LT_S(edge_idx, num__);
+    size_t gidx = edge_idx / kShapeCoordsGroupSize;
+    const CoordGroup& group = mmgroups__.at(gidx);
+    res->latlon.clear();
+    {
+      const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+      res->use_reverse_edge = (hval == CoordGroup::STORED_AT_REVERSE_EDGE);
+      if (res->use_reverse_edge || hval == 0) {
+        return;
+      }
+    }
+
+    // Skip stuff.
+    uint32_t cnt = 0;
+    const uint8_t* ptr = ABS_BLOB_PTR(this, group.relative_blob_offset__);
+    uint32_t skip = edge_idx % kShapeCoordsGroupSize;
+    for (uint32_t off = 0; off < skip; ++off) {
+      uint8_t header = group.GetHeaderVal(off);
+      if (header == 0 || header == CoordGroup::STORED_AT_REVERSE_EDGE) {
+        continue;
+      }
+      uint32_t num_coords = header;
+      if (header == CoordGroup::LENGTH_GREATER_EQUAL_14) {
+        cnt += DecodeUInt(ptr + cnt, &num_coords);
+        num_coords += 14;
+      }
+      cnt += DecodeShapeCoords(ptr + cnt, num_coords, {DegE6(0), DegE6(0)},
+                               &res->latlon);
+    }
+
+    // Now read the data.
+    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    CHECK_S(hval != 0 && hval != CoordGroup::STORED_AT_REVERSE_EDGE) << hval;
+    uint32_t num_coords = hval;
+    if (hval == CoordGroup::LENGTH_GREATER_EQUAL_14) {
+      cnt += DecodeUInt(ptr + cnt, &num_coords);
+      num_coords += 14;
+    }
+    DecodeShapeCoords(ptr + cnt, num_coords, base, &res->latlon);
+  }
 
   // The number of ids.
   uint64_t size() const { return num__; }
@@ -585,19 +647,49 @@ struct MMShapeCoords {
   }
 
  private:
+  static constexpr size_t kShapeCoordsGroupSize = 64;
   struct CoordGroup {
-    // 64 x 4-bit set.
+    // <kShapeCoordsGroupSize> x 4-bit.
     // For each edge we store a 4-bit value.
-    //   0-13: number of coord pairs stored
-    //   14:   coords stored at reverse edge.
-    //   15:   length > 13, stored in-stream.
-    uint64_t arr[4];
+    //   0-13: number of coordinate pairs (excluding start/end).
+    //   14:   length > 13, stored in-stream.
+    //   15:   coords stored at reverse edge.
+    enum { LENGTH_GREATER_EQUAL_14 = 14, STORED_AT_REVERSE_EDGE = 15 };
+    uint8_t header_arr[32] = {0};
     // Offset from the start of MMShapeCoords object to the start of the
     // data for this group.
     int64_t relative_blob_offset__;
+
+    uint8_t GetHeaderVal(uint8_t offset) const {
+      CHECK_LE_S(offset, kShapeCoordsGroupSize);
+      CHECK_LT_S(offset / 2, sizeof(header_arr));
+      uint8_t val = header_arr[offset / 2];
+      if (offset & 1) {
+        return val & 15u;
+      } else {
+        return val >> 4;
+      }
+    }
+
+    // Set a value at 'offset', which is [0..kShapeCoordsGroupSize].
+    // Each value is at most 4 bits.
+    void SetHeaderVal(uint8_t offset, uint8_t v) {
+      CHECK_LE_S(offset, kShapeCoordsGroupSize);
+      CHECK_LE_S(v, 15u);
+      uint32_t p = offset / 2;
+      CHECK_LT_S(p, sizeof(header_arr));
+      if (offset & 1) {
+        // Set low bits;
+        header_arr[p] = v | (header_arr[p] & ~(15u));
+      } else {
+        // Set high bits;
+        header_arr[p] = (v << 4) | (header_arr[p] & ~(15u << 4));
+      }
+    }
   };
 
-  // Number of Ids stored in total.
+  // Number of entries that store information about a list of shape coords. This
+  // equals the number of edges in the cluster.
   uint32_t num__;
   uint32_t blob_size_in_bytes__;
   MMVec64<CoordGroup> mmgroups__;
@@ -606,55 +698,68 @@ struct MMShapeCoords {
  public:
   MMShapeCoords() : mmgroups__(){};
 
-  void EncodeShapeCoordGroup(const std::span<uint16_t>& length,
-                             const std::span<bool>& use_reverse_edge,
-                             const std::span<MMLatLon>& latlon,
-                             std::vector<uint8_t>* header_bits,
-                             WriteBuff* buff);
-
+  // 'length':           Dim=#edges. length of latlon span in 'latlon'. Includes
+  //                     the start and end node of the edge.
+  // 'use_reverse_edge': Dim=#edges. true if the shape coords ate the reverse
+  //                      edge should be used. 'length' must be 0.
+  // 'latlon':           Coordinates, consecutive spans of 'length' for each
+  //                     edge.
   void WriteDataBlob(const std::string& name, int64_t global_object_offset,
-                     const std::vector<MMLatLon>& latlon, int fd,
-                     const std::vector<uint16_t>& length,
-                     const std::vector<bool>& use_reverse_edge) {
-    ;
-  }
-
-#if 0
-  // Initialise the memory mapped vector with the data from 'ids'.
-  // 'global_object_offset' if the global offset of the object this method is
-  // called from.
-  void WriteDataBlob(const std::string& name, int64_t global_object_offset,
-                     int fd, const std::vector<int64_t>& ids) {
-    num__ = ids.size();
+                     int fd, const std::vector<uint16_t>& length,
+                     const std::vector<bool>& use_reverse_edge,
+                     const std::vector<MMLatLon>& latlon) {
+    CHECK_EQ_S(length.size(), use_reverse_edge.size());
 
     // Create the groups vector.
-    uint32_t num_groups = (num__ + kOSMIdsGroupSize - 1) / kOSMIdsGroupSize;
-    std::vector<MMGroupedOSMIds::IdGroup> groups(num_groups, {0});
+    num__ = length.size();
+    uint32_t num_groups =
+        (num__ + kShapeCoordsGroupSize - 1) / kShapeCoordsGroupSize;
+    std::vector<CoordGroup> groups(num_groups, {0});
 
-    // Compute the delta encodings for each individual group and store the
-    // deltas in one big buffer, keeping the start_id and offset for each
-    // group in the mmgroups__ vector.
-    WriteBuff buff;
+    // Compute the encodings for each individual sequence of coordinates and put
+    // the all in the same write buffer, remembering the relative start position
+    // for each group.
     const int64_t abs_blobs_offset = GetFileSize(fd);
+    WriteBuff buff;
+    size_t coord_pos = 0;
     for (uint32_t gidx = 0; gidx < groups.size(); ++gidx) {
-      MMGroupedOSMIds::IdGroup& group = groups.at(gidx);
-      uint32_t first_pos = gidx * kOSMIdsGroupSize;
-      int64_t prev_id = ids.at(first_pos);
-      // CHECK_LT_S(std::llabs(prev_id), 1ll << (kOSMIdsIdBits - 1));
-      // CHECK_LT_S(buff.used(), 1ull << kOSMIdsBlobOffsetBits);
-      group.first_id = prev_id;
+      CoordGroup& group = groups.at(gidx);
+      uint32_t first_pos = gidx * kShapeCoordsGroupSize;
       group.relative_blob_offset__ =
           abs_blobs_offset + buff.used() - global_object_offset;
-      for (uint32_t pos = first_pos + 1;
-           pos < std::min(first_pos + kOSMIdsGroupSize, ids.size()); ++pos) {
-        // Push delta.
-        int64_t id = ids.at(pos);
-        DeltaEncodeInt64(prev_id, id, &buff);
-        prev_id = id;
+      for (uint32_t offset = 0; offset < kShapeCoordsGroupSize; ++offset) {
+        const uint32_t pos = first_pos + offset;
+        if (pos >= length.size()) {
+          break;
+        }
+        if (use_reverse_edge.at(pos)) {
+          CHECK_EQ_S(length.at(pos), 0);
+          group.SetHeaderVal(offset, CoordGroup::STORED_AT_REVERSE_EDGE);
+        } else if (length.at(pos) == 0) {
+          group.SetHeaderVal(offset, 0);
+        } else {
+          CHECK_GT_S(length.at(pos), 2) << length.at(pos);
+          // Length after removing start/end node.
+          const uint16_t naked_length = length.at(pos) - 2;
+          if (naked_length < 14) {
+            group.SetHeaderVal(offset, naked_length);
+          } else {
+            CHECK_GE_S(naked_length, 14);
+            group.SetHeaderVal(offset, CoordGroup::LENGTH_GREATER_EQUAL_14);
+            EncodeUInt(naked_length - 14, &buff);  // store length in-stream.
+          }
+          EncodeShapeCoords(latlon.at(coord_pos),
+                            std::span<const MMLatLon>(&latlon.at(coord_pos + 1),
+                                                      naked_length),
+                            &buff);
+        }
+
+        coord_pos += length.at(pos);
       }
     }
+    CHECK_EQ_S(coord_pos, latlon.size());
 
-    // Write blob containing the deltas
+    // Write blob containing coord deltas
     CHECK_EQ_S(abs_blobs_offset, GetFileSize(fd));
     AppendData(name + ":blob", fd, buff.base_ptr(), buff.used());
     blob_size_in_bytes__ = buff.used();
@@ -664,6 +769,5 @@ struct MMShapeCoords {
         name, global_object_offset + offsetof(MMShapeCoords, mmgroups__), fd,
         groups);
   }
-#endif
 };
 CHECK_IS_MM_OK(MMShapeCoords);

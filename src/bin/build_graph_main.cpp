@@ -801,7 +801,8 @@ int main(int argc, char* argv[]) {
   }
 #endif
 
-  WriteGraphToMMFile(g, *(meta.node_table), "/tmp/mmgraph.file", check_mmgraph);
+  WriteGraphToMMFile(g, *(meta.node_table), "/tmp/mmgraph.file", opt.n_threads,
+                     check_mmgraph);
   {
     int fd = ::open("/tmp/mmgraph.file", O_RDWR | O_CLOEXEC, 0644);
     if (fd < 0) FileAbortOnError("open");
@@ -817,7 +818,7 @@ int main(int argc, char* argv[]) {
     ::close(fd);
     const MMGraph& mmg = *((MMGraph*)ptr);
     MMGraph* mmgptr = (MMGraph*)ptr;
-    CHECK_EQ_S(mmg.magic, kMagic);
+    CHECK_EQ_S(mmg.magic, kMMMagic);
 
     ComputeShortestMMPaths(opt.n_threads, mmgptr);
 

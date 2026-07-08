@@ -5,12 +5,13 @@
 #include <cmath>
 
 #include "base/deg_coord.h"
+#include "base/encode_coords.h"
 #include "base/top_n.h"
 #include "base/util.h"
 
 void TestTopNGreater() {
   FUNC_TIMER();
-  TopN<int, 5, /*keep_greater*/true> topn;
+  TopN<int, 5, /*keep_greater*/ true> topn;
   std::vector<int> items = {1, 6, 3, 9, 3, 7, 1, 5, 9, 34, 2, 8};
   for (int val : items) {
     topn.Add(val);
@@ -28,7 +29,7 @@ void TestTopNGreater() {
 
 void TestTopNSmaller() {
   FUNC_TIMER();
-  TopN<int, 5, /*keep_greater*/false> topn;
+  TopN<int, 5, /*keep_greater*/ false> topn;
   std::vector<int> items = {1, 6, 3, 9, 3, 7, 1, 5, 9, 34, 2, 8};
   for (int val : items) {
     topn.Add(val);
@@ -52,13 +53,45 @@ void TestDegE6() {
   DegE6 d(5.0f);
   DegE6 e(5.0);
 
-  CHECK_EQ_S(a.v(), 5);;
+  CHECK_EQ_S(a.v(), 5);
+  ;
   CHECK_EQ_S(b.v(), 5);
   CHECK_EQ_S(c.v(), 5);
   CHECK_EQ_S(d.v(), 5 * DegE6::MulFactor());
   CHECK_EQ_S(e.v(), 5 * DegE6::MulFactor());
   CHECK_EQ_S(d.AsFloat(), 5.0f);
   CHECK_EQ_S(e.AsDouble(), 5.0);
+}
+
+void TestShapeCoords() {
+  FUNC_TIMER();
+
+  uint64_t rand = 13;
+  std::vector<MMLatLon> latlon;
+  std::vector<MMLatLon> latlon2;
+
+  for (size_t k = 0; k < 200; ++k) {
+    const MMLatLon base(DegE6(PseudoRandomInt32(&rand)),
+                        DegE6(PseudoRandomInt32(&rand)));
+    const size_t num = PseudoRandomUInt64(&rand) % 17;
+    for (size_t i = 0; i < num; ++i) {
+      latlon.emplace_back(DegE6(PseudoRandomInt32(&rand)),
+                          DegE6(PseudoRandomInt32(&rand)));
+    }
+    WriteBuff buff;
+    EncodeShapeCoords(base, latlon, &buff);
+    uint32_t cnt =
+        DecodeShapeCoords(buff.base_ptr(), latlon.size(), base, &latlon2);
+    CHECK_EQ_S(cnt, buff.used());
+    CHECK_EQ_S(latlon.size(), latlon2.size());
+    for (size_t i = 0; i < latlon.size(); ++i) {
+      // LOG_S(INFO) << absl::StrFormat("%lu: lat:%ld lon:%ld", i,
+      //                                latlon.at(i).lat.v64(),
+      //                                latlon.at(i).lon.v64());
+      CHECK_EQ_S(latlon.at(i).lat.v64(), latlon2.at(i).lat.v64()) << i;
+      CHECK_EQ_S(latlon.at(i).lon.v64(), latlon2.at(i).lon.v64()) << i;
+    }
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -70,6 +103,7 @@ int main(int argc, char* argv[]) {
   TestTopNGreater();
   TestTopNSmaller();
   TestDegE6();
+  TestShapeCoords();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

@@ -16,7 +16,7 @@
 
 constexpr uint64_t kMMMagic = 7715514337782280064ull;
 constexpr uint32_t kMMVersionMajor = 0;
-constexpr uint32_t kMMVersionMinor = 6;
+constexpr uint32_t kMMVersionMinor = 7;
 
 // Stores basic node data in an uint64_t.
 struct MMNode {
@@ -202,6 +202,8 @@ struct MMCluster {
   // *** Debugging.
   MMGroupedOSMIds grouped_node_to_osm_id;
   MMGroupedOSMIds grouped_way_to_osm_id;
+
+  MMShapeCoords edge_shape_coords;
 
   // Helper functions.
   uint32_t get_path_metric(uint32_t in_edge_pos, uint32_t out_edge_pos) const {
@@ -405,6 +407,24 @@ struct MMCluster {
     return out_edges.at(pos);
   }
 
+  std::vector<MMLatLon> get_shape_coords(uint32_t from_node_idx,
+                                              uint32_t edge_idx) {
+    MMShapeCoords::Result res;
+    edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
+    if (res.use_reverse_edge) {
+      uint32_t rev_edge_idx =
+          find_edge_idx(get_edge(edge_idx).target_idx(), from_node_idx,
+                        edge_to_way.at(edge_idx));
+      // The edge *must* exist.
+      CHECK_NE_S(rev_edge_idx, INFU32);
+      edge_shape_coords.get(node_to_latlon(get_edge(edge_idx).target_idx()),
+                            edge_idx, &res);
+      // The list *must* be non-empty.
+      CHECK_S(!res.latlon.empty());
+    }
+    return res.latlon;
+  }
+
   // Return the "FullEdge" debug string for this edge.
   std::string DebugStringEdge(uint32_t from_idx, uint32_t edge_idx) const;
 };
@@ -559,6 +579,7 @@ struct MMGraph {
     DO_STATS_FOR_CLUSTER_ATTR(streetnames_table, total);
     DO_STATS_FOR_CLUSTER_ATTR(grouped_node_to_osm_id, total);
     DO_STATS_FOR_CLUSTER_ATTR(grouped_way_to_osm_id, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edge_shape_coords, total);
     RAW_LOG_F(INFO, std::string(115, '-').c_str());
     RAW_LOG_F(INFO, "Total %6lu clusters %63lu %20lu (%5.2f%%)",
               clusters.size(), total / clusters.size(), total,
@@ -712,11 +733,6 @@ inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(
   }
   return res;
 }
-
-// TODO: add scope.
-constexpr uint64_t kMagic = 7715514337782280064ull;
-constexpr uint32_t kVersionMajor = 0;
-constexpr uint32_t kVersionMinor = 4;
 
 struct MMClusterWrapper {
   const MMCluster& mc;
