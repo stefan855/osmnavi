@@ -565,43 +565,20 @@ struct MMShapeCoords {
     bool use_reverse_edge;  // When true then search at reverse edge.
   };
 
-#if 0
-  enum EmptyReason {Empty = 1, UseReverseEdge = 2, NoVal = 3};
-
-  // Check if an entry has an empty shape coord list and return true if so,
-  // false if the list is non-empty.
-  // 'reason': If the function returns true, than this is the reason (unset
-  //           otherwise).
-  //
-  // Note: The test for emptiness is faster then retrieving empty lists with
-  // 'get()', because you don't have to provide base-latlon.
-  bool is_empty(uint32_t edge_idx, EmptyReason* reason) {
-    CHECK_LT_S(edge_idx, num__);
-    size_t gidx = edge_idx / kShapeCoordsGroupSize;
-    const CoordGroup& group = mmgroups__.at(gidx);
-    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
-    if (hval == 0 || hval == CoordGroup::STORED_AT_REVERSE_EDGE) {
-      *reason = hval == 0 ? Empty : CoordGroup::STORED_AT_REVERSE_EDGE;
-      return true;
-    }
-    *reason = NoVal;
-    return false;
-  }
-#endif
-
   // Gets the list of shape coordinates (excluding start and end node) for
   // edge 'edge_idx'.
   // 'base':       The latlon of the start node of the edge 'edge_idx'.
   // 'edge_idx':   Edge we want to get the shape coordinates from.
   // 'res':        Result of the operation.
   // If res->use_reverse_edge is true, then the latlon from the reverse edge has
-  // to be retrieved.
+  // to be retrieved with an additional call.
   // Otherwise, res->latlon is either empty or contains the list of shadow
   // coordinates without start/end nodes.
+  //
+  // Note: Use MMCluster::get_shape_coords() instead of the functions defined
+  // here, it has a much simpler API.
   void get(const MMLatLon base, uint32_t edge_idx, Result* res) const {
-    CHECK_LT_S(edge_idx, num__);
-    size_t gidx = edge_idx / kShapeCoordsGroupSize;
-    const CoordGroup& group = mmgroups__.at(gidx);
+    const CoordGroup& group = GetGroup(edge_idx);
     res->latlon.clear();
     {
       const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
@@ -638,6 +615,26 @@ struct MMShapeCoords {
       num_coords += 14;
     }
     DecodeShapeCoords(ptr + cnt, num_coords, base, &res->latlon);
+  }
+
+  // Check if an entry has an empty shape coord list and return true if so,
+  // false if the list is non-empty.
+  // 'use_reverse_edge': Tells you to retrieve the shape coords from the reverse
+  // edge.
+  //
+  // Note: Use MMCluster::get_shape_coords() instead of the functions defined
+  // here, it has a much simpler API.
+  bool is_empty(uint32_t edge_idx, bool* use_reverse_edge) const {
+    const CoordGroup& group = GetGroup(edge_idx);
+    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    *use_reverse_edge = (hval == CoordGroup::STORED_AT_REVERSE_EDGE);
+    return (hval == 0 || hval == CoordGroup::STORED_AT_REVERSE_EDGE);
+  }
+
+  bool has_coords(uint32_t edge_idx) const {
+    const CoordGroup& group = GetGroup(edge_idx);
+    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    return hval != 0;
   }
 
   // The number of ids.
@@ -687,6 +684,12 @@ struct MMShapeCoords {
       }
     }
   };
+
+  const CoordGroup& GetGroup(uint32_t edge_idx) const {
+    CHECK_LT_S(edge_idx, num__);
+    size_t gidx = edge_idx / kShapeCoordsGroupSize;
+    return mmgroups__.at(gidx);
+  }
 
   // Number of entries that store information about a list of shape coords. This
   // equals the number of edges in the cluster.

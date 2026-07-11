@@ -540,7 +540,7 @@ inline std::vector<NodeBuilder::VNode> GetCoords(
 // straight line. For this, for each sequence of three points, the perpendicular
 // distance of the middle point is computed, and also the angle
 void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
-  const bool debug = false;
+  static constexpr bool debug = false;
   for (uint32_t pos = 0; pos < coords->size() - 2;) {
     NodeBuilder::VNode A = coords->at(pos);
     NodeBuilder::VNode M = coords->at(pos + 1);
@@ -663,7 +663,7 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
         CHECK_GT_S(coords.size(), 2);
         SimplifyPolyline(&coords);
         if (coords.size() <= 2) {
-          // Shape data is empty.
+          // After simplification, shape data is empty.
           CHECK_EQ_S(coords.size(), 2);
           tci->cedge_shape_coord_length.push_back(0);
           // Keep the inverted edge the check use_reverse afterwards.
@@ -698,6 +698,7 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
         if (tci->cedge_has_shape_coords_at_reverse_edge.at(rev_cedge_idx)) {
           CHECK_EQ_S(tci->cedge_shape_coord_length.at(rev_cedge_idx), 0);
           tci->cedge_has_shape_coords_at_reverse_edge.at(rev_cedge_idx) = false;
+          // LOG_S(INFO) << "mark reverse edge as false after simplification";
         }
       }
     }
@@ -930,6 +931,7 @@ void CheckShapeCoords(const TmpClusterInfo& tci, const MMCluster& mc) {
         CHECK_EQ_S(res.use_reverse_edge,
                    tci.cedge_has_shape_coords_at_reverse_edge.at(edge_idx));
       } else {
+        CHECK_S(!res.use_reverse_edge);
         CHECK_EQ_S(res.latlon.size() + 2,
                    tci.cedge_shape_coord_length.at(edge_idx));
         for (uint32_t i = 0; i < res.latlon.size(); ++i) {
@@ -940,7 +942,6 @@ void CheckShapeCoords(const TmpClusterInfo& tci, const MMCluster& mc) {
         }
         coord_pos += tci.cedge_shape_coord_length.at(edge_idx);
       }
-
     }
   }
 }

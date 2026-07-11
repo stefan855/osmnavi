@@ -31,14 +31,12 @@ void TestDistanceToSegment() {
                                    dist.distance_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    LOG_S(INFO) << absl::StrFormat("T:                  %.8f", dist.t);
     CHECK_DOUBLE_EQ_S(dist.distance_cm, expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 0.5, 0.01)
-    CHECK_DOUBLE_EQ_S(dist.t, 0.5, 0.01)
   }
   {
     constexpr DegE6 lat_p(lat_a.v() - 100), lon_p(lon_a.v() - 100);
-    // We expect negative t and a distance of ~1.4 meters.
+    // We expect a distance of ~1.4 meters.
     constexpr double expected = std::hypot(LonDistanceAtLat(DegE6(100), lat_a),
                                            CmPerLatitudeDegree(DegE6(100)));
 
@@ -48,14 +46,12 @@ void TestDistanceToSegment() {
                                    dist.distance_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    LOG_S(INFO) << absl::StrFormat("T:                  %.8f", dist.t);
     CHECK_DOUBLE_EQ_S(dist.distance_cm, expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 0.0, 0.01)
-    CHECK_LT_S(dist.t, 0.0);
   }
   {
     constexpr DegE6 lat_p(lat_b.v() + 100), lon_p(lon_b.v() + 100);
-    // We expect positive t and a distance of ~1.4 meters.
+    // We expect a distance of ~1.4 meters.
     constexpr double expected = std::hypot(LonDistanceAtLat(DegE6(100), lat_a),
                                            CmPerLatitudeDegree(DegE6(100)));
 
@@ -65,10 +61,8 @@ void TestDistanceToSegment() {
                                    dist.distance_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    LOG_S(INFO) << absl::StrFormat("T:                  %.8f", dist.t);
     CHECK_DOUBLE_EQ_S(dist.distance_cm, expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 1.0, 0.01)
-    CHECK_GT_S(dist.t, 1.0);
   }
 }
 

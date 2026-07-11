@@ -43,7 +43,7 @@ struct EdgePoint {
 };
 
 // A location on the map, defined by one or more edge-points.
-// (lat, lon) if for information only.
+// 'point' if for information only.
 class GeoAnchor {
  public:
   GeoAnchor() : point_({}){};

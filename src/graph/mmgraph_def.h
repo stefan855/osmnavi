@@ -190,8 +190,8 @@ struct MMCluster {
   // Array referenced by entries in complex_turn_restrictions.
   MMVec64<uint32_t> complex_turn_restriction_legs;
 
-  // MMVec64<MMLatLon> node_to_latlon;
   // Store coordinates relative to bounding_rect.min
+  // Use node_to_latlon()/node_to_lat()/node_to_lon() to query.
   MMCompressedUIntVec node_to_rel_lat;
   MMCompressedUIntVec node_to_rel_lon;
 
@@ -309,21 +309,11 @@ struct MMCluster {
   DegE6 node_to_lat(uint32_t node_idx) const {
     return DegE6(bounding_rect.min.lat.v64() +
                  static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
-    /*
-    return static_cast<int32_t>(
-        bounding_rect.min.lat +
-        static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
-    */
   }
 
   DegE6 node_to_lon(uint32_t node_idx) const {
     return DegE6(bounding_rect.min.lon.v64() +
                  static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
-    /*
-    return static_cast<int32_t>(
-        bounding_rect.min.lon +
-        static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
-    */
   }
 
   const std::string_view get_streetname(uint32_t way_idx) const {
@@ -408,21 +398,31 @@ struct MMCluster {
   }
 
   std::vector<MMLatLon> get_shape_coords(uint32_t from_node_idx,
-                                              uint32_t edge_idx) {
-    MMShapeCoords::Result res;
-    edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
-    if (res.use_reverse_edge) {
+                                         uint32_t edge_idx) const {
+    bool use_reverse_edge;
+    if (edge_shape_coords.is_empty(edge_idx, &use_reverse_edge)) {
+      if (!use_reverse_edge) {
+        return {};  // Edge doesn't have shape coords.
+      }
       uint32_t rev_edge_idx =
           find_edge_idx(get_edge(edge_idx).target_idx(), from_node_idx,
                         edge_to_way.at(edge_idx));
       // The edge *must* exist.
       CHECK_NE_S(rev_edge_idx, INFU32);
+      MMShapeCoords::Result res;
       edge_shape_coords.get(node_to_latlon(get_edge(edge_idx).target_idx()),
-                            edge_idx, &res);
+                            rev_edge_idx, &res);
       // The list *must* be non-empty.
       CHECK_S(!res.latlon.empty());
+      CHECK_S(!res.use_reverse_edge);
+      std::reverse(res.latlon.begin(), res.latlon.end());
+      return res.latlon;  // We found shape coords at the reverse edge.
+    } else {
+      MMShapeCoords::Result res;
+      edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
+      CHECK_S(!res.use_reverse_edge);
+      return res.latlon;  // We found shape coords at the normal edge.
     }
-    return res.latlon;
   }
 
   // Return the "FullEdge" debug string for this edge.

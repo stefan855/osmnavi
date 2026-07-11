@@ -99,8 +99,8 @@ WorldPoint TileToWorld(int zoom, int tile_x, int tile_y) {
 
 }  // namespace
 
-struct MMTileData {
-  MMTileData(const MMGraph& mg) : mg(mg) {
+struct MMGraphTileData {
+  MMGraphTileData(const MMGraph& mg) : mg(mg) {
     for (const MMCluster& mc : mg.clusters.span()) {
       const WorldPoint mc_min =
           LatLonToPixelMercator(mc.bounding_rect.min.lat.AsDouble(),
@@ -161,7 +161,7 @@ struct PNGContext {
     colors[BROWN] = gdImageColorAllocate(im, 139, 69, 19);
     colors[GREY] = gdImageColorAllocate(im, 128, 128, 128);
     colors[GBLUE] = gdImageColorAllocate(im, 0, 255, 255);
-    colors[ORANGE] = gdImageColorAllocate(im, 255, 128, 0);
+    colors[ORANGE] = gdImageColorAllocate(im, 255, 165, 0);
     colors[LGREEN] = gdImageColorAllocate(im, 0, 179, 0);
     colors[GREENBL] = gdImageColorAllocate(im, 0, 204, 153);
     colors[LBROWN] = gdImageColorAllocate(im, 181, 101, 29);
@@ -201,7 +201,7 @@ bool edge_select_all(const MMCluster& mc, uint32_t from_idx,
 }
 
 std::string CreatePNGInternal(
-    const MMTileData& d, int zoom, int tile_x, int tile_y,
+    const MMGraphTileData& d, int zoom, int tile_x, int tile_y,
     EdgeColorFunc edge_color_func,
     EdgeSelectFunc edge_select_func = edge_select_all) {
   PNGContext pd(zoom, tile_x, tile_y);
@@ -222,16 +222,16 @@ std::string CreatePNGInternal(
       // beginning and should be overwriting less important edge from the end.
       for (int32_t node_idx = mc.nodes.size() - 1; node_idx >= 0; --node_idx) {
         const MMLatLon latlon0 = mc.node_to_latlon(node_idx);
-        const WorldPoint wp0 = LatLonToPixelMercator(
-            latlon0.lat.AsDouble(), latlon0.lon.AsDouble());
+        const WorldPoint wp0 = LatLonToPixelMercator(latlon0.lat.AsDouble(),
+                                                     latlon0.lon.AsDouble());
         for (uint32_t edge_idx : mc.edge_indices(node_idx)) {
           if (!edge_select_func(mc, node_idx, edge_idx)) {
             continue;
           }
           const MMLatLon latlon1 =
               mc.node_to_latlon(mc.get_edge(edge_idx).target_idx());
-          const WorldPoint wp1 = LatLonToPixelMercator(
-              latlon1.lat.AsDouble(), latlon1.lon.AsDouble());
+          const WorldPoint wp1 = LatLonToPixelMercator(latlon1.lat.AsDouble(),
+                                                       latlon1.lon.AsDouble());
           TwoPoint line{.x0 = wp0.x, .y0 = wp0.y, .x1 = wp1.x, .y1 = wp1.y};
           if (line.x0 > line.x1) {
             std::swap(line.x0, line.x1);
@@ -274,8 +274,10 @@ void test_tiles(double lat, double lon) {
 }
 #endif
 
-std::string CreatePNG(const MMTileData& d, std::string what, int zoom,
-                      int tile_x, int tile_y) {
+std::string CreateMMGraphPNG(const MMGraphTileData& d, std::string what,
+                             int zoom, int tile_x, int tile_y) {
+  LOG_S(INFO) << absl::StrFormat("<%s> zoom:%d tile_x/y:(%d,%d)", what, zoom,
+                                 tile_x, tile_y);
   if (what == "graph_motorcar") {
     return CreatePNGInternal(d, zoom, tile_x, tile_y,
                              [](const MMCluster& mc, uint32_t edge_idx) -> int {
@@ -299,7 +301,7 @@ std::string CreatePNG(const MMTileData& d, std::string what, int zoom,
   } else if (what == "restricted") {
     return CreatePNGInternal(
         d, zoom, tile_x, tile_y,
-        [](const MMCluster& mc, uint32_t edge_idx) -> int { return GBLUE; },
+        [](const MMCluster& mc, uint32_t edge_idx) -> int { return BROWN; },
         [](const MMCluster& mc, uint32_t from_idx, uint32_t edge_idx) -> bool {
           return mc.get_edge(edge_idx).restricted();
         });
@@ -310,10 +312,10 @@ std::string CreatePNG(const MMTileData& d, std::string what, int zoom,
 }
 void DrawLineInternal(PNGContext& pd, const MMLatLon& latlon0,
                       const MMLatLon& latlon1, TileColor line_color) {
-  const WorldPoint wp0 = LatLonToPixelMercator(latlon0.lat.AsDouble(),
-                                               latlon0.lon.AsDouble());
-  const WorldPoint wp1 = LatLonToPixelMercator(latlon1.lat.AsDouble(),
-                                               latlon1.lon.AsDouble());
+  const WorldPoint wp0 =
+      LatLonToPixelMercator(latlon0.lat.AsDouble(), latlon0.lon.AsDouble());
+  const WorldPoint wp1 =
+      LatLonToPixelMercator(latlon1.lat.AsDouble(), latlon1.lon.AsDouble());
   TwoPoint line{.x0 = wp0.x, .y0 = wp0.y, .x1 = wp1.x, .y1 = wp1.y};
   if (line.x0 > line.x1) {
     std::swap(line.x0, line.x1);

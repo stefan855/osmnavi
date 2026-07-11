@@ -16,13 +16,14 @@
 #include "algos/mm_cluster_router.h"
 #include "algos/mm_hybrid_router.h"
 #include "base/argli.h"
+#include "base/deg_coord.h"
 #include "base/lru_cache.h"
 #include "base/thread_pool.h"
 #include "base/util.h"
-#include "httplib.h"
 #include "geometry/closest_edge.h"
 #include "geometry/tiles.h"
 #include "graph/mmgraph_def.h"
+#include "httplib.h"
 
 namespace {
 struct RouteKey {
@@ -100,17 +101,22 @@ std::string EncodeCoordinate(int value) {
   return encoded;
 }
 
-std::string EncodePolyline(const std::vector<CoordinatePair>& coordinates,
-                           int precision = 5) {
+std::string EncodePolyline(const std::vector<MMLatLon>& coordinates) {
+  // constexpr int precision = 5;
   std::string encoded = "";
   int prev_lat = 0;
   int prev_lon = 0;
 
-  const double factor = std::pow(10.0, precision);
+  // const double factor = std::pow(10.0, precision);
 
   for (const auto& coord : coordinates) {
-    int lat = static_cast<int>(std::round(coord.lat * factor));
-    int lon = static_cast<int>(std::round(coord.lon * factor));
+    // int lat = static_cast<int>(std::round(coord.lat * factor));
+    // int lon = static_cast<int>(std::round(coord.lon * factor));
+
+    //  Get a compilation error if DegE6 doesn't have a factor of 10^6 anymore.
+    static_assert(DegE6::MulFactor() == 1'000'000);
+    int lat = (coord.lat.v() + 5) / 10;  // Scale to 10^5.
+    int lon = (coord.lon.v() + 5) / 10;  // Scale to 10^5.
 
     int delta_lat = lat - prev_lat;
     int delta_lon = lon - prev_lon;
@@ -172,12 +178,12 @@ struct JsonResult {
   std::string last_name;
 };
 
-double GetLon(const MMCluster& mc, uint32_t n_idx) {
-  return mc.node_to_lon(n_idx).AsDouble();
+DegE6 GetLon(const MMCluster& mc, uint32_t n_idx) {
+  return mc.node_to_lon(n_idx);
 }
 
-double GetLat(const MMCluster& mc, uint32_t n_idx) {
-  return mc.node_to_lat(n_idx).AsDouble();
+DegE6 GetLat(const MMCluster& mc, uint32_t n_idx) {
+  return mc.node_to_lat(n_idx);
 }
 
 std::string GetEdgeName(const MMCluster& mc, const MMFullEdge& fe) {
@@ -202,31 +208,40 @@ class StepsData {
     const MMFullEdge& fe = res_.full_edges.at(pos);
     const MMCluster& mc = fe.mc(mg);
 
-    double from_lon = GetLon(mc, fe.from_node_idx);
-    double from_lat = GetLat(mc, fe.from_node_idx);
-    double to_lon = GetLon(mc, fe.target_idx(mc));
-    double to_lat = GetLat(mc, fe.target_idx(mc));
+    DegE6 from_lon = GetLon(mc, fe.from_node_idx);
+    DegE6 from_lat = GetLat(mc, fe.from_node_idx);
+    DegE6 to_lon = GetLon(mc, fe.target_idx(mc));
+    DegE6 to_lat = GetLat(mc, fe.target_idx(mc));
     if (pos == 0) {
-      from_lon = res_.start.lon_at_fraction.AsDouble();
-      from_lat = res_.start.lat_at_fraction.AsDouble();
+      from_lon = res_.start.lon_at_fraction;
+      from_lat = res_.start.lat_at_fraction;
     }
     if (pos + 1 == num_steps()) {
-      to_lon = res_.target.lon_at_fraction.AsDouble();
-      to_lat = res_.target.lat_at_fraction.AsDouble();
+      to_lon = res_.target.lon_at_fraction;
+      to_lat = res_.target.lat_at_fraction;
     }
 
-    std::vector<CoordinatePair> coords;
+    std::vector<MMLatLon> coords;
     coords.push_back({.lat = from_lat, .lon = from_lon});
+    // TODO: handle start/end segment.
+    if (pos != 0 && pos + 1 != num_steps()) {
+      const std::vector<MMLatLon> v =
+          mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc));
+      // TODO: Not yet supported by gcc: coords.append_range(v);
+      coords.insert(coords.end(), v.cbegin(), v.cend());
+    }
     coords.push_back({.lat = to_lat, .lon = to_lon});
+
     // convert to seconds.
     const double duration = res_.edge_metric(pos) / 1000.0;
     const double dist = res_.distance_cm(mg, pos) / 100.0;
 
-    nlohmann::json maneuver = {{"bearing_after", 0},
-                               {"bearing_before", 0},
-                               {"location", {from_lon, from_lat}},
-                               {"modifier", "ModifierContinue"},
-                               {"type", (pos == 0 ? "depart" : "continue")}};
+    nlohmann::json maneuver = {
+        {"bearing_after", 0},
+        {"bearing_before", 0},
+        {"location", {from_lon.AsDouble(), from_lat.AsDouble()}},
+        {"modifier", "ModifierContinue"},
+        {"type", (pos == 0 ? "depart" : "continue")}};
 
     nlohmann::json step = {{"geometry", EncodePolyline(coords)},
                            {"maneuver", maneuver},
@@ -242,16 +257,17 @@ class StepsData {
   JsonResult CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
-    float to_lon = res_.target.lon_at_fraction.AsFloat();
-    float to_lat = res_.target.lat_at_fraction.AsFloat();
+    DegE6 to_lon = res_.target.lon_at_fraction;
+    DegE6 to_lat = res_.target.lat_at_fraction;
 
-    std::vector<CoordinatePair> coords;
+    std::vector<MMLatLon> coords;
     coords.push_back({.lat = to_lat, .lon = to_lon});
 
-    nlohmann::json maneuver = {{"bearing_after", 0},
-                               {"bearing_before", 0},
-                               {"location", {to_lon, to_lat}},
-                               {"type", "arrive"}};
+    nlohmann::json maneuver = {
+        {"bearing_after", 0},
+        {"bearing_before", 0},
+        {"location", {to_lon.AsDouble(), to_lat.AsDouble()}},
+        {"type", "arrive"}};
 
     nlohmann::json step = {{"geometry", EncodePolyline(coords)},
                            {"maneuver", maneuver},
@@ -566,15 +582,15 @@ int main(int argc, char* argv[]) {
                             "image/png");
           });
 
-  const MMTileData mm_tile_data(mg);
+  const MMGraphTileData mm_tile_data(mg);
   // Match the request path against a regular expression
   // and extract its captures
   svr.Get(R"(/tiles/([^/]+)/([^/]+)/([^/]+)/([^/]+)\.png)",
           [&mm_tile_data](const httplib::Request& req, httplib::Response& res) {
-            res.set_content(CreatePNG(mm_tile_data, req.matches.str(1),
-                                      atoi(req.matches.str(2).c_str()),
-                                      atoi(req.matches.str(3).c_str()),
-                                      atoi(req.matches.str(4).c_str())),
+            res.set_content(CreateMMGraphPNG(mm_tile_data, req.matches.str(1),
+                                             atoi(req.matches.str(2).c_str()),
+                                             atoi(req.matches.str(3).c_str()),
+                                             atoi(req.matches.str(4).c_str())),
                             "image/png");
           });
 
