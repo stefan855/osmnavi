@@ -22,10 +22,13 @@ inline int64_t calculate_distance(DegE6 lat1, DegE6 lon1, DegE6 lat2,
                       std::atan2(std::sqrt(a), std::sqrt(1.0 - a)));
 }
 
+inline int64_t calculate_distance(MMLatLon ll1, MMLatLon ll2) {
+  return calculate_distance(ll1.lat, ll1.lon, ll2.lat, ll2.lon);
+}
+
 namespace {
 // Length of a segment on a longitude circle in cm, given its size in degrees.
-// This assumes that the earth is a perfect sphere (although it isn't). This is
-// necessary because the calculate_distance() does the same.
+// This assumes that the earth is a perfect sphere (although it isn't).
 inline int64_t length_lat_segment_cm(const DegE6 lat_diff) {
   constexpr double kEarthCircumferenceThroughPoles =
       kEarthRadiusCm * std::numbers::pi * 2;

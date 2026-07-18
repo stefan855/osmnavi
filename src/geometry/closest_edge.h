@@ -4,31 +4,30 @@
 #include "algos/mm_router_defs.h"
 #include "base/top_n.h"
 #include "base/util.h"
-#include "geometry/distance_from_segment.h"
+#include "geometry/distance_to_segment.h"
 #include "graph/mmgraph_def.h"
 
 namespace {
 
 struct ClosestEdge {
   MMFullEdge fe;
-  DistanceToSegment dts;
-#if 0
+  // Distance information for the shape segment, or full edge if no shape coords
+  // are available.
+  DistanceToSegment shape_dts;
+
   // For edges that have shape coordinates, this is the position of the shape
-  // segment in this list.
+  // segment in the extended shape coordinate list.
   //
-  // -1:   segment between start node and the first coordinate pair in shape
-  //       coords.
-  // last: segment between the last coordinate pair and the target node..
-  //
-  // Note that in this case, dts relates to the shape segment, not to the full
-  // edge 'fe'.
-  bool has_shape_edge_pos;
-  int shape_edge_pos;
-#endif
+  // -1:   No shape coordinates exist for this edge.
+  // 0..:  segment starts at this position in the *extended* shape coordinate
+  //       list.
+  int shape_coords_pos;
 
   // "spaceship" operator, automatically defines ==, !=, <, <=, >, >=.
   // auto operator<=>(const ClosestEdge&) const = default;
-  auto operator<=>(const ClosestEdge& other) const { return dts <=> other.dts; }
+  auto operator<=>(const ClosestEdge& other) const {
+    return shape_dts <=> other.shape_dts;
+  }
 };
 
 struct ClusterInfo {
@@ -47,19 +46,19 @@ uint32_t DistanceToBoundingRect(DegE6 lat, DegE6 lon, MMBoundingRect br) {
   const double dist1 =
       FastPointToSegmentDistance(lat, lon, br.min.lat, br.min.lon, br.min.lat,
                                  br.max.lon)
-          .distance_cm;
+          .distance_to_seg_cm;
   const double dist2 =
       FastPointToSegmentDistance(lat, lon, br.min.lat, br.max.lon, br.max.lat,
                                  br.max.lon)
-          .distance_cm;
+          .distance_to_seg_cm;
   const double dist3 =
       FastPointToSegmentDistance(lat, lon, br.max.lat, br.max.lon, br.max.lat,
                                  br.min.lon)
-          .distance_cm;
+          .distance_to_seg_cm;
   const double dist4 =
       FastPointToSegmentDistance(lat, lon, br.max.lat, br.min.lon, br.min.lat,
                                  br.min.lon)
-          .distance_cm;
+          .distance_to_seg_cm;
   uint32_t min_dist =
       static_cast<uint32_t>(std::min({dist1, dist2, dist3, dist4}));
   return min_dist;
@@ -132,95 +131,61 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, DegE6 lat,
   return result;
 }
 
-}  // namespace
-
-inline GeoAnchor FindClosestEdges(const MMGraph& mg, DegE6 lat, DegE6 lon) {
-  LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%.6f, %.6f)",
-                                 lat.AsDouble(), lon.AsDouble());
-  const std::vector<ClusterInfo> good_clusters = FindGoodClusters(mg, lat, lon);
-
-  TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;
-  topn.Add({.fe = {.from_node_idx = INFU32}, .dts = {.distance_cm = INFU31}});
-
-  uint32_t count_scanned = 0;
-  for (const ClusterInfo& ci : good_clusters) {
-    if (topn.top().dts.distance_cm < ci.point_to_border_cm) {
-      /*
-      LOG_S(INFO) << absl::StrFormat(
-          "Ignore cluster %u bc border distance %u > found distance %.f",
-          ci.cluster_id, ci.point_to_border_cm, topn.top().dts.distance_cm);
-          */
-      continue;
-    }
-    count_scanned++;
-    const MMCluster& mc = mg.clusters.at(ci.cluster_id);
-    for (uint32_t n0_idx = 0; n0_idx < mc.nodes.size(); ++n0_idx) {
-      const MMLatLon& n0_coord = mc.node_to_latlon(n0_idx);
-      for (uint32_t e_idx : mc.edge_indices(n0_idx)) {
-        // TODO: Getting consecutive shape coords for all edges can be
-        // made much faster by caching the last read pos in the blob.
-        if (mc.edge_shape_coords.has_coords(e_idx)) {
-          uint32_t n1_idx = mc.get_edge(e_idx).target_idx();
-          // LOG_S(INFO) << absl::StrFormat("Check closest edge %ld %ld %.2fm",
-          //                                mc.get_node_id(n0_idx),
-          //                                mc.get_node_id(n1_idx), 0.0);
-          std::vector<MMLatLon> coords = mc.get_shape_coords(n0_idx, e_idx);
-          CHECK_S(!coords.empty());
-          for (int pos = -1; pos < static_cast<int64_t>(coords.size()); ++pos) {
-            MMLatLon c0 = pos == -1 ? n0_coord : coords.at(pos);
-            MMLatLon c1 = pos + 1 == static_cast<int64_t>(coords.size())
-                              ? mc.node_to_latlon(n1_idx)
-                              : coords.at(pos + 1);
-            const DistanceToSegment d = FastPointToSegmentDistance(
-                lat, lon, c0.lat, c0.lon, c1.lat, c1.lon);
-            // LOG_S(INFO) << absl::StrFormat("  distance %.2fm",
-            //                                d.distance_cm / 100.0);
-            if (!topn.filled() ||
-                d.distance_cm < topn.bottom().dts.distance_cm) {
-              // LOG_S(INFO) << absl::StrFormat(
-              //     "New closest shape edge %ld %ld %.2fm",
-              //     mc.get_node_id(n0_idx), mc.get_node_id(n1_idx),
-              //     d.distance_cm / 100.0);
-
-              topn.Add(
-                  {.fe = {.from_node_idx = n0_idx,
-                          .cluster_id = mc.cluster_id,
-                          .edge_offset = e_idx - mc.edge_start_idx(n0_idx)},
-                   .dts = d});
-            }
-          }
-        } else {
-          uint32_t n1_idx = mc.get_edge(e_idx).target_idx();
-          const MMLatLon& n1_coord = mc.node_to_latlon(n1_idx);
-          const DistanceToSegment d = FastPointToSegmentDistance(
-              lat, lon, n0_coord.lat, n0_coord.lon, n1_coord.lat, n1_coord.lon);
-          if (!topn.filled() || d.distance_cm < topn.bottom().dts.distance_cm) {
-            // LOG_S(INFO) << absl::StrFormat(
-            //     "New closest non-shape edge %ld %ld %.2fm",
-            //     mc.get_node_id(n0_idx), mc.get_node_id(n1_idx),
-            //     d.distance_cm / 100.0);
-            topn.Add({.fe = {.from_node_idx = n0_idx,
-                             .cluster_id = mc.cluster_id,
-                             .edge_offset = e_idx - mc.edge_start_idx(n0_idx)},
-                      .dts = d});
-          }
-        }
-      }
-    }
+// If an edge has shape coordinates, then the ce.shape_dts.to_fraction relates
+// only to the shape segment that was closest.
+//
+// Returns the to_fraction that corresponds to the full length of the edge.
+inline double ComputeGlobalEdgeFraction(const MMGraph& mg,
+                                        const ClosestEdge& ce) {
+  const MMCluster& mc = ce.fe.mc(mg);
+  if (ce.shape_coords_pos < 0) {
+    // LOG_S(INFO) << "AA0 no shape coords";
+    // No shape coordinates, we're already done.
+    return ce.shape_dts.fraction_closest;
   }
-  LOG_S(INFO) << absl::StrFormat("%u of %llu clusters scanned", count_scanned,
-                                 good_clusters.size());
+  CHECK_GE_S(ce.shape_coords_pos, 0);
+  std::vector<MMLatLon> coords = mc.get_shape_coords(
+      ce.fe.from_node_idx, ce.fe.edge_idx(mc), /*extend=*/true);
+  // Last segment must exist.
+  CHECK_LT_S(ce.shape_coords_pos + 1, coords.size());
 
+  const uint32_t total_dist = mc.edge_to_distance.at(ce.fe.edge_idx(mc));
+  uint64_t sum_dist = 0;
+  // LOG_S(INFO) << absl::StrFormat(
+  //     "AA1 shape coords #seg:%lu scpos:%d scfrac:%.2f len:%u",
+  //     coords.size() - 1, ce.shape_coords_pos, ce.shape_dts.fraction_closest,
+  //     total_dist);
+  for (int pos = 0; pos <= ce.shape_coords_pos; ++pos) {
+    uint32_t dist = calculate_distance(coords.at(pos), coords.at(pos + 1));
+    sum_dist += (pos != ce.shape_coords_pos)
+                    ? dist
+                    : std::lround(dist * ce.shape_dts.fraction_closest);
+    // LOG_S(INFO) << absl::StrFormat("AA2 segment %d dist:%u sum%lu", pos,
+    // dist, sum_dist);
+  }
+  // Don't accept shape coordinates with a total distance of 0.
+  CHECK_GT_S(total_dist, 0);
+  // LOG_S(INFO) << absl::StrFormat(
+  //     "AA3 global fraction:%.2f",
+  //     static_cast<double>(sum_dist) / static_cast<double>(total_dist));
+  return static_cast<double>(sum_dist) / static_cast<double>(total_dist);
+}
+
+GeoAnchor ConvertClosestEdgesToAnchor(
+    const MMGraph& mg, DegE6 lat, DegE6 lon,
+    const TopN<ClosestEdge, 1, /*keep_greater=*/false>& topn) {
   GeoAnchor a({lat, lon});
   for (const ClosestEdge& ce : topn.span()) {
     if (ce.fe.from_node_idx != INFU32) {  // Valid entry?
-      a.AddEdge({.distance_cm = static_cast<uint32_t>(ce.dts.distance_cm),
-                 .to_fraction = static_cast<float>(ce.dts.fraction_closest),
-                 .lat_at_fraction = ce.dts.lat_closest,
-                 .lon_at_fraction = ce.dts.lon_closest,
-                 .fe = ce.fe});
-      // LOG_S(INFO) << absl::StrFormat("fraction_closest:%.3f",
-      //                                ce.dts.fraction_closest);
+      a.AddEdge(
+          {.distance_to_seg_cm =
+               static_cast<uint32_t>(ce.shape_dts.distance_to_seg_cm),
+           // .to_fraction =
+           // static_cast<float>(ce.shape_dts.fraction_closest),
+           .to_fraction = static_cast<float>(ComputeGlobalEdgeFraction(mg, ce)),
+           .lat_at_fraction = ce.shape_dts.lat_closest,
+           .lon_at_fraction = ce.shape_dts.lon_closest,
+           .fe = ce.fe});
     }
   }
 
@@ -232,7 +197,7 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, DegE6 lat, DegE6 lon) {
     uint32_t backward_idx = mc.find_edge_idx(
         ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
     if (backward_idx != INFU32) {
-      a.AddEdge({.distance_cm = ep.distance_cm,
+      a.AddEdge({.distance_to_seg_cm = ep.distance_to_seg_cm,
                  .to_fraction = 1.0f - ep.to_fraction,
                  .lat_at_fraction = ep.lat_at_fraction,
                  .lon_at_fraction = ep.lon_at_fraction,
@@ -243,4 +208,136 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, DegE6 lat, DegE6 lon) {
 
   // This returns an entry with valid=false in case there are no results.
   return a;
+}
+
+}  // namespace
+
+inline GeoAnchor FindClosestEdges(const MMGraph& mg, DegE6 lat, DegE6 lon) {
+  LOG_S(INFO) << absl::StrFormat("FindClosestEdges() search for (%.6f, %.6f)",
+                                 lat.AsDouble(), lon.AsDouble());
+  const std::vector<ClusterInfo> good_clusters = FindGoodClusters(mg, lat, lon);
+
+  TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;
+  topn.Add({.fe = {.from_node_idx = INFU32},
+            .shape_dts = {.distance_to_seg_cm = INFU31},
+            .shape_coords_pos = -1});
+
+  uint32_t count_scanned = 0;
+  for (const ClusterInfo& ci : good_clusters) {
+    if (topn.top().shape_dts.distance_to_seg_cm < ci.point_to_border_cm) {
+      /*
+      LOG_S(INFO) << absl::StrFormat(
+          "Ignore cluster %u bc border distance %u > found distance %.f",
+          ci.cluster_id, ci.point_to_border_cm,
+      topn.top().shape_dts.distance_to_seg_cm);
+          */
+      continue;
+    }
+    count_scanned++;
+    const MMCluster& mc = mg.clusters.at(ci.cluster_id);
+    for (uint32_t n0_idx = 0; n0_idx < mc.nodes.size(); ++n0_idx) {
+      const MMLatLon& n0_coord = mc.node_to_latlon(n0_idx);
+      for (uint32_t e_idx : mc.edge_indices(n0_idx)) {
+        if (mc.edge_shape_coords.has_coords(e_idx)) {
+          // ======== Shape Coords.
+          //
+          uint32_t n1_idx = mc.get_edge(e_idx).target_idx();
+          // LOG_S(INFO) << absl::StrFormat("Check closest edge %ld %ld %.2fm",
+          //                                mc.get_node_id(n0_idx),
+          //                                mc.get_node_id(n1_idx), 0.0);
+          // TODO: Getting consecutive shape coords for all edges can be
+          // made much faster by caching the last read pos in the blob.
+          std::vector<MMLatLon> coords = mc.get_shape_coords(n0_idx, e_idx);
+          CHECK_S(!coords.empty());
+          for (int pos = -1; pos < static_cast<int64_t>(coords.size()); ++pos) {
+            MMLatLon c0 = pos == -1 ? n0_coord : coords.at(pos);
+            MMLatLon c1 = pos + 1 == static_cast<int64_t>(coords.size())
+                              ? mc.node_to_latlon(n1_idx)
+                              : coords.at(pos + 1);
+            const DistanceToSegment d = FastPointToSegmentDistance(
+                lat, lon, c0.lat, c0.lon, c1.lat, c1.lon);
+            // LOG_S(INFO) << absl::StrFormat("  distance %.2fm",
+            //                                d.distance_to_seg_cm / 100.0);
+            if (!topn.filled() ||
+                d.distance_to_seg_cm <
+                    topn.bottom().shape_dts.distance_to_seg_cm) {
+              // LOG_S(INFO) << absl::StrFormat(
+              //     "New closest shape edge %ld %ld %.2fm",
+              //     mc.get_node_id(n0_idx), mc.get_node_id(n1_idx),
+              //     d.distance_to_seg_cm / 100.0);
+
+              topn.Add(
+                  {.fe = {.from_node_idx = n0_idx,
+                          .cluster_id = mc.cluster_id,
+                          .edge_offset = e_idx - mc.edge_start_idx(n0_idx)},
+                   .shape_dts = d,
+                   // We start iterating at -1, but extended shape coords start
+                   // at 0, so store pos + 1.
+                   .shape_coords_pos = pos + 1});
+            }
+          }
+        } else {
+          // ======== Straight line (no shape coords).
+          uint32_t n1_idx = mc.get_edge(e_idx).target_idx();
+          const MMLatLon& n1_coord = mc.node_to_latlon(n1_idx);
+          const DistanceToSegment d = FastPointToSegmentDistance(
+              lat, lon, n0_coord.lat, n0_coord.lon, n1_coord.lat, n1_coord.lon);
+          if (!topn.filled() ||
+              d.distance_to_seg_cm <
+                  topn.bottom().shape_dts.distance_to_seg_cm) {
+            // LOG_S(INFO) << absl::StrFormat(
+            //     "New closest non-shape edge %ld %ld %.2fm",
+            //     mc.get_node_id(n0_idx), mc.get_node_id(n1_idx),
+            //     d.distance_to_seg_cm / 100.0);
+            topn.Add({.fe = {.from_node_idx = n0_idx,
+                             .cluster_id = mc.cluster_id,
+                             .edge_offset = e_idx - mc.edge_start_idx(n0_idx)},
+                      .shape_dts = d,
+                      .shape_coords_pos = -1});
+          }
+        }
+      }
+    }
+  }
+  LOG_S(INFO) << absl::StrFormat("%u of %llu clusters scanned", count_scanned,
+                                 good_clusters.size());
+
+  return ConvertClosestEdgesToAnchor(mg, lat, lon, topn);
+
+#if 0
+  GeoAnchor a({lat, lon});
+  for (const ClosestEdge& ce : topn.span()) {
+    if (ce.fe.from_node_idx != INFU32) {  // Valid entry?
+      a.AddEdge(
+          {.distance_to_seg_cm =
+               static_cast<uint32_t>(ce.shape_dts.distance_to_seg_cm),
+           .to_fraction = static_cast<float>(ce.shape_dts.fraction_closest),
+           .lat_at_fraction = ce.shape_dts.lat_closest,
+           .lon_at_fraction = ce.shape_dts.lon_closest,
+           .fe = ce.fe});
+      // LOG_S(INFO) << absl::StrFormat("fraction_closest:%.3f",
+      //                                ce.shape_dts.fraction_closest);
+    }
+  }
+
+  CHECK_LE_S(a.edge_points().size(), 1);  // We collect at most one edge.
+  if (a.edge_points().size() == 1) {
+    // Find backward edge
+    const EdgePoint& ep = a.edge_points().front();
+    const MMCluster& mc = ep.fe.mc(mg);
+    uint32_t backward_idx = mc.find_edge_idx(
+        ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
+    if (backward_idx != INFU32) {
+      a.AddEdge({.distance_to_seg_cm = ep.distance_to_seg_cm,
+                 .to_fraction = 1.0f - ep.to_fraction,
+                 .lat_at_fraction = ep.lat_at_fraction,
+                 .lon_at_fraction = ep.lon_at_fraction,
+                 .fe = MMFullEdge::CreateWithEdgeIdx(mc, ep.fe.target_idx(mc),
+                                                     backward_idx)});
+    }
+  }
+
+  // This returns an entry with valid=false in case there are no results.
+  return a;
+#endif
 }

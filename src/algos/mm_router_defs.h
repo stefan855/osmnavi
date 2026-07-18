@@ -9,7 +9,7 @@
 // which is measured from the beginning of the edge. The value is in the range
 // [0..1].
 struct EdgePoint {
-  uint32_t distance_cm = 0;
+  uint32_t distance_to_seg_cm = 0;
   // 'to_fraction' [0...1] gives the distance *to* the point on the edge.
   // 0.0 means that the point is at the beginning of the edge, i.e. at
   // fe.from_node_idx. 1.0 means that the start is at the end of the edge. All
@@ -31,8 +31,9 @@ struct EdgePoint {
     CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
     return absl::StrFormat(
         "Closest Edge to (%.7f, %.7f) dist:%.2fm cl:%u n0:%lli n1:%lli fc:%.2f",
-        origin_lat.AsDouble(), origin_lon.AsDouble(), distance_cm / 100.0,
-        fe.cluster_id, mc.get_node_id(fe.from_node_idx),
+        origin_lat.AsDouble(), origin_lon.AsDouble(),
+        distance_to_seg_cm / 100.0, fe.cluster_id,
+        mc.get_node_id(fe.from_node_idx),
         mc.get_node_id(fe.edge(mc).target_idx()), to_fraction);
   }
 

@@ -370,7 +370,7 @@ class MMClusterRouter final {
         // This edge is a copy of an outgoing edge in another router,
         // therefore it should not count against the metric, i.e. we skip it
         // 100%.
-        res.start.distance_cm = 0;
+        res.start.distance_to_seg_cm = 0;
         res.start.to_fraction = 1.0;
       }
     }
@@ -416,7 +416,7 @@ class MMClusterRouter final {
                    res.full_edges.back().edge_idx(mc_));
       } else {
         res.target.fe = res.full_edges.back();
-        res.target.distance_cm =
+        res.target.distance_to_seg_cm =
             mc_.edge_to_distance.at(res.target.fe.edge_idx(mc_));
         res.target.to_fraction = 1.0;
       }

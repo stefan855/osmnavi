@@ -9,7 +9,7 @@
 
 // Describes the distance from a point to a line segment.
 struct DistanceToSegment {
-  double distance_cm = 0;
+  double distance_to_seg_cm = 0;
   double fraction_closest = 0.0;
   DegE6 lat_closest;
   DegE6 lon_closest;
@@ -64,7 +64,7 @@ constexpr DistanceToSegment FastPointToSegmentDistance(DegE6 lat_p, DegE6 lon_p,
 
   if (len_sq < 1e-10) {
     // Segment is a point
-    return {.distance_cm = std::hypot(x_p, y_p),
+    return {.distance_to_seg_cm = std::hypot(x_p, y_p),
             .fraction_closest = 0.0,
             .lat_closest = lat_a,
             .lon_closest = lon_a};
@@ -86,7 +86,7 @@ constexpr DistanceToSegment FastPointToSegmentDistance(DegE6 lat_p, DegE6 lon_p,
   double closest_x = fraction_closest * dx;
   double closest_y = fraction_closest * dy;
 
-  return {.distance_cm = std::hypot(x_p - closest_x, y_p - closest_y),
+  return {.distance_to_seg_cm = std::hypot(x_p - closest_x, y_p - closest_y),
           .fraction_closest = fraction_closest,
           .lat_closest = DegE6(
               lat_a.v64() + static_cast<int64_t>(fraction_closest *

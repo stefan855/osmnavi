@@ -639,13 +639,13 @@ int GetNumLanes(const OSMTagHelper& tagh, const std::vector<ParsedTag>& ptags) {
     if (pt.bits == KeySet({KEY_BIT_LANES})) {
       double val;
       if (absl::SimpleAtod(tagh.ToString(pt.val_st_idx), &val)) {
-        num_lanes = std::roundl(val);
+        num_lanes = std::lround(val);
       }
     } else if (pt.bits == KeySet({KEY_BIT_LANES, KEY_BIT_FORWARD}) ||
                pt.bits == KeySet({KEY_BIT_LANES, KEY_BIT_BACKWARD})) {
       double val;
       if (absl::SimpleAtod(tagh.ToString(pt.val_st_idx), &val)) {
-        sum_lanes_with_dir += std::roundl(val);
+        sum_lanes_with_dir += std::lround(val);
       }
     }
   }

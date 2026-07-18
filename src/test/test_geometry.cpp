@@ -6,7 +6,7 @@
 
 #include "base/deg_coord.h"
 #include "base/util.h"
-#include "geometry/distance_from_segment.h"
+#include "geometry/distance_to_segment.h"
 
 void TestHelpers() {
   FUNC_TIMER();
@@ -28,10 +28,10 @@ void TestDistanceToSegment() {
     DistanceToSegment dist =
         FastPointToSegmentDistance(lat_p, lon_p, lat_a, lon_a, lat_b, lon_b);
     LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
-                                   dist.distance_cm);
+                                   dist.distance_to_seg_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    CHECK_DOUBLE_EQ_S(dist.distance_cm, expected, 0.01);
+    CHECK_DOUBLE_EQ_S(dist.distance_to_seg_cm, expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 0.5, 0.01)
   }
   {
@@ -43,10 +43,10 @@ void TestDistanceToSegment() {
     DistanceToSegment dist =
         FastPointToSegmentDistance(lat_p, lon_p, lat_a, lon_a, lat_b, lon_b);
     LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
-                                   dist.distance_cm);
+                                   dist.distance_to_seg_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    CHECK_DOUBLE_EQ_S(dist.distance_cm, expected, 0.01);
+    CHECK_DOUBLE_EQ_S(dist.distance_to_seg_cm, expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 0.0, 0.01)
   }
   {
@@ -58,10 +58,10 @@ void TestDistanceToSegment() {
     DistanceToSegment dist =
         FastPointToSegmentDistance(lat_p, lon_p, lat_a, lon_a, lat_b, lon_b);
     LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
-                                   dist.distance_cm);
+                                   dist.distance_to_seg_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    CHECK_DOUBLE_EQ_S(dist.distance_cm, expected, 0.01);
+    CHECK_DOUBLE_EQ_S(dist.distance_to_seg_cm, expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 1.0, 0.01)
   }
 }

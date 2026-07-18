@@ -397,8 +397,11 @@ struct MMCluster {
     return out_edges.at(pos);
   }
 
+  // For an edge, return the shape coordinates (excluding start/end node).
+  // Handles edges that are marked "use reverse edge".
   std::vector<MMLatLon> get_shape_coords(uint32_t from_node_idx,
-                                         uint32_t edge_idx) const {
+                                         uint32_t edge_idx,
+                                         bool extend = false) const {
     bool use_reverse_edge;
     if (edge_shape_coords.is_empty(edge_idx, &use_reverse_edge)) {
       if (!use_reverse_edge) {
@@ -416,13 +419,29 @@ struct MMCluster {
       CHECK_S(!res.latlon.empty());
       CHECK_S(!res.use_reverse_edge);
       std::reverse(res.latlon.begin(), res.latlon.end());
+      if (extend) {
+        extend_shape_coords(from_node_idx, edge_idx, &res.latlon);
+      }
       return res.latlon;  // We found shape coords at the reverse edge.
     } else {
       MMShapeCoords::Result res;
       edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
       CHECK_S(!res.use_reverse_edge);
+      CHECK_S(!res.latlon.empty());
+      if (extend) {
+        extend_shape_coords(from_node_idx, edge_idx, &res.latlon);
+      }
       return res.latlon;  // We found shape coords at the normal edge.
     }
+  }
+
+  // Convenience function, which, given an non-empty shape list without
+  // start/end node, adds the coordinates of the start node (beginning) and the
+  // target node (at the end) to the shape list.
+  void extend_shape_coords(uint32_t from_node_idx, uint32_t edge_idx,
+                           std::vector<MMLatLon>* coords) const {
+    coords->insert(coords->begin(), node_to_latlon(from_node_idx));
+    coords->push_back(node_to_latlon(get_edge(edge_idx).target_idx()));
   }
 
   // Return the "FullEdge" debug string for this edge.

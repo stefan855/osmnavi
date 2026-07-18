@@ -10,7 +10,7 @@
 #include "base/deg_coord.h"
 #include "base/mmap_base.h"
 #include "geometry/distance.h"
-#include "geometry/distance_from_segment.h"
+#include "geometry/distance_to_segment.h"
 #include "geometry/geometry.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
@@ -546,7 +546,7 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
     NodeBuilder::VNode M = coords->at(pos + 1);
     NodeBuilder::VNode B = coords->at(pos + 2);
 
-    DistanceToSegment dist_to_seg =
+    DistanceToSegment dts =
         FastPointToSegmentDistance(M.lat, M.lon, A.lat, A.lon, B.lat, B.lon);
 
     int64_t len1 = calculate_distance(A.lat, A.lon, M.lat, M.lon);
@@ -563,15 +563,15 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
           "Distance of middle point d1:(%7d,%7d) d2:(%7d,%7d): %5.2fm "
           "len1:%5.2fm len2:%5.2f angle:%d",
           M.lat.v() - A.lat.v(), M.lon.v() - A.lon.v(), B.lat.v() - M.lat.v(),
-          B.lon.v() - M.lon.v(), dist_to_seg.distance_cm / 100.0, len1 / 100.0,
+          B.lon.v() - M.lon.v(), dts.distance_to_seg_cm / 100.0, len1 / 100.0,
           len2 / 100.0, angle_at_m);
       LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", A.id, M.id,
                                      B.id);
     }
 
-    if ((dist_to_seg.distance_cm <= 15 && angle_at_m <= 3) ||
-        (dist_to_seg.distance_cm <= 19 && angle_at_m <= 1) ||
-        (dist_to_seg.distance_cm <= 5 && angle_at_m <= 5)) {
+    if ((dts.distance_to_seg_cm <= 15 && angle_at_m <= 3) ||
+        (dts.distance_to_seg_cm <= 19 && angle_at_m <= 1) ||
+        (dts.distance_to_seg_cm <= 5 && angle_at_m <= 5)) {
       if (debug) {
         LOG_S(INFO) << "  Remove shape coord " << coords->size() << " -> "
                     << coords->size() - 1;

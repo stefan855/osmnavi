@@ -292,7 +292,7 @@ class MMHybridRouter final {
         start_anchor.edge_points().size());
     for (const auto& ep : start_anchor.edge_points()) {
       LOG_S(INFO) << "  " << ep.fe.DebugString(mg)
-                  << " frac: " << ep.to_fraction;
+                  << " frac:" << ep.to_fraction;
     }
     LOG_S(INFO) << absl::StrFormat(
         "Target anchor cluster:%u edges:%llu",
@@ -300,7 +300,7 @@ class MMHybridRouter final {
         target_anchor.edge_points().size());
     for (const auto& ep : target_anchor.edge_points()) {
       LOG_S(INFO) << "  " << ep.fe.DebugString(mg)
-                  << " frac: " << ep.to_fraction;
+                  << " frac:" << ep.to_fraction;
     }
 
     // Use the externally provided router data if it exists, otherwise use the

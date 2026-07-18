@@ -68,6 +68,7 @@ static LRUCache<RouteKey, std::string> g_route_result_cache(8);
 // Cache the result for 'FindClosestEdges()'.
 inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, DegE6 lat,
                                            DegE6 lon) {
+  return FindClosestEdges(mg, lat, lon);
   static LRUCache<uint64_t, GeoAnchor> g_closest_edge_cache(32);
 
   // Combine both lat and lon into one uint64_t, so we don't have to create a
@@ -302,7 +303,7 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   nlohmann::json waypoints = nlohmann::json::array();
   {
     waypoints.push_back(
-        {{"distance", std::roundf(res.start.distance_cm / 10.0) / 10.0},
+        {{"distance", std::roundf(res.start.distance_to_seg_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.start.fe.mc(mg), res.start.fe)},
          {"location",
           {res.start.lon_at_fraction.AsDouble(),
@@ -310,7 +311,7 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   }
   {
     waypoints.push_back(
-        {{"distance", std::roundf(res.target.distance_cm / 10.0) / 10.0},
+        {{"distance", std::roundf(res.target.distance_to_seg_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.target.fe.mc(mg), res.target.fe)},
          {"location",
           {res.target.lon_at_fraction.AsDouble(),
