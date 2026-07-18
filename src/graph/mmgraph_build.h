@@ -545,8 +545,7 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
     NodeBuilder::VNode M = coords->at(pos + 1);
     NodeBuilder::VNode B = coords->at(pos + 2);
 
-    DistanceToSegment dts = FastPointToSegmentDistance(
-        M.ll.lat, M.ll.lon, A.ll.lat, A.ll.lon, B.ll.lat, B.ll.lon);
+    DistanceToSegment dts = FastPointToSegmentDistance(M.ll, A.ll, B.ll);
 
     int64_t len1 = calculate_distance(A.ll, M.ll);
     int64_t len2 = calculate_distance(M.ll, B.ll);

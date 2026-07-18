@@ -66,21 +66,19 @@ static std::shared_ptr<MMHybridRouter::RouterData> g_last_router_data;
 static LRUCache<RouteKey, std::string> g_route_result_cache(8);
 
 // Cache the result for 'FindClosestEdges()'.
-inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, LatE6 lat,
-                                           LonE6 lon) {
-  return FindClosestEdges(mg, lat, lon);
+inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, LatLon pt) {
   static LRUCache<uint64_t, GeoAnchor> g_closest_edge_cache(32);
 
   // Combine both lat and lon into one uint64_t, so we don't have to create a
   // hash function.
-  uint64_t key = static_cast<uint32_t>(lat.v());
-  key = (key << 32) + static_cast<uint32_t>(lon.v());
+  uint64_t key = static_cast<uint32_t>(pt.lat.v());
+  key = (key << 32) + static_cast<uint32_t>(pt.lon.v());
 
   std::optional<GeoAnchor> res = g_closest_edge_cache.get(key);
   if (res.has_value()) {
     return res.value();
   }
-  GeoAnchor anch = FindClosestEdges(mg, lat, lon);
+  GeoAnchor anch = FindClosestEdges(mg, pt);
   g_closest_edge_cache.put(key, anch);
   return anch;
 }
@@ -347,8 +345,8 @@ nlohmann::json ComputeRoute(const MMGraph& mg, LatE6 lat1, LonE6 lon1,
   double find_closest_time;
   {
     absl::Time start_time = absl::Now();
-    start = FindClosestEdgesWithCache(mg, lat1, lon1);
-    target = FindClosestEdgesWithCache(mg, lat2, lon2);
+    start = FindClosestEdgesWithCache(mg, {lat1, lon1});
+    target = FindClosestEdgesWithCache(mg, {lat2, lon2});
     find_closest_time = ToDoubleSeconds(absl::Now() - start_time);
   }
   LOG_S(INFO) << absl::StrFormat("**** Find closest edges: %.2f secs",

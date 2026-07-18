@@ -12,8 +12,7 @@ void TestHelpers() {
   FUNC_TIMER();
   double km_cm = 1.0 * 1000.0 * 100.0;
   CHECK_DOUBLE_EQ_S(LatDistanceForLength(km_cm).AsDouble(),
-                    (km_cm / kEarthCircumReferenceCm) * 360.0,
-                    0.01);
+                    (km_cm / kEarthCircumReferenceCm) * 360.0, 0.01);
 }
 
 void TestDistanceToSegment() {
@@ -28,8 +27,8 @@ void TestDistanceToSegment() {
     constexpr double expected = CmPerLatitudeDegree(LatE6(100));
     LatE6 lat_p(lat_a.v() - 100);
     LonE6 lon_p(1.5);
-    DistanceToSegment dist =
-        FastPointToSegmentDistance(lat_p, lon_p, lat_a, lon_a, lat_b, lon_b);
+    DistanceToSegment dist = FastPointToSegmentDistance(
+        {lat_p, lon_p}, {lat_a, lon_a}, {lat_b, lon_b});
     LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
                                    dist.distance_to_seg_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
@@ -44,8 +43,8 @@ void TestDistanceToSegment() {
     constexpr double expected = std::hypot(LonDistanceAtLat(LonE6(100), lat_a),
                                            CmPerLatitudeDegree(LatE6(100)));
 
-    DistanceToSegment dist =
-        FastPointToSegmentDistance(lat_p, lon_p, lat_a, lon_a, lat_b, lon_b);
+    DistanceToSegment dist = FastPointToSegmentDistance(
+        {lat_p, lon_p}, {lat_a, lon_a}, {lat_b, lon_b});
     LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
                                    dist.distance_to_seg_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
@@ -61,7 +60,7 @@ void TestDistanceToSegment() {
                                            CmPerLatitudeDegree(LatE6(100)));
 
     DistanceToSegment dist =
-        FastPointToSegmentDistance(lat_p, lon_p, lat_a, lon_a, lat_b, lon_b);
+        FastPointToSegmentDistance({lat_p, lon_p}, {lat_a, lon_a}, {lat_b, lon_b});
     LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
                                    dist.distance_to_seg_cm);
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",

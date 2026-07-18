@@ -39,24 +39,24 @@ constexpr LatE6 LatDistanceForLength(int32_t length_cm) {
 // Compute the (x, y) distance from (lat0, lon0) to (lat1, lon1) in
 // centimeters. Uses a flat (x,y) coordinate system with (lat0, lon0) at (0,0)
 // for computation. Works reasonably well only for small distances.
-constexpr void FastEarthDistanceXY(LatE6 lat0, LonE6 lon0, LatE6 lat1,
-                                   LonE6 lon1, double* x, double* y) {
-  *x = kEarthRadiusCm * LonE6(lon1.v64() - lon0.v64()).ToRad() *
-       std::cos(lat0.ToRad());
-  *y = kEarthRadiusCm * LatE6(lat1.v64() - lat0.v64()).ToRad();
+constexpr void FastEarthDistanceXY(LatLon p0, LatLon p1, double* x, double* y) {
+  *x = kEarthRadiusCm * LonE6(p1.lon.v64() - p0.lon.v64()).ToRad() *
+       std::cos(p0.lat.ToRad());
+  *y = kEarthRadiusCm * LatE6(p1.lat.v64() - p0.lat.v64()).ToRad();
 }
 
 // Compute distance of (lat_p, lon_p) to segment (lat_a,lon_a) -> (lat_b,lon_b).
 // Returns the distance and the fraction of AB that has to be travelled to get
 // to the closest point.
-constexpr DistanceToSegment FastPointToSegmentDistance(LatE6 lat_p, LonE6 lon_p,
-                                                       LatE6 lat_a, LonE6 lon_a,
-                                                       LatE6 lat_b,
-                                                       LonE6 lon_b) {
-  // Convert to local coordinates (A is origin)
+constexpr DistanceToSegment FastPointToSegmentDistance(LatLon p, LatLon a,
+                                                       LatLon b) {
+  // LatE6 lat_p, LonE6 lon_p, LatE6 lat_a, LonE6 lon_a, LatE6 lat_b, LonE6
+  // lon_b) { Convert to local coordinates (A is origin)
   double x_p, y_p, x_b, y_b;
-  FastEarthDistanceXY(lat_a, lon_a, lat_p, lon_p, &x_p, &y_p);
-  FastEarthDistanceXY(lat_a, lon_a, lat_b, lon_b, &x_b, &y_b);
+  // FastEarthDistanceXY(lat_a, lon_a, lat_p, lon_p, &x_p, &y_p);
+  // FastEarthDistanceXY(lat_a, lon_a, lat_b, lon_b, &x_b, &y_b);
+  FastEarthDistanceXY(a, p, &x_p, &y_p);
+  FastEarthDistanceXY(a, b, &x_b, &y_b);
 
   double dx = x_b;  // x_a is 0
   double dy = y_b;  // y_a is 0
@@ -66,8 +66,8 @@ constexpr DistanceToSegment FastPointToSegmentDistance(LatE6 lat_p, LonE6 lon_p,
     // Segment is a point
     return {.distance_to_seg_cm = std::hypot(x_p, y_p),
             .fraction_closest = 0.0,
-            .lat_closest = lat_a,
-            .lon_closest = lon_a};
+            .lat_closest = a.lat,
+            .lon_closest = a.lon};
   }
 
   // Project point onto line: t = dot(AP, AB) / |AB|^2
@@ -89,9 +89,9 @@ constexpr DistanceToSegment FastPointToSegmentDistance(LatE6 lat_p, LonE6 lon_p,
   return {.distance_to_seg_cm = std::hypot(x_p - closest_x, y_p - closest_y),
           .fraction_closest = fraction_closest,
           .lat_closest = LatE6(
-              lat_a.v64() + static_cast<int64_t>(fraction_closest *
-                                                 (lat_b.v64() - lat_a.v64()))),
+              a.lat.v64() + static_cast<int64_t>(fraction_closest *
+                                                 (b.lat.v64() - a.lat.v64()))),
           .lon_closest = LonE6(
-              lon_a.v64() + static_cast<int64_t>(fraction_closest *
-                                                 (lon_b.v64() - lon_a.v64())))};
+              a.lon.v64() + static_cast<int64_t>(fraction_closest *
+                                                 (b.lon.v64() - a.lon.v64())))};
 }
