@@ -101,18 +101,20 @@ mkdir ../../data
 
 # Extract country borders, run the following in the release directory:
 ./extract_admin ../../data/planet-latest.osm.pbf /tmp/admin
-# If no errors occurr (or if you can ignore the countries that have errors), then move the output directory
-# as shown below.
+# If no errors occurr (or if you can ignore the countries that have errors), then move the
+# output directory as shown below.
 mv /tmp/admin ../../data/admin
-# Otherwise you might try another planet dump (some planet files have errors in the country boundaries such
-# as incomplete polygons).
+# Otherwise you might try another planet dump (some planet files have errors in the country
+# boundaries such as incomplete polygons).
 
-# Create visualisation data in /tmp. This takes about 25 seconds on my home computer.
+# Create routing and visualisation data in /tmp. This takes about 11 seconds on my home
+# computer (AMD 9950x CPU). Choose another country/area if you want something else.
 ./build_graph_main ../../data/switzerland-latest.osm.pbf
 
-# Run tile server for visualization data
+# Run tile server for some of the visualization data. 
 ./tile_server
-# Run routing server to answer interactive queries
+# Run routing server to answer interactive queries (and also serve the bulk of the
+# visualization data).
 ./mm_routing_server /tmp/mmgraph.file (starts a server on http://localhost:8081/)
 
 # Browse information in both servers.
