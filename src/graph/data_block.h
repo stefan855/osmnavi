@@ -113,8 +113,7 @@ class NodeBuilder {
  public:
   struct VNode {
     std::uint64_t id;
-    DegE6 lat;
-    DegE6 lon;
+    LatLon ll;
   };
 
  private:
@@ -129,8 +128,8 @@ class NodeBuilder {
       pos_ = 0;
       cnt_ = 0;
       n_.id = b_->start_id;
-      n_.lat = 0;
-      n_.lon = 0;
+      n_.ll.lat = LatE6();
+      n_.ll.lon = LonE6();
     }
     bool Next() {
       if (b_ == nullptr || pos_ >= b_->num_records) {
@@ -141,9 +140,9 @@ class NodeBuilder {
       cnt_ += DecodeUInt(b_->buff + cnt_, &udelta);
       n_.id += udelta;
       cnt_ += DecodeInt(b_->buff + cnt_, &idelta);
-      n_.lat = n_.lat.v64() + idelta;
+      n_.ll.lat = n_.ll.lat.v64() + idelta;
       cnt_ += DecodeInt(b_->buff + cnt_, &idelta);
-      n_.lon = n_.lon.v64() + idelta;
+      n_.ll.lon = n_.ll.lon.v64() + idelta;
       ++pos_;
       return true;
     }
@@ -159,11 +158,11 @@ class NodeBuilder {
     }
     assert(node.id >= prev_id_);
     EncodeUInt(node.id - prev_id_, &buff_);
-    EncodeInt(node.lat.v64() - prev_lat_, &buff_);
-    EncodeInt(node.lon.v64() - prev_lon_, &buff_);
+    EncodeInt(node.ll.lat.v64() - prev_lat_, &buff_);
+    EncodeInt(node.ll.lon.v64() - prev_lon_, &buff_);
     prev_id_ = node.id;
-    prev_lat_ = node.lat.v64();
-    prev_lon_ = node.lon.v64();
+    prev_lat_ = node.ll.lat.v64();
+    prev_lon_ = node.ll.lon.v64();
     num_records_++;
   }
 

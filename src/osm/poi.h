@@ -21,8 +21,8 @@ struct POI {
   std::string type;
 
   // lat/lon of the point or the average lat/lon if a way or relation.
-  DegE6 lat = DegE6(INF32);
-  DegE6 lon = DegE6(INF32);
+  LatE6 lat = LatE6(INF32);
+  LonE6 lon = LonE6(INF32);
 
   // Cumulative numbers to compute average lat/lon values above.
   std::int64_t sum_lat = 0;
@@ -116,8 +116,8 @@ void ConsumeNodePOI(const OSMTagHelper& tagh,
   POI poi;
   if (ParseKeyValues(tagh, node, &poi)) {
     poi.id = node.id();
-    poi.lat = DegE6::FromOSM(node.osm_lat_);
-    poi.lon = DegE6::FromOSM(node.osm_lon_);
+    poi.lat = LatE6::FromOSM(node.osm_lat_);
+    poi.lon = LonE6::FromOSM(node.osm_lon_);
     poi.obj_type = 'n';
 
     // Not really necessary, but still...
@@ -135,8 +135,8 @@ void ConsumeNodePOI(const OSMTagHelper& tagh,
 void ComputeAverages(CollectedData* data) {
   for (POI& poi : data->pois) {
     if (poi.obj_type == 'w' && poi.num_points > 0) {
-      poi.lat = DegE6(poi.sum_lat / poi.num_points);
-      poi.lon = DegE6(poi.sum_lon / poi.num_points);
+      poi.lat = LatE6(poi.sum_lat / poi.num_points);
+      poi.lon = LonE6(poi.sum_lon / poi.num_points);
     } else {
       CHECK_EQ_S(poi.obj_type, 'n');
       CHECK_EQ_S(poi.lat.v(), poi.sum_lat) << poi.id << " #" << poi.num_points;

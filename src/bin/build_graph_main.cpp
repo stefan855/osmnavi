@@ -246,7 +246,7 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
         continue;
       }
       if (RoutableForward(g, w, vt) && RoutableBackward(g, w, vt) &&
-          n.lat > other.lat) {
+          n.ll.lat > other.ll.lat) {
         // Edges that have both directions will show up twice when iterating,
         // so ignore one of the two edges for this case.
         continue;
@@ -270,8 +270,8 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
         }
       }
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
-                                n.lat.AsDouble(), n.lon.AsDouble(),
-                                other.lat.AsDouble(), other.lon.AsDouble());
+                                n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
+                                other.ll.lat.AsDouble(), other.ll.lon.AsDouble());
       count++;
     }
   }
@@ -297,8 +297,8 @@ void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
 
       const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
-                                n.lat.AsDouble(), n.lon.AsDouble(),
-                                other.lat.AsDouble(), other.lon.AsDouble());
+                                n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
+                                other.ll.lat.AsDouble(), other.ll.lon.AsDouble());
       count++;
     }
   }
@@ -327,8 +327,8 @@ void WriteClusterSkeletonEdges(const Graph& g, const std::string& color,
 
       const GNode& target = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
-                                n.lat.AsDouble(), n.lon.AsDouble(),
-                                target.lat.AsDouble(), target.lon.AsDouble());
+                                n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
+                                target.ll.lat.AsDouble(), target.ll.lon.AsDouble());
       count++;
     }
   }
@@ -384,8 +384,8 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
       }
       const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
-                                n.lat.AsDouble(), n.lon.AsDouble(),
-                                other.lat.AsDouble(), other.lon.AsDouble());
+                                n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
+                                other.ll.lat.AsDouble(), other.ll.lon.AsDouble());
       count++;
     }
   }
@@ -413,8 +413,8 @@ void WriteCrossCountryEdges(const build_graph::GraphMetaData& meta,
       if (n1.ncc != n2.ncc) {
         count++;
         myfile << absl::StrFormat("line,black,%.6f,%.6f,%.6f,%.6f\n",
-                                  n1.lat.AsDouble(), n1.lon.AsDouble(),
-                                  n2.lat.AsDouble(), n2.lon.AsDouble());
+                                  n1.ll.lat.AsDouble(), n1.ll.lon.AsDouble(),
+                                  n2.ll.lat.AsDouble(), n2.ll.lon.AsDouble());
         // LOG_S(INFO) << absl::StrFormat("cross country %lld -> %lld",
         //                                n1.node_id, n2.node_id);
       }
@@ -473,8 +473,8 @@ void WriteLouvainGraph(const Graph& g, const std::string& filename) {
       }
 
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color,
-                                n0.lat.AsDouble(), n0.lon.AsDouble(),
-                                n1.lat.AsDouble(), n1.lon.AsDouble());
+                                n0.ll.lat.AsDouble(), n0.ll.lon.AsDouble(),
+                                n1.ll.lat.AsDouble(), n1.ll.lon.AsDouble());
       count++;
     }
   }

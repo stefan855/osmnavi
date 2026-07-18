@@ -515,18 +515,18 @@ void FindNode(const DataBlockTable& t, std::uint64_t id, std::int64_t lat,
   NodeBuilder::VNode node;
   CHECK_S(NodeBuilder::FindNode(t, id, &node));
   CHECK_EQ_S(node.id, id);
-  CHECK_EQ_S(node.lat.v(), lat);
-  CHECK_EQ_S(node.lon.v(), lon);
+  CHECK_EQ_S(node.ll.lat.v(), lat);
+  CHECK_EQ_S(node.ll.lon.v(), lon);
 }
 
 void TestNodeDataBlock() {
   LOG_S(INFO) << "TestNodeDataBlock() started";
   DataBlockTable t(10);
   NodeBuilder builder;
-  builder.AddNode({5, DegE6(1), DegE6(10)});
-  builder.AddNode({300, DegE6(2), DegE6(100)});
+  builder.AddNode({5, LatE6(1), LonE6(10)});
+  builder.AddNode({300, LatE6(2), LonE6(100)});
   builder.AddBlockToTable(&t);
-  builder.AddNode({500, DegE6(3), DegE6(1000)});
+  builder.AddNode({500, LatE6(3), LonE6(1000)});
   builder.AddBlockToTable(&t);
 
   t.Sort();
@@ -556,7 +556,7 @@ void TestNodeDataBlockReEncode() {
   {
     NodeBuilder builder;
     for (unsigned int i = 1; i <= num_elements; ++i) {
-      builder.AddNode({i, DegE6(0), DegE6(0)});
+      builder.AddNode({i, LatE6(0), LonE6(0)});
       if (builder.pending_nodes(), 3) {
         builder.AddBlockToTable(&from);
       }
@@ -583,7 +583,7 @@ void TestNodeDataBlockReEncode() {
   for (unsigned int i = 1; i <= num_elements; ++i) {
     NodeBuilder::VNode node;
     CHECK_S(NodeBuilder::FindNode(to, i, &node));
-    CHECK_S(node.lat.v() == 0 && node.lon.v() == 0);
+    CHECK_S(node.ll.lat.v() == 0 && node.ll.lon.v() == 0);
   }
   LOG_S(INFO) << "TestNodeDataBlockReEncode() finished";
 }
@@ -955,7 +955,7 @@ void TestTiledCountryLookup() {
     // is partially assigned to 'country, and tile 0,3) has no country.
     p.AddLine(tile_size + 1, -1, tile_size + 1, 2 * tile_size + 1000, country);
     TiledCountryLookup tiler(p, tile_size);
-    CHECK_EQ_S(tiler.GetCountryNum(DegE6(1), DegE6(1)), country);
+    CHECK_EQ_S(tiler.GetCountryNum(LonE6(1), LatE6(1)), country);
 
     // CHECK_EQ_S(p.CountIntersections(0, 50), 1);
   }
@@ -1193,10 +1193,10 @@ void TestArglis() {
 }
 
 void TestCalculateDistance() {
-  DegE6 lat_paris(48.8566);
-  DegE6 lon_paris(2.3522);
-  DegE6 lat_berlin(52.5200);
-  DegE6 lon_berlin(13.4050);
+  LatE6 lat_paris(48.8566);
+  LonE6 lon_paris(2.3522);
+  LatE6 lat_berlin(52.5200);
+  LonE6 lon_berlin(13.4050);
   const uint32_t dist_cm =
       calculate_distance(lat_paris, lon_paris, lat_berlin, lon_berlin);
   CHECK_DOUBLE_EQ_S(dist_cm, 878 * 1000 * 100, 0.001);
@@ -1206,12 +1206,12 @@ void TestCalculateDistance() {
 }
 
 uint32_t ComputeAngle(double lat1, double lon1, double lat2, double lon2) {
-  const DegE6 lat1n(lat1);
-  const DegE6 lon1n(lon1);
-  const DegE6 lat2n(lat2);
-  const DegE6 lon2n(lon2);
+  const LatE6 lat1n(lat1);
+  const LonE6 lon1n(lon1);
+  const LatE6 lat2n(lat2);
+  const LonE6 lon2n(lon2);
   const uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
-  return angle_to_east_degrees(lat1n, lon1n, lat2n, lon2n, length_cm);
+  return angle_to_east_degrees({lat1n, lon1n}, {lat2n, lon2n}, length_cm);
 }
 
 int32_t TestAngle(double lat1, double lon1, double lat2, double lon2,
@@ -1257,12 +1257,13 @@ void TestEdgeAngles() {
   // circle is shrinking.
   int32_t prev_angle = 45;
   for (uint32_t i = 4; i < 90; i += 5) {
-    const DegE6 lat1(static_cast<double>(i));
-    const DegE6 lon1(0.0);
-    const DegE6 lat2(static_cast<double>(i + 1));
-    const DegE6 lon2(1.0);
+    const LatE6 lat1(static_cast<double>(i));
+    const LonE6 lon1(0.0);
+    const LatE6 lat2(static_cast<double>(i + 1));
+    const LonE6 lon2(1.0);
     uint32_t length_cm = calculate_distance(lat1, lon1, lat2, lon2);
-    int32_t angle = angle_to_east_degrees(lat1, lon1, lat2, lon2, length_cm);
+    int32_t angle =
+        angle_to_east_degrees({lat1, lon1}, {lat2, lon2}, length_cm);
     LOG_S(INFO) << absl::StrFormat("angle of (%u,%u)->(%u,%u) is %u", i, 0,
                                    i + 1, 1, angle);
     CHECK_GE_S(angle, prev_angle);
@@ -1400,9 +1401,9 @@ void TestDeDuperMergeSort() {
 }
 
 namespace {
-int64_t qdist(DegE6 lat, DegE6 lon, const GNode& n) {
-  int64_t dlat = lat.v64() - n.lat.v64();
-  int64_t dlon = lon.v64() - n.lon.v64();
+int64_t qdist(LatE6 lat, LonE6 lon, const GNode& n) {
+  int64_t dlat = lat.v64() - n.ll.lat.v64();
+  int64_t dlon = lon.v64() - n.ll.lon.v64();
   return dlat * dlat + dlon * dlon;
 }
 }  // namespace
@@ -1411,10 +1412,10 @@ void TestClosestPoint() {
   FUNC_TIMER();
   Graph g;
   // Coords (-1,-1) (0,0) (1,1) (2,2)
-  g.nodes.push_back({.lat = DegE6(0.0), .lon = DegE6(0.0)});
-  g.nodes.push_back({.lat = DegE6(4.0), .lon = DegE6(2.0)});
-  g.nodes.push_back({.lat = DegE6(2.0), .lon = DegE6(1.0)});
-  g.nodes.push_back({.lat = DegE6(-2.0), .lon = DegE6(-1.0)});
+  g.nodes.push_back({.ll = {LatE6(0.0), LonE6(0.0)}});
+  g.nodes.push_back({.ll = {LatE6(4.0), LonE6(2.0)}});
+  g.nodes.push_back({.ll = {LatE6(2.0), LonE6(1.0)}});
+  g.nodes.push_back({.ll = {LatE6(-2.0), LonE6(-1.0)}});
 
   auto idx = SortNodeIndexesByLon(g);
   CHECK_EQ_S(idx.size(), 4);
@@ -1423,21 +1424,21 @@ void TestClosestPoint() {
   CHECK_EQ_S(idx.at(2), 2);
   CHECK_EQ_S(idx.at(3), 1);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-1.000001)), 0);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-1.000000)), 0);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-0.999999)), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(-1.000001)), 0);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(-1.000000)), 0);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(-0.999999)), 1);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(-1)), 1);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(0)), 1);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1)), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(-1)), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(0)), 1);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(1)), 2);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(0.999999)), 2);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1.000000)), 2);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1.000001)), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(0.999999)), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(1.000000)), 2);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(1.000001)), 3);
 
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(1.999999)), 3);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(2.000000)), 3);
-  CHECK_EQ_S(LowerBoundBinSearch(g, idx, DegE6(2.000001)), 4);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(1.999999)), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(2.000000)), 3);
+  CHECK_EQ_S(LowerBoundBinSearch(g, idx, LonE6(2.000001)), 4);
 
   // Note, we've found two (lat,lon) pairs that different results slow vs. fast
   // because the have the same qdist:
@@ -1446,8 +1447,8 @@ void TestClosestPoint() {
   srand(1);
   for (int i = 0; i < 100'000; ++i) {
     // Random coordinates in the range [-10, +10) degrees.
-    DegE6 lat(static_cast<double>((rand() % (2 * 90)) - 90));
-    DegE6 lon(static_cast<double>((rand() % (2 * 180)) - 180));
+    LatE6 lat(static_cast<double>((rand() % (2 * 90)) - 90));
+    LonE6 lon(static_cast<double>((rand() % (2 * 180)) - 180));
     auto slow = FindClosestNodeSlow(g, lat, lon);
     auto fast = FindClosestNodeFast(g, idx, lat, lon);
     if (slow.dist != fast.dist) {
@@ -1459,9 +1460,10 @@ void TestClosestPoint() {
           "Searching for (%.6f,%.6f)\nslow (%.6f,%.6f) qdist:%d cm:%d\nfast "
           "(%.6f,%.6f) "
           "qdist:%d cm:%d",
-          lat.AsDouble(), lon.AsDouble(), nslow.lat.AsDouble(),
-          nslow.lon.AsDouble(), slow_qdist, slow.dist, nfast.lat.AsDouble(),
-          nfast.lon.AsDouble(), fast_qdist, fast.dist);
+          lat.AsDouble(), lon.AsDouble(), nslow.ll.lat.AsDouble(),
+          nslow.ll.lon.AsDouble(), slow_qdist, slow.dist,
+          nfast.ll.lat.AsDouble(), nfast.ll.lon.AsDouble(), fast_qdist,
+          fast.dist);
     }
   }
 }

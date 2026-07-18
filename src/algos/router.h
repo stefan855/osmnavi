@@ -67,8 +67,8 @@ class Router {
 
     Context ctx = {.opt = opt,
                    .metric = metric,
-                   .target_lat = g_.nodes.at(target_idx).lat,
-                   .target_lon = g_.nodes.at(target_idx).lon};
+                   .target_lat = g_.nodes.at(target_idx).ll.lat,
+                   .target_lon = g_.nodes.at(target_idx).ll.lon};
 
     std::uint32_t start_v_idx =
         FindOrAddVisitedNode(start_idx, /*use_astar_heuristic=*/false);
@@ -151,8 +151,8 @@ class Router {
           if (shortest == (output_shortest > 0)) {
             myfile << absl::StrFormat(
                 "line,%s,%.6f,%.6f,%.6f,%.6f\n", shortest ? "red" : "black",
-                sfrom.lat.AsDouble(), sfrom.lon.AsDouble(), sn.lat.AsDouble(),
-                sn.lon.AsDouble());
+                sfrom.ll.lat.AsDouble(), sfrom.ll.lon.AsDouble(),
+                sn.ll.lat.AsDouble(), sn.ll.lon.AsDouble());
           }
         }
       }
@@ -164,8 +164,8 @@ class Router {
   struct Context {
     const RoutingOptions opt;
     const RoutingMetric& metric;
-    DegE6 target_lat;
-    DegE6 target_lon;
+    LatE6 target_lat;
+    LonE6 target_lon;
   };
 
   static bool MetricCmp(const QueuedNode& left, const QueuedNode& right) {
@@ -211,9 +211,9 @@ class Router {
 
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        static_cast<uint32_t>(1.00 * calculate_distance(node.lat, node.lon,
-                                                        ctx.target_lat,
-                                                        ctx.target_lon)));
+        static_cast<uint32_t>(
+            1.00 *
+            calculate_distance(node.ll, {ctx.target_lat, ctx.target_lon})));
   }
 
   // Expand the forward edges.

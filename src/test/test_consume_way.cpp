@@ -121,7 +121,7 @@ build_graph::GraphMetaData CreateMeta() {
 void StoreNodes(int num_nodes, DataBlockTable* t) {
   NodeBuilder builder;
   for (int32_t i = 1; i <= num_nodes; ++i) {
-    builder.AddNode({.id = (uint32_t)i, .lat = DegE6(i), .lon = DegE6(i)});
+    builder.AddNode({.id = (uint32_t)i, .ll = {LatE6(i), LonE6(i)}});
   }
   builder.AddBlockToTable(t);
 }

@@ -8,12 +8,11 @@
 // Compute distance between two points on the surface of the earth, using the
 // haversine formula.
 // Returned distance is in centimeters.
-inline int64_t calculate_distance(DegE6 lat1, DegE6 lon1, DegE6 lat2,
-                                  DegE6 lon2) {
-  double lat1_rad = lat1.AsDouble() * (std::numbers::pi / 180.0);
-  double lon1_rad = lon1.AsDouble() * (std::numbers::pi / 180.0);
-  double lat2_rad = lat2.AsDouble() * (std::numbers::pi / 180.0);
-  double lon2_rad = lon2.AsDouble() * (std::numbers::pi / 180.0);
+inline int64_t calculate_distance(LatLon p1, LatLon p2) {
+  double lat1_rad = p1.lat.AsDouble() * (std::numbers::pi / 180.0);
+  double lon1_rad = p1.lon.AsDouble() * (std::numbers::pi / 180.0);
+  double lat2_rad = p2.lat.AsDouble() * (std::numbers::pi / 180.0);
+  double lon2_rad = p2.lon.AsDouble() * (std::numbers::pi / 180.0);
   double f_dlat = std::sin((lat2_rad - lat1_rad) / 2.0);
   double f_dlon = std::sin((lon2_rad - lon1_rad) / 2.0);
   double a = f_dlat * f_dlat +
@@ -22,14 +21,15 @@ inline int64_t calculate_distance(DegE6 lat1, DegE6 lon1, DegE6 lat2,
                       std::atan2(std::sqrt(a), std::sqrt(1.0 - a)));
 }
 
-inline int64_t calculate_distance(MMLatLon ll1, MMLatLon ll2) {
-  return calculate_distance(ll1.lat, ll1.lon, ll2.lat, ll2.lon);
+inline int64_t calculate_distance(LatE6 lat1, LonE6 lon1, LatE6 lat2,
+                                  LonE6 lon2) {
+  return calculate_distance({lat1, lon1}, {lat2, lon2});
 }
 
 namespace {
 // Length of a segment on a longitude circle in cm, given its size in degrees.
 // This assumes that the earth is a perfect sphere (although it isn't).
-inline int64_t length_lat_segment_cm(const DegE6 lat_diff) {
+inline int64_t length_lat_segment_cm(const LatE6 lat_diff) {
   constexpr double kEarthCircumferenceThroughPoles =
       kEarthRadiusCm * std::numbers::pi * 2;
 
@@ -55,13 +55,13 @@ inline int64_t length_lat_segment_cm(const DegE6 lat_diff) {
 // length_lat_segment_cm()). Angle α is computed from the formula
 //   sin(α) = height / edge_length.
 //
-inline int32_t angle_to_east_degrees(DegE6 lat1, DegE6 lon1, DegE6 lat2,
-                                     DegE6 lon2, uint32_t edge_length_cm) {
+inline int32_t angle_to_east_degrees(LatLon ll1, LatLon ll2, 
+                                     uint32_t edge_length_cm) {
   if (edge_length_cm == 0) {
     return 0;
   }
 
-  const DegE6 lat_diff(std::abs(lat2.v64() - lat1.v64()));
+  const LatE6 lat_diff(std::abs(ll2.lat.v64() - ll1.lat.v64()));
   const double height_cm = length_lat_segment_cm(lat_diff);
 
   int64_t angle = 90;
@@ -79,14 +79,14 @@ inline int32_t angle_to_east_degrees(DegE6 lat1, DegE6 lon1, DegE6 lat2,
 
   // Compute result, depending on the quadrant the target of the edge is
   // relative to the origin of the edge.
-  if (lat2 >= lat1) {
-    if (lon2 >= lon1) {  // 1. Quadrant
+  if (ll2.lat >= ll1.lat) {
+    if (ll2.lon >= ll1.lon) {  // 1. Quadrant
       return angle;
     } else {  // 2. Quadrant
       return 180 - angle;
     }
   } else {
-    if (lon2 >= lon1) {  // 4. Quadrant
+    if (ll2.lon >= ll1.lon) {  // 4. Quadrant
       return (360 - angle) % 360;
     } else {  // 3. Quadrant
       return 180 + angle;

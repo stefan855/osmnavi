@@ -139,8 +139,8 @@ struct MMComplexTurnRestriction {
 
 struct MMBoundingRect {
   // Upper left and lower right corner of the bounding rectangle;
-  MMLatLon min;
-  MMLatLon max;
+  LatLon min;
+  LatLon max;
 };
 
 // This is the memory mapped data structure that represents one cluster in the
@@ -302,17 +302,17 @@ struct MMCluster {
     return way_shared_attrs.at(way_to_wsa.at(way_idx));
   }
 
-  MMLatLon node_to_latlon(uint32_t node_idx) const {
+  LatLon node_to_latlon(uint32_t node_idx) const {
     return {.lat = node_to_lat(node_idx), .lon = node_to_lon(node_idx)};
   }
 
-  DegE6 node_to_lat(uint32_t node_idx) const {
-    return DegE6(bounding_rect.min.lat.v64() +
+  LatE6 node_to_lat(uint32_t node_idx) const {
+    return LatE6(bounding_rect.min.lat.v64() +
                  static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
   }
 
-  DegE6 node_to_lon(uint32_t node_idx) const {
-    return DegE6(bounding_rect.min.lon.v64() +
+  LonE6 node_to_lon(uint32_t node_idx) const {
+    return LonE6(bounding_rect.min.lon.v64() +
                  static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
   }
 
@@ -399,7 +399,7 @@ struct MMCluster {
 
   // For an edge, return the shape coordinates (excluding start/end node).
   // Handles edges that are marked "use reverse edge".
-  std::vector<MMLatLon> get_shape_coords(uint32_t from_node_idx,
+  std::vector<LatLon> get_shape_coords(uint32_t from_node_idx,
                                          uint32_t edge_idx,
                                          bool extend = false) const {
     bool use_reverse_edge;
@@ -439,7 +439,7 @@ struct MMCluster {
   // start/end node, adds the coordinates of the start node (beginning) and the
   // target node (at the end) to the shape list.
   void extend_shape_coords(uint32_t from_node_idx, uint32_t edge_idx,
-                           std::vector<MMLatLon>* coords) const {
+                           std::vector<LatLon>* coords) const {
     coords->insert(coords->begin(), node_to_latlon(from_node_idx));
     coords->push_back(node_to_latlon(get_edge(edge_idx).target_idx()));
   }

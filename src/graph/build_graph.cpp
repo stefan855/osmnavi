@@ -186,8 +186,8 @@ void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
 
         CHECK_GT_S(node.id_, 0);
         builder.AddNode({.id = (uint64_t)node.id_,
-                         .lat = DegE6::FromOSM(node.osm_lat_),
-                         .lon = DegE6::FromOSM(node.osm_lon_)});
+                         .ll = {LatE6::FromOSM(node.osm_lat_),
+                                LonE6::FromOSM(node.osm_lon_)}});
         if (builder.pending_nodes() >= 128) {
           std::unique_lock<std::mutex> l(mut);
           builder.AddBlockToTable(node_table);
@@ -359,7 +359,7 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
       *missing_nodes = true;
       continue;
     }
-    uint16_t ncc = meta.tiler->GetCountryNum(node.lon, node.lat);
+    uint16_t ncc = meta.tiler->GetCountryNum(node.ll.lon, node.ll.lat);
     way_nodes.push_back({.id = running_id,
                          .ncc = ncc,
                          .dup_earlier = false,
@@ -965,8 +965,8 @@ void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
 // Sort by ascending way.id.
 void SortGWays(GraphMetaData* meta) {
   FUNC_TIMER();
-  // We have two way related vectors with the same size. They have to be sorted
-  // together. Use zip views for this, a new C++23 feature.
+  // We have two way related vectors with the same size. They have to be
+  // sorted together. Use zip views for this, a new C++23 feature.
   CHECK_EQ_S(meta->graph.ways.size(), meta->graph.way_node_ids.size());
   auto zip =
       std::ranges::views::zip(meta->graph.ways, meta->graph.way_node_ids);
@@ -1003,8 +1003,7 @@ void AllocateGNodes(GraphMetaData* meta) {
       // n.simple_turn_restriction_via_node = 0;
       n.is_pedestrian_crossing = 0;
       n.cluster_skeleton = 0;
-      n.lat = node->lat;
-      n.lon = node->lon;
+      n.ll = node->ll;
       meta->graph.nodes.push_back(n);
     }
   }
@@ -1014,7 +1013,7 @@ void SetCountryInGNodes(GraphMetaData* meta) {
   FUNC_TIMER();
   // TODO: run with thread pool.
   for (GNode& n : meta->graph.nodes) {
-    n.ncc = meta->tiler->GetCountryNum(n.lon, n.lat);
+    n.ncc = meta->tiler->GetCountryNum(n.ll.lon, n.ll.lat);
   }
 }
 
@@ -1109,7 +1108,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
 
     // Compute distances sum from start and store in distance vector.
     // Non-existing nodes add 0 to the distance.
-    NodeBuilder::VNode prev_node = {.id = 0, .lat = DegE6(), .lon = DegE6()};
+    NodeBuilder::VNode prev_node = {.id = 0, .ll = {LatE6(), LonE6()}};
     int64_t sum = 0;
     for (const uint64_t id : ids) {
       if (meta->way_nodes_seen->GetBit(id)) {
@@ -1121,12 +1120,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
         }
         // Sum up distance so far.
         if (prev_node.id != 0) {
-          sum += calculate_distance(prev_node.lat, prev_node.lon, node.lat,
-                                    node.lon);
-#if 0
-          LOG_S(INFO) << "delta-lat:" << (node.lat - prev_node.lat);
-          LOG_S(INFO) << "delta-lon:" << (node.lon - prev_node.lon);
-#endif
+          sum += calculate_distance(prev_node.ll, node.ll);
         }
         prev_node = node;
       } else {
@@ -1218,10 +1212,11 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       restr_car_f);
             } else {
               CHECK_S(vt_backward) << way.id;
-              AddEdge(
-                  graph, idx2, idx1, /*inverted=*/false,
-                  /*contra_way=*/true, has_shapes, /*has_reverse_shapes=*/false,
-                  /*both_directions=*/false, way_idx, distance_cm, restr_car_b);
+              AddEdge(graph, idx2, idx1, /*inverted=*/false,
+                      /*contra_way=*/true, has_shapes,
+                      /*has_reverse_shapes=*/false,
+                      /*both_directions=*/false, way_idx, distance_cm,
+                      restr_car_b);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
               // querying the way information works the same for inverted and
@@ -1234,8 +1229,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
             }
           }
           prev_pos = pos;
-          // True iff the id has been seen before in the same way. Needed later
-          // to find the start point an edge when computing shape lists.
+          // True iff the id has been seen before in the same way. Needed
+          // later to find the start point an edge when computing shape lists.
           prev_pos_is_repeated_id = id_set.contains(id);
           id_set.insert(id);
         }
@@ -1930,10 +1925,10 @@ inline void LabelEdgeAndNextCrossing(Graph& g, const NodeTags& nt, FullEdge fe,
   }
 }
 
-// Some nodes are tagged as "traffic_signals", "stop" or "give_way". They often
-// come with a direction in the tags, but sometimes the direction has to be
-// inferred by looking at the direction of the road or by finding the closest
-// crossing.
+// Some nodes are tagged as "traffic_signals", "stop" or "give_way". They
+// often come with a direction in the tags, but sometimes the direction has to
+// be inferred by looking at the direction of the road or by finding the
+// closest crossing.
 //
 // For these tags we try to find the next crossing and mark the edge arriving
 // at the crossing as high-signal, high or low priority, depending on the tag.

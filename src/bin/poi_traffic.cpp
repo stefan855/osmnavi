@@ -126,15 +126,16 @@ void WriteCSV(const GraphData& gd, const std::vector<int64_t>& edge_traffic,
       bool dead_end = n1.dead_end || n2.dead_end;
       if (!export_file.empty()) {
         myfile << absl::StrFormat("%lld,%.6f,%.6f,%.6f,%.6f,%lld,%d\n", way_id,
-                                  n1.lat.AsDouble(), n1.lon.AsDouble(), n2.lat.AsDouble(),
-                                  n2.lon.AsDouble(), edge_traffic.at(i), dead_end);
+                                  n1.ll.lat.AsDouble(), n1.ll.lon.AsDouble(),
+                                  n2.ll.lat.AsDouble(), n2.ll.lon.AsDouble(),
+                                  edge_traffic.at(i), dead_end);
       } else {
         int div = edge_traffic.at(i) / traffic_div;
         int idx = div < 1 ? 0 : div < 10 ? 1 : div < 100 ? 2 : 3;
         CHECK_LT_S(idx, 4);
         myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", colors[idx],
-                                  n1.lat.AsDouble(), n1.lon.AsDouble(), n2.lat.AsDouble(),
-                                  n2.lon.AsDouble());
+                                  n1.ll.lat.AsDouble(), n1.ll.lon.AsDouble(),
+                                  n2.ll.lat.AsDouble(), n2.ll.lon.AsDouble());
       }
     }
   }

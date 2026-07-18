@@ -401,10 +401,10 @@ void TestMMShapeCoords() {
   const std::vector<uint16_t> length = {3, 0, 4, 0};
   const std::vector<bool> use_reverse_edge = {false, true, false, false};
   uint64_t rand = 13;
-  std::vector<MMLatLon> latlon;
+  std::vector<LatLon> latlon;
   for (size_t i = 0; i < 7; ++i) {
-    latlon.emplace_back(DegE6(PseudoRandomInt32(&rand)),
-                        DegE6(PseudoRandomInt32(&rand)));
+    latlon.emplace_back(LatE6(PseudoRandomInt32(&rand)),
+                        LonE6(PseudoRandomInt32(&rand)));
   }
 
   // Build file.
@@ -426,18 +426,18 @@ void TestMMShapeCoords() {
     for (size_t i = 0; i < length.size(); ++i) {
       if (length.at(i) == 0) {
         MMShapeCoords::Result res;
-        mm->sc.get({DegE6(0), DegE6(0)}, i, &res);
+        mm->sc.get({LatE6(0), LonE6(0)}, i, &res);
         CHECK_EQ_S(res.latlon.size(), 0) << i;
         CHECK_EQ_S(use_reverse_edge.at(i), res.use_reverse_edge) << i;
       } else {
-        MMLatLon base = latlon.at(latlon_pos);
+        LatLon base = latlon.at(latlon_pos);
         MMShapeCoords::Result res;
 
         mm->sc.get(base, i, &res);
 
         CHECK_EQ_S(res.latlon.size(), length.at(i) - 2);
         for (size_t off = 0; off + 2 < length.at(i); ++off) {
-          MMLatLon expected = latlon.at(latlon_pos + 1 + off);
+          LatLon expected = latlon.at(latlon_pos + 1 + off);
           CHECK_EQ_S(res.latlon.at(off).lat.v(), expected.lat.v()) << i;
           CHECK_EQ_S(res.latlon.at(off).lon.v(), expected.lon.v()) << i;
         }

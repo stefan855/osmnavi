@@ -18,13 +18,13 @@ struct ClosestNodeResult {
 
 // Computes distance to each node in the graph and chooses the node with the
 // shortest distance.
-inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, DegE6 lat,
-                                             DegE6 lon) {
+inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, LatE6 lat,
+                                             LonE6 lon) {
   uint32_t found_pos = INFU32;
   int64_t min_dist = INF64;
   for (uint32_t i = 0; i < g.nodes.size(); ++i) {
     const GNode& n = g.nodes.at(i);
-    int64_t dist = calculate_distance(lat, lon, n.lat, n.lon);
+    int64_t dist = calculate_distance({lat, lon}, n.ll);
     if (dist < min_dist) {
       min_dist = dist;
       found_pos = i;
@@ -40,13 +40,13 @@ namespace {
 // else, so I have to implement my own binary search...
 inline int64_t LowerBoundBinSearch(const Graph& g,
                                    const std::vector<uint32_t>& idx,
-                                   DegE6 lon) {
+                                   LonE6 lon) {
   uint64_t L = 0;
   uint64_t R = idx.size();
   while (L < R) {
     uint64_t M = (L + R) / 2;
     // Does element at M satisfies condition?
-    if (lon <= g.nodes.at(idx.at(M)).lon) {
+    if (lon <= g.nodes.at(idx.at(M)).ll.lon) {
       // Yes, so it must be an M or before.
       R = M;
     } else {
@@ -58,8 +58,7 @@ inline int64_t LowerBoundBinSearch(const Graph& g,
 }
 
 struct FastSearchData {
-  const DegE6 lat;
-  const DegE6 lon;
+  const LatLon ll;
   // Distance of one degree in lon direction at 'lat'.
   const double dist_one_deg_lon;
   int64_t min_dist;
@@ -75,7 +74,7 @@ struct FastSearchData {
 // if inside.
 inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
   const GNode& n = g.nodes.at(pos);
-  const int64_t dlon = std::abs(fsdata->lon.v64() - n.lon.v64());
+  const int64_t dlon = std::abs(fsdata->ll.lon.v64() - n.ll.lon.v64());
   if (dlon > fsdata->max_dlon) {
     return false;
   }
@@ -85,7 +84,7 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
     return true;
   }
 #endif
-  int64_t dist = calculate_distance(fsdata->lat, fsdata->lon, n.lat, n.lon);
+  int64_t dist = calculate_distance(fsdata->ll, n.ll);
   if (dist < fsdata->min_dist) {
     fsdata->min_dist = dist;
     fsdata->found_pos = pos;
@@ -108,10 +107,10 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
 // for one degree. This is better because there might be a shorter route through
 // the north/south pole than when staying on a fixed latitude, which makes the
 // search range larger. Additionally we divide by 2.0, because the point at +180
-// longitude could be very at the pole.
-double ComputeOneDegreeHeuristic(DegE6 lat) {
+// longitude could be very close to the pole.
+double ComputeOneDegreeHeuristic(LatE6 lat) {
   return static_cast<double>(
-             calculate_distance(lat, DegE6(0.0), lat, DegE6(180.0))) /
+             calculate_distance({lat, LonE6(0.0)}, {lat, LonE6(180.0)})) /
          (180.0 * 2.0);
 }
 
@@ -121,7 +120,7 @@ inline std::vector<uint32_t> SortNodeIndexesByLon(const Graph& g) {
   std::vector<uint32_t> idx(g.nodes.size());
   std::iota(idx.begin(), idx.end(), 0);  // Fills it with 0..N-1
   std::sort(idx.begin(), idx.end(), [&g](uint32_t a, uint32_t b) {
-    return g.nodes.at(a).lon < g.nodes.at(b).lon;
+    return g.nodes.at(a).ll.lon < g.nodes.at(b).ll.lon;
   });
   return idx;
 }
@@ -136,13 +135,12 @@ inline std::vector<uint32_t> SortNodeIndexesByLon(const Graph& g) {
 // there were no errors when comparing 10k computations.
 inline ClosestNodeResult FindClosestNodeFast(const Graph& g,
                                              const std::vector<uint32_t>& idx,
-                                             DegE6 lat, DegE6 lon) {
+                                             LatE6 lat, LonE6 lon) {
   // Find first element >= the given lon.
   int64_t posf = LowerBoundBinSearch(g, idx, lon);  // first element >= 'lon'.
   // Search both forward (posf)and backward (posb) from the found position.
   int64_t posb = posf - 1;
-  FastSearchData fsdata = {.lat = lat,
-                           .lon = lon,
+  FastSearchData fsdata = {.ll = {lat, lon},
                            .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat),
                            .min_dist = INF64,
                            .max_dlon = INF64,

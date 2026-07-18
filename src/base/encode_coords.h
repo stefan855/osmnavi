@@ -12,10 +12,10 @@ namespace {
 // Manages lat/lon and deltas that we have seen for the previous point.
 // Predicts the current delta.
 struct ShapeCoordOracle {
-  ShapeCoordOracle(DegE6 lat, DegE6 lon)
+  ShapeCoordOracle(LatE6 lat, LonE6 lon)
       : lat(lat), lon(lon), dlat(0), dlon(0) {}
-  DegE6 lat;
-  DegE6 lon;
+  LatE6 lat;
+  LonE6 lon;
   int64_t dlat;
   int64_t dlon;
 
@@ -23,7 +23,7 @@ struct ShapeCoordOracle {
   int64_t predict_new_lat() const { return lat.v64() + dlat; }
 
   // Given a new dlat, estimate the new dlon.
-  int64_t predict_new_lon(DegE6 new_lat) const {
+  int64_t predict_new_lon(LatE6 new_lat) const {
     if (std::abs(dlat) < 30) {
       return lon.v64() + dlon;
     }
@@ -35,7 +35,7 @@ struct ShapeCoordOracle {
     // return lon.v64() + dlon;
   }
 
-  void push_new(DegE6 new_lat, DegE6 new_lon) {
+  void push_new(LatE6 new_lat, LonE6 new_lon) {
     dlat = new_lat.v64() - lat.v64();
     dlon = new_lon.v64() - lon.v64();
     lat = new_lat;
@@ -48,8 +48,8 @@ struct ShapeCoordOracle {
 // 'latlon' contains the shape coordinates of an edge for encoding, excluding
 // the start- and end-node of the edge. Does forward encoding, using the first
 // element to form deltas and ignoring the last element.
-inline void EncodeShapeCoords(const MMLatLon base,
-                              std::span<const MMLatLon> latlon,
+inline void EncodeShapeCoords(const LatLon base,
+                              std::span<const LatLon> latlon,
                               WriteBuff* buff) {
   static size_t counter = 0;
   const bool debug = (++counter % 50000 == 0);
@@ -62,7 +62,7 @@ inline void EncodeShapeCoords(const MMLatLon base,
   }
 
   for (size_t i = 0; i < latlon.size(); ++i) {
-    MMLatLon curr = latlon[i];
+    LatLon curr = latlon[i];
     DeltaEncodeInt64(oracle.predict_new_lat(), curr.lat.v64(), buff);
     DeltaEncodeInt64(oracle.predict_new_lon(curr.lat), curr.lon.v64(), buff);
 
@@ -85,8 +85,8 @@ inline void EncodeShapeCoords(const MMLatLon base,
 // the start- and end-node of the edge. Does forward encoding, using the first
 // element to form deltas and ignoring the last element.
 inline uint32_t DecodeShapeCoords(const uint8_t* ptr, uint32_t num_coords,
-                                  const MMLatLon base,
-                                  std::vector<MMLatLon>* latlon) {
+                                  const LatLon base,
+                                  std::vector<LatLon>* latlon) {
   latlon->clear();
   ShapeCoordOracle oracle(base.lat, base.lon);
   uint32_t cnt = 0;
@@ -95,8 +95,8 @@ inline uint32_t DecodeShapeCoords(const uint8_t* ptr, uint32_t num_coords,
     int64_t lon;
     cnt += DeltaDecodeInt64(ptr + cnt, oracle.predict_new_lat(), &lat);
     cnt +=
-        DeltaDecodeInt64(ptr + cnt, oracle.predict_new_lon(DegE6(lat)), &lon);
-    latlon->emplace_back(DegE6(lat), DegE6(lon));
+        DeltaDecodeInt64(ptr + cnt, oracle.predict_new_lon(LatE6(lat)), &lon);
+    latlon->emplace_back(LatE6(lat), LonE6(lon));
     oracle.push_new(latlon->back().lat, latlon->back().lon);
   }
   return cnt;

@@ -26,8 +26,8 @@ GNode RandomGNode(uint64_t seed) {
   n.edges_start_pos = dist(myrand) % (1llu << GNODE_EDGE_START_BITS);
   n.num_forward_edges = dist(myrand) % (1llu << NUM_EDGES_OUT_BITS);
   n.ncc = dist(myrand) % (1llu << NUM_CC_BITS);
-  n.lat = (int32_t)(dist(myrand) % (1llu << 32));
-  n.lon = (int32_t)(dist(myrand) % (1llu << 32));
+  n.ll.lat = LatE6(static_cast<int32_t>((dist(myrand) % (1llu << 32))));
+  n.ll.lon = LonE6(static_cast<int32_t>((dist(myrand) % (1llu << 32))));
   n.large_component = dist(myrand) % 2;
   n.cluster_border_node = dist(myrand) % 2;
   n.dead_end = dist(myrand) % 2;

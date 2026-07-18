@@ -52,7 +52,7 @@ struct TmpClusterInfo {
   std::vector<bool> cedge_has_shape_coords_at_reverse_edge;
   // Array of latlon coordinate pairs. The list contains all arrays of coords
   // according to 'cedge_shape_coord_length', in continuous order.
-  std::vector<MMLatLon> shape_coords_arr;
+  std::vector<LatLon> shape_coords_arr;
 
   std::vector<uint32_t> cedge_to_turn_cost_idx;
   std::vector<TurnCostData> turn_costs;
@@ -72,7 +72,7 @@ struct TmpClusterInfo {
   // Dim #nodes
   std::vector<uint64_t> mm_nodes;
   std::vector<int64_t> mm_node_to_osm_id;
-  std::vector<MMLatLon> mm_node_to_latlon;
+  std::vector<LatLon> mm_node_to_latlon;
 
   // Dim #edges
   std::vector<uint64_t> mm_edges;  // Type MMEdge.
@@ -488,8 +488,7 @@ void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
     CHECK_S(!nb.off_cluster_node() || nb.border_node());
     tci->mm_nodes.push_back(nb.data__);
     tci->mm_node_to_osm_id.push_back(n.node_id);
-    tci->mm_node_to_latlon.push_back({.lat = n.lat, .lon = n.lon});
-    // LOG_S(INFO) << "lat:" << n.lat << " lon:" << n.lon;
+    tci->mm_node_to_latlon.push_back(n.ll);
   }
 
   tci->mm_bounding_rect = {};
@@ -546,13 +545,13 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
     NodeBuilder::VNode M = coords->at(pos + 1);
     NodeBuilder::VNode B = coords->at(pos + 2);
 
-    DistanceToSegment dts =
-        FastPointToSegmentDistance(M.lat, M.lon, A.lat, A.lon, B.lat, B.lon);
+    DistanceToSegment dts = FastPointToSegmentDistance(
+        M.ll.lat, M.ll.lon, A.ll.lat, A.ll.lon, B.ll.lat, B.ll.lon);
 
-    int64_t len1 = calculate_distance(A.lat, A.lon, M.lat, M.lon);
-    int64_t len2 = calculate_distance(M.lat, M.lon, B.lat, B.lon);
-    int32_t angle1 = angle_to_east_degrees(A.lat, A.lon, M.lat, M.lon, len1);
-    int32_t angle2 = angle_to_east_degrees(M.lat, M.lon, B.lat, B.lon, len2);
+    int64_t len1 = calculate_distance(A.ll, M.ll);
+    int64_t len2 = calculate_distance(M.ll, B.ll);
+    int32_t angle1 = angle_to_east_degrees(A.ll, M.ll, len1);
+    int32_t angle2 = angle_to_east_degrees(M.ll, B.ll, len2);
     int32_t angle_at_m = std::abs(angle1 - angle2);
     if (angle_at_m > 180) {
       angle_at_m = std::abs(angle_at_m - 360);
@@ -562,9 +561,10 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
       LOG_S(INFO) << absl::StrFormat(
           "Distance of middle point d1:(%7d,%7d) d2:(%7d,%7d): %5.2fm "
           "len1:%5.2fm len2:%5.2f angle:%d",
-          M.lat.v() - A.lat.v(), M.lon.v() - A.lon.v(), B.lat.v() - M.lat.v(),
-          B.lon.v() - M.lon.v(), dts.distance_to_seg_cm / 100.0, len1 / 100.0,
-          len2 / 100.0, angle_at_m);
+          M.ll.lat.v() - A.ll.lat.v(), M.ll.lon.v() - A.ll.lon.v(),
+          B.ll.lat.v() - M.ll.lat.v(), B.ll.lon.v() - M.ll.lon.v(),
+          dts.distance_to_seg_cm / 100.0, len1 / 100.0, len2 / 100.0,
+          angle_at_m);
       LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", A.id, M.id,
                                      B.id);
     }
@@ -592,12 +592,12 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
   }
 
   // Check if the middle point is close to the straight line from start to end.
-  DegE6 lat_a = coords->front().lat;
-  DegE6 lon_a = coords->front().lon;
-  DegE6 lat_b = coords->back().lat;
-  DegE6 lon_b = coords->back().lon;
-  DegE6 lat_pt = coords->at(1).lat;
-  DegE6 lon_pt = coords->at(1).lon;
+  LatE6 lat_a = coords->front().lat;
+  LonE6 lon_a = coords->front().lon;
+  LatE6 lat_b = coords->back().lat;
+  LonE6 lon_b = coords->back().lon;
+  LatE6 lat_pt = coords->at(1).lat;
+  LonE6 lon_pt = coords->at(1).lon;
 
   DistanceToSegment d =
       FastPointToSegmentDistance(lat_pt, lon_pt, lat_a, lon_a, lat_b, lon_b);
@@ -679,7 +679,7 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
                      VectorElementMaxLimit(tci->cedge_shape_coord_length));
           tci->cedge_shape_coord_length.push_back(coords.size());
           for (const NodeBuilder::VNode& nc : coords) {
-            tci->shape_coords_arr.emplace_back(nc.lat, nc.lon);
+            tci->shape_coords_arr.emplace_back(nc.ll);
           }
         }
       }
@@ -793,9 +793,9 @@ void CheckGNodePlausible(const Graph& g, const TmpClusterInfo& tci,
   CHECK_S(n.cluster_id == mc.cluster_id || n.cluster_border_node)
       << mc.cluster_id;
 
-  MMLatLon latlon = mc.node_to_latlon(node_idx);
-  CHECK_EQ_S(latlon.lat.v(), n.lat.v());
-  CHECK_EQ_S(latlon.lon.v(), n.lon.v());
+  LatLon latlon = mc.node_to_latlon(node_idx);
+  CHECK_EQ_S(latlon.lat.v(), n.ll.lat.v());
+  CHECK_EQ_S(latlon.lon.v(), n.ll.lon.v());
 }
 
 void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mc,
@@ -923,7 +923,7 @@ void CheckShapeCoords(const TmpClusterInfo& tci, const MMCluster& mc) {
   MMShapeCoords::Result res;
   uint32_t coord_pos = 0;
   for (uint32_t node_idx = 0; node_idx < mc.nodes.size(); ++node_idx) {
-    MMLatLon base = mc.node_to_latlon(node_idx);
+    LatLon base = mc.node_to_latlon(node_idx);
     for (uint32_t edge_idx : mc.edge_indices(node_idx)) {
       mc.edge_shape_coords.get(base, edge_idx, &res);
       if (res.latlon.empty()) {
@@ -1433,7 +1433,7 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
     for (const auto& latlon : tci.mm_node_to_latlon) {
       CHECK_LE_S(tci.mm_bounding_rect.min.lat.v(), latlon.lat.v());
       // TODO: handle potential overflow?
-      const DegE6 diff = latlon.lat - tci.mm_bounding_rect.min.lat;
+      const LatE6 diff = latlon.lat - tci.mm_bounding_rect.min.lat;
       rel_lat.push_back(diff.v());
     }
     mmcluster->node_to_rel_lat.WriteDataBlob(
@@ -1448,7 +1448,7 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
     for (const auto& latlon : tci.mm_node_to_latlon) {
       CHECK_LE_S(tci.mm_bounding_rect.min.lon.v(), latlon.lon.v());
       // TODO: handle potential overflow?
-      const DegE6 diff = latlon.lon - tci.mm_bounding_rect.min.lon;
+      const LonE6 diff = latlon.lon - tci.mm_bounding_rect.min.lon;
       rel_lon.push_back(diff.v());
     }
     mmcluster->node_to_rel_lon.WriteDataBlob(

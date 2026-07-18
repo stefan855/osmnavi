@@ -66,8 +66,8 @@ static std::shared_ptr<MMHybridRouter::RouterData> g_last_router_data;
 static LRUCache<RouteKey, std::string> g_route_result_cache(8);
 
 // Cache the result for 'FindClosestEdges()'.
-inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, DegE6 lat,
-                                           DegE6 lon) {
+inline GeoAnchor FindClosestEdgesWithCache(const MMGraph& mg, LatE6 lat,
+                                           LonE6 lon) {
   return FindClosestEdges(mg, lat, lon);
   static LRUCache<uint64_t, GeoAnchor> g_closest_edge_cache(32);
 
@@ -102,7 +102,7 @@ std::string EncodeCoordinate(int value) {
   return encoded;
 }
 
-std::string EncodePolyline(const std::vector<MMLatLon>& coordinates) {
+std::string EncodePolyline(const std::vector<LatLon>& coordinates) {
   // constexpr int precision = 5;
   std::string encoded = "";
   int prev_lat = 0;
@@ -114,8 +114,10 @@ std::string EncodePolyline(const std::vector<MMLatLon>& coordinates) {
     // int lat = static_cast<int>(std::round(coord.lat * factor));
     // int lon = static_cast<int>(std::round(coord.lon * factor));
 
-    //  Get a compilation error if DegE6 doesn't have a factor of 10^6 anymore.
-    static_assert(DegE6::MulFactor() == 1'000'000);
+    //  Get a compilation error if LatE6/LonE6 doesn't have a factor of 10^6
+    //  anymore.
+    static_assert(LatE6::MulFactor() == 1'000'000);
+    static_assert(LonE6::MulFactor() == 1'000'000);
     int lat = (coord.lat.v() + 5) / 10;  // Scale to 10^5.
     int lon = (coord.lon.v() + 5) / 10;  // Scale to 10^5.
 
@@ -179,11 +181,11 @@ struct JsonResult {
   std::string last_name;
 };
 
-DegE6 GetLon(const MMCluster& mc, uint32_t n_idx) {
+LonE6 GetLon(const MMCluster& mc, uint32_t n_idx) {
   return mc.node_to_lon(n_idx);
 }
 
-DegE6 GetLat(const MMCluster& mc, uint32_t n_idx) {
+LatE6 GetLat(const MMCluster& mc, uint32_t n_idx) {
   return mc.node_to_lat(n_idx);
 }
 
@@ -209,10 +211,10 @@ class StepsData {
     const MMFullEdge& fe = res_.full_edges.at(pos);
     const MMCluster& mc = fe.mc(mg);
 
-    DegE6 from_lon = GetLon(mc, fe.from_node_idx);
-    DegE6 from_lat = GetLat(mc, fe.from_node_idx);
-    DegE6 to_lon = GetLon(mc, fe.target_idx(mc));
-    DegE6 to_lat = GetLat(mc, fe.target_idx(mc));
+    LonE6 from_lon = GetLon(mc, fe.from_node_idx);
+    LatE6 from_lat = GetLat(mc, fe.from_node_idx);
+    LonE6 to_lon = GetLon(mc, fe.target_idx(mc));
+    LatE6 to_lat = GetLat(mc, fe.target_idx(mc));
     if (pos == 0) {
       from_lon = res_.start.lon_at_fraction;
       from_lat = res_.start.lat_at_fraction;
@@ -222,11 +224,11 @@ class StepsData {
       to_lat = res_.target.lat_at_fraction;
     }
 
-    std::vector<MMLatLon> coords;
+    std::vector<LatLon> coords;
     coords.push_back({.lat = from_lat, .lon = from_lon});
     // TODO: handle start/end segment.
     if (pos != 0 && pos + 1 != num_steps()) {
-      const std::vector<MMLatLon> v =
+      const std::vector<LatLon> v =
           mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc));
       // TODO: Not yet supported by gcc: coords.append_range(v);
       coords.insert(coords.end(), v.cbegin(), v.cend());
@@ -258,10 +260,10 @@ class StepsData {
   JsonResult CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
-    DegE6 to_lon = res_.target.lon_at_fraction;
-    DegE6 to_lat = res_.target.lat_at_fraction;
+    LonE6 to_lon = res_.target.lon_at_fraction;
+    LatE6 to_lat = res_.target.lat_at_fraction;
 
-    std::vector<MMLatLon> coords;
+    std::vector<LatLon> coords;
     coords.push_back({.lat = to_lat, .lon = to_lon});
 
     nlohmann::json maneuver = {
@@ -335,8 +337,8 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   return {{"code", "Ok"}, {"waypoints", waypoints}, {"routes", routes}};
 }
 
-nlohmann::json ComputeRoute(const MMGraph& mg, DegE6 lat1, DegE6 lon1,
-                            DegE6 lat2, DegE6 lon2) {
+nlohmann::json ComputeRoute(const MMGraph& mg, LatE6 lat1, LonE6 lon1,
+                            LatE6 lat2, LonE6 lon2) {
   FUNC_TIMER();
 
   LOG_S(INFO) << "Search " << lat1.AsDouble() << " " << lon1.AsDouble();
@@ -542,8 +544,8 @@ int main(int argc, char* argv[]) {
               LOG_S(INFO) << "Return cached result length " << res_str.size()
                           << " bytes";
             } else {
-              nlohmann::json result = ComputeRoute(mg, DegE6(lat1), DegE6(lon1),
-                                                   DegE6(lat2), DegE6(lon2));
+              nlohmann::json result = ComputeRoute(mg, LatE6(lat1), LonE6(lon1),
+                                                   LatE6(lat2), LonE6(lon2));
               res_str = result.dump();
               g_route_result_cache.put(route_key, res_str);
             }
@@ -598,8 +600,8 @@ int main(int argc, char* argv[]) {
   // Try something on startup:
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
-  LOG_S(INFO) << ComputeRoute(mg, DegE6(47.3476881), DegE6(8.720121),
-                              DegE6(47.3476057), DegE6(8.7204095))
+  LOG_S(INFO) << ComputeRoute(mg, LatE6(47.3476881), LonE6(8.720121),
+                              LatE6(47.3476057), LonE6(8.7204095))
                      .dump(2);
 
   mg.PrintInfo();

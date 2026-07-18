@@ -223,8 +223,7 @@ struct GNode {
 
   std::uint32_t cluster_skeleton : 1;
 
-  DegE6 lat;
-  DegE6 lon;
+  LatLon ll;
 };
 
 // TODO: 32 bits are needed to represent all distances on earth, but for edges

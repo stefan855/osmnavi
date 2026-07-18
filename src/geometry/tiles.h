@@ -221,14 +221,14 @@ std::string CreatePNGInternal(
       // Iterate backwards because the more important edges are at the
       // beginning and should be overwriting less important edge from the end.
       for (int32_t node_idx = mc.nodes.size() - 1; node_idx >= 0; --node_idx) {
-        const MMLatLon latlon0 = mc.node_to_latlon(node_idx);
+        const LatLon latlon0 = mc.node_to_latlon(node_idx);
         const WorldPoint wp0 = LatLonToPixelMercator(latlon0.lat.AsDouble(),
                                                      latlon0.lon.AsDouble());
         for (uint32_t edge_idx : mc.edge_indices(node_idx)) {
           if (!edge_select_func(mc, node_idx, edge_idx)) {
             continue;
           }
-          const MMLatLon latlon1 =
+          const LatLon latlon1 =
               mc.node_to_latlon(mc.get_edge(edge_idx).target_idx());
           const WorldPoint wp1 = LatLonToPixelMercator(latlon1.lat.AsDouble(),
                                                        latlon1.lon.AsDouble());
@@ -310,8 +310,8 @@ std::string CreateMMGraphPNG(const MMGraphTileData& d, std::string what,
     return "";
   }
 }
-void DrawLineInternal(PNGContext& pd, const MMLatLon& latlon0,
-                      const MMLatLon& latlon1, TileColor line_color) {
+void DrawLineInternal(PNGContext& pd, const LatLon& latlon0,
+                      const LatLon& latlon1, TileColor line_color) {
   const WorldPoint wp0 =
       LatLonToPixelMercator(latlon0.lat.AsDouble(), latlon0.lon.AsDouble());
   const WorldPoint wp1 =
@@ -360,8 +360,8 @@ void DrawClusterRouter(PNGContext& pd, const MMHybridRouter::RouterData& rd,
     }
 
     if (from_node_idx != INFU32) {
-      const MMLatLon latlon0 = mc.node_to_latlon(from_node_idx);
-      const MMLatLon latlon1 =
+      const LatLon latlon0 = mc.node_to_latlon(from_node_idx);
+      const LatLon latlon1 =
           mc.node_to_latlon(mc.get_edge(edge_idx).target_idx());
       /*
       TileColor color = source == MMHybridRouter::START
@@ -387,10 +387,10 @@ std::string CreatePNGForHybridRouting(const MMGraph& mg,
     const MMCluster& mc = mg.mc(out_edge.from_cluster_id);
     const TileColor color =
         hvis.done ? (TileColor)(mc.color_no % NUM_COLORS) : GREY;
-    const MMLatLon latlon0 = mc.node_to_latlon(out_edge.from_node_idx);
-    const MMLatLon latlon1 = mc.node_to_latlon(out_edge.to_node_idx);
+    const LatLon latlon0 = mc.node_to_latlon(out_edge.from_node_idx);
+    const LatLon latlon1 = mc.node_to_latlon(out_edge.to_node_idx);
     DrawLineInternal(pd, latlon0, latlon1, MAGENTA);
-    MMLatLon prev_latlon;
+    LatLon prev_latlon;
     if (hvis.prev_source == MMHybridRouter::HYBRID) {
       const MMOutgoingEdge& prev_out_edge =
           MMHybridRouter::out_edge_from_hybrid_key(mg, hvis.prev_key_or_v_idx);

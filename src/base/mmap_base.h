@@ -26,9 +26,9 @@
 static_assert(std::endian::native == std::endian::little);
 
 #if 0
-struct MMLatLon {
-  DegE6 lat;
-  DegE6 lon;
+struct LatLon {
+  LatE6 lat;
+  LonE6 lon;
 };
 #endif
 
@@ -561,7 +561,7 @@ CHECK_IS_MM_OK(MMGroupedOSMIds);
 struct MMShapeCoords {
  public:
   struct Result {
-    std::vector<MMLatLon> latlon;
+    std::vector<LatLon> latlon;
     bool use_reverse_edge;  // When true then search at reverse edge.
   };
 
@@ -577,7 +577,7 @@ struct MMShapeCoords {
   //
   // Note: Use MMCluster::get_shape_coords() instead of the functions defined
   // here, it has a much simpler API.
-  void get(const MMLatLon base, uint32_t edge_idx, Result* res) const {
+  void get(const LatLon base, uint32_t edge_idx, Result* res) const {
     const CoordGroup& group = GetGroup(edge_idx);
     res->latlon.clear();
     {
@@ -602,7 +602,7 @@ struct MMShapeCoords {
         cnt += DecodeUInt(ptr + cnt, &num_coords);
         num_coords += 14;
       }
-      cnt += DecodeShapeCoords(ptr + cnt, num_coords, {DegE6(0), DegE6(0)},
+      cnt += DecodeShapeCoords(ptr + cnt, num_coords, {LatE6(0), LonE6(0)},
                                &res->latlon);
     }
 
@@ -710,7 +710,7 @@ struct MMShapeCoords {
   void WriteDataBlob(const std::string& name, int64_t global_object_offset,
                      int fd, const std::vector<uint16_t>& length,
                      const std::vector<bool>& use_reverse_edge,
-                     const std::vector<MMLatLon>& latlon) {
+                     const std::vector<LatLon>& latlon) {
     CHECK_EQ_S(length.size(), use_reverse_edge.size());
 
     // Create the groups vector.
@@ -752,7 +752,7 @@ struct MMShapeCoords {
             EncodeUInt(naked_length - 14, &buff);  // store length in-stream.
           }
           EncodeShapeCoords(latlon.at(coord_pos),
-                            std::span<const MMLatLon>(&latlon.at(coord_pos + 1),
+                            std::span<const LatLon>(&latlon.at(coord_pos + 1),
                                                       naked_length),
                             &buff);
         }

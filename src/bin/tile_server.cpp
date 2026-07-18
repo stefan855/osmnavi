@@ -127,7 +127,8 @@ double ConvertToDouble(std::string_view numstr) {
     if (!absl::SimpleAtoi(numstr, &num)) {
       LOG_S(INFO) << "Can not convert string to int64: <" << numstr << ">";
     }
-    return DegE6(num).AsDouble();
+    // We use lat here, it doesn't matter for the conversion.
+    return LatE6(num).AsDouble();
   }
 }
 

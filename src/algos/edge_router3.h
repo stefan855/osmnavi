@@ -86,8 +86,8 @@ class EdgeRouter3 {
 
     Context ctx = {.opt = opt,
                    .metric = metric,
-                   .target_lat = g_.nodes.at(target_idx).lat,
-                   .target_lon = g_.nodes.at(target_idx).lon};
+                   .target_lat = g_.nodes.at(target_idx).ll.lat,
+                   .target_lon = g_.nodes.at(target_idx).ll.lon};
 
     InitialiseRoutingFromNode(ctx, start_idx);
 
@@ -148,8 +148,8 @@ class EdgeRouter3 {
           const GNode b = ve.key.ToNode(g_, ctr_list_);
           myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n",
                                     ve.shortest_route ? "red" : "black",
-                                    a.lat.AsDouble(), a.lon.AsDouble(),
-                                    b.lat.AsDouble(), b.lon.AsDouble());
+                                    a.ll.lat.AsDouble(), a.ll.lon.AsDouble(),
+                                    b.ll.lat.AsDouble(), b.ll.lon.AsDouble());
         }
       }
     }
@@ -192,8 +192,8 @@ class EdgeRouter3 {
   struct Context {
     const RoutingOptions opt;
     const RoutingMetric& metric;
-    const DegE6 target_lat;
-    const DegE6 target_lon;
+    const LatE6 target_lat;
+    const LonE6 target_lon;
     // RestrictedAccessArea target_restricted_access;
   };
 
@@ -302,9 +302,9 @@ class EdgeRouter3 {
         WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        static_cast<uint32_t>(1.00 * calculate_distance(node.lat, node.lon,
-                                                        ctx.target_lat,
-                                                        ctx.target_lon)));
+        static_cast<uint32_t>(
+            1.00 *
+            calculate_distance(node.ll, {ctx.target_lat, ctx.target_lon})));
   }
 
   // Add turn restrictions that have the initial trigger on edge 'e'.

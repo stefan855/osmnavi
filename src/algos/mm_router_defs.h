@@ -15,8 +15,8 @@ struct EdgePoint {
   // fe.from_node_idx. 1.0 means that the start is at the end of the edge. All
   // values between indicate a location between start and end.
   float to_fraction = 0.0;
-  DegE6 lat_at_fraction;
-  DegE6 lon_at_fraction;
+  LatE6 lat_at_fraction;
+  LonE6 lon_at_fraction;
   MMFullEdge fe = {};
 
   float GetFromFraction() const {
@@ -26,8 +26,8 @@ struct EdgePoint {
     return std::max(0.0f, std::min(1.0f, to_fraction));
   }
 
-  std::string DebugString(const MMCluster& mc, DegE6 origin_lat = {},
-                          DegE6 origin_lon = {}) const {
+  std::string DebugString(const MMCluster& mc, LatE6 origin_lat = {},
+                          LonE6 origin_lon = {}) const {
     CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
     return absl::StrFormat(
         "Closest Edge to (%.7f, %.7f) dist:%.2fm cl:%u n0:%lli n1:%lli fc:%.2f",
@@ -37,8 +37,8 @@ struct EdgePoint {
         mc.get_node_id(fe.edge(mc).target_idx()), to_fraction);
   }
 
-  std::string DebugString(const MMGraph& mg, DegE6 origin_lat = {},
-                          DegE6 origin_lon = {}) const {
+  std::string DebugString(const MMGraph& mg, LatE6 origin_lat = {},
+                          LonE6 origin_lon = {}) const {
     return DebugString(mg.clusters.at(fe.cluster_id), origin_lat, origin_lon);
   }
 };
@@ -48,7 +48,7 @@ struct EdgePoint {
 class GeoAnchor {
  public:
   GeoAnchor() : point_({}){};
-  GeoAnchor(const MMLatLon& point) : point_(point) {}
+  GeoAnchor(const LatLon& point) : point_(point) {}
 
   void AddEdge(const EdgePoint& ep) { push_edge(ep); }
   void AddEdge(const MMCluster& mc, float to_fraction, const MMFullEdge& fe) {
@@ -177,7 +177,7 @@ class GeoAnchor {
   }
 
   const std::vector<EdgePoint>& edge_points() const { return edge_points_; }
-  const MMLatLon& point() const { return point_; }
+  const LatLon& point() const { return point_; }
 
  private:
   void push_edge(const EdgePoint& ep) {
@@ -188,7 +188,7 @@ class GeoAnchor {
   }
 
   // The point selected by the user on the map.
-  MMLatLon point_;
+  LatLon point_;
   std::vector<EdgePoint> edge_points_;
 };
 

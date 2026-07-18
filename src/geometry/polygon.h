@@ -32,19 +32,20 @@ inline Polygon LoadPolygon(const std::string& filename) {
     std::vector<std::string_view> row = absl::StrSplit(line, ',');
     CHECK_EQ_S(row.size(), 4u);
 
-    DegE6 lat, lon;
+    LatE6 lat;
+    LonE6 lon;
     if (row.at(2).contains('.') && row.at(3).contains('.')) {
       double num;
       CHECK_S(absl::SimpleAtod(row.at(2), &num)) << line;
-      lat = DegE6(num);
+      lat = LatE6(num);
       CHECK_S(absl::SimpleAtod(row.at(3), &num)) << line;
-      lon = DegE6(num);
+      lon = LonE6(num);
     } else {
       int32_t num;
       CHECK_S(absl::SimpleAtoi(row.at(2), &num)) << row.at(2);
-      lat = DegE6(num);
+      lat = LatE6(num);
       CHECK_S(absl::SimpleAtoi(row.at(3), &num)) << row.at(3);
-      lon = DegE6(num);
+      lon = LonE6(num);
     }
 
     if (poly.coords.empty()) {

@@ -47,18 +47,18 @@ void TestTopNSmaller() {
 
 void TestDegE6() {
   FUNC_TIMER();
-  DegE6 a(static_cast<int>(5));
-  DegE6 b(static_cast<int32_t>(5));
-  DegE6 c(static_cast<int64_t>(5));
-  DegE6 d(5.0f);
-  DegE6 e(5.0);
+  LatE6 a(static_cast<int>(5));
+  LatE6 b(static_cast<int32_t>(5));
+  LatE6 c(static_cast<int64_t>(5));
+  LatE6 d(5.0f);
+  LatE6 e(5.0);
 
   CHECK_EQ_S(a.v(), 5);
   ;
   CHECK_EQ_S(b.v(), 5);
   CHECK_EQ_S(c.v(), 5);
-  CHECK_EQ_S(d.v(), 5 * DegE6::MulFactor());
-  CHECK_EQ_S(e.v(), 5 * DegE6::MulFactor());
+  CHECK_EQ_S(d.v(), 5 * LatE6::MulFactor());
+  CHECK_EQ_S(e.v(), 5 * LatE6::MulFactor());
   CHECK_EQ_S(d.AsFloat(), 5.0f);
   CHECK_EQ_S(e.AsDouble(), 5.0);
 }
@@ -67,16 +67,16 @@ void TestShapeCoords() {
   FUNC_TIMER();
 
   uint64_t rand = 13;
-  std::vector<MMLatLon> latlon;
-  std::vector<MMLatLon> latlon2;
+  std::vector<LatLon> latlon;
+  std::vector<LatLon> latlon2;
 
   for (size_t k = 0; k < 200; ++k) {
-    const MMLatLon base(DegE6(PseudoRandomInt32(&rand)),
-                        DegE6(PseudoRandomInt32(&rand)));
+    const LatLon base(LatE6(PseudoRandomInt32(&rand)),
+                      LonE6(PseudoRandomInt32(&rand)));
     const size_t num = PseudoRandomUInt64(&rand) % 17;
     for (size_t i = 0; i < num; ++i) {
-      latlon.emplace_back(DegE6(PseudoRandomInt32(&rand)),
-                          DegE6(PseudoRandomInt32(&rand)));
+      latlon.emplace_back(LatE6(PseudoRandomInt32(&rand)),
+                          LonE6(PseudoRandomInt32(&rand)));
     }
     WriteBuff buff;
     EncodeShapeCoords(base, latlon, &buff);

@@ -66,8 +66,8 @@ inline void EncodeGNode(const GNode& base, const GNode& n, WriteBuff* buff) {
   EncodeInt(n.edges_start_pos - base.edges_start_pos, buff);
   EncodeUInt(n.num_forward_edges, buff);
   EncodeUInt(n.ncc, buff);
-  EncodeInt(n.lat.v(), buff);
-  EncodeInt(n.lon.v(), buff);
+  EncodeInt(n.ll.lat.v(), buff);
+  EncodeInt(n.ll.lon.v(), buff);
   /*
   ** bit std::uint32_t large_component : 1;
   ** bit std::uint32_t cluster_border_node : 1 = 0;
@@ -88,8 +88,8 @@ inline uint32_t DecodeGNode(const GNode& base, const std::uint8_t* ptr,
   DECODE_INT_DIFF(cnt, ptr, base.edges_start_pos, n->edges_start_pos);
   DECODE_UINT(cnt, ptr, n->num_forward_edges);
   DECODE_UINT(cnt, ptr, n->ncc);
-  DECODE_INT(cnt, ptr, n->lat);
-  DECODE_INT(cnt, ptr, n->lon);
+  DECODE_INT(cnt, ptr, n->ll.lat);
+  DECODE_INT(cnt, ptr, n->ll.lon);
 
   {
     uint64_t bitset;

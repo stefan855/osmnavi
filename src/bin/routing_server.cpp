@@ -168,12 +168,12 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter3& router,
   const GNode& to_node = ve.key.ToNode(g, ctr_list);
   const GNode& from_node = arrival ? to_node : ve.key.FromNode(g, ctr_list);
   std::vector<DoubleCoordinatePair> coords;
-  coords.emplace_back(from_node.lat.AsDouble(), from_node.lon.AsDouble());
+  coords.emplace_back(from_node.ll.lat.AsDouble(), from_node.ll.lon.AsDouble());
   double dist = 0;
   double duration = 0;
   if (!arrival) {
     coords.push_back(
-        {.lat = to_node.lat.AsDouble(), .lon = to_node.lon.AsDouble()});
+        {.lat = to_node.ll.lat.AsDouble(), .lon = to_node.ll.lon.AsDouble()});
     // convert to seconds.
     duration = (prev_edge != nullptr ? ve.min_metric - prev_edge->min_metric
                                      : ve.min_metric) /
@@ -188,7 +188,7 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter3& router,
   nlohmann::json maneuver = {
       {"bearing_after", 0},
       {"bearing_before", 0},
-      {"location", {from_node.lon.AsDouble(), from_node.lat.AsDouble()}},
+      {"location", {from_node.ll.lon.AsDouble(), from_node.ll.lat.AsDouble()}},
       {"modifier", "ModifierContinue"},
       {"type", (arrival    ? "arrive"
                 : pos == 0 ? "depart"
@@ -239,15 +239,16 @@ nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
     const GNode& n = ve.key.FromNode(g, ctr_list);
     waypoints.push_back({{"distance", std::roundf(dist_p1 / 10.0) / 10.0},
                          {"name", GetEdgeName(g, ctr_list, ve)},
-                         {"location", {n.lon.AsDouble(), n.lat.AsDouble()}}});
+                         {"location", {n.ll.lon.AsDouble(), n.ll.lat.AsDouble()}}});
   }
   {
     const EdgeRouter3::VisitedEdge& ve =
         router.GetVEdge(res.route_v_idx.back());
     const GNode& n = ve.key.ToNode(g, ctr_list);
-    waypoints.push_back({{"distance", std::roundf(dist_p2 / 10.0) / 10.0},
-                         {"name", GetEdgeName(g, ctr_list, ve)},
-                         {"location", {n.lon.AsDouble(), n.lat.AsDouble()}}});
+    waypoints.push_back(
+        {{"distance", std::roundf(dist_p2 / 10.0) / 10.0},
+         {"name", GetEdgeName(g, ctr_list, ve)},
+         {"location", {n.ll.lon.AsDouble(), n.ll.lat.AsDouble()}}});
   }
 
   // We currently support only one leg, so the only thing to fill are the steps.
@@ -266,8 +267,8 @@ nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
 
 nlohmann::json ComputeRoute(const Graph& g,
                             const std::vector<uint32_t>& sorted_node_indexes,
-                            bool hybrid, DegE6 lon1, DegE6 lat1, DegE6 lon2,
-                            DegE6 lat2) {
+                            bool hybrid, LonE6 lon1, LatE6 lat1, LonE6 lon2,
+                            LatE6 lat2) {
   FUNC_TIMER();
   const ClosestNodeResult n1 =
       FindClosestNodeFast(g, sorted_node_indexes, lat1, lon1);
@@ -285,8 +286,8 @@ nlohmann::json ComputeRoute(const Graph& g,
     const GNode gn2 = g.nodes.at(target_idx);
     LOG_S(INFO) << absl::StrFormat(
         "Routing from node %lld (%.4f, %.4f) to %lld (%.4f, %.4f)", gn1.node_id,
-        gn1.lat.AsDouble(), gn1.lon.AsDouble(), gn2.node_id, gn2.lat.AsDouble(),
-        gn2.lon.AsDouble());
+        gn1.ll.lat.AsDouble(), gn1.ll.lon.AsDouble(), gn2.node_id,
+        gn2.ll.lat.AsDouble(), gn2.ll.lon.AsDouble());
   }
 
   RoutingMetricTime metric;
@@ -422,8 +423,8 @@ int main(int argc, char* argv[]) {
               !absl::SimpleAtod(req.matches.str(5), &lat2)) {
             result = {{"code", "InvalidQuery"}};
           } else {
-            result = ComputeRoute(g, sorted_node_indexes, hybrid, DegE6(lon1),
-                                  DegE6(lat1), DegE6(lon2), DegE6(lat2));
+            result = ComputeRoute(g, sorted_node_indexes, hybrid, LonE6(lon1),
+                                  LatE6(lat1), LonE6(lon2), LatE6(lat2));
           }
         }
         res.set_header("Access-Control-Allow-Origin", "*");
@@ -436,8 +437,8 @@ int main(int argc, char* argv[]) {
   decode_polyline("ar~_Hwcft@Ny@");
   decode_polyline("qq~_Hqeft@");
   LOG_S(INFO) << ComputeRoute(g, sorted_node_indexes, /*hybrid=*/false,
-                              DegE6(8.720121), DegE6(47.3476881),
-                              DegE6(8.7204095), DegE6(47.3476057))
+                              LonE6(8.720121), LatE6(47.3476881),
+                              LonE6(8.7204095), LatE6(47.3476057))
                      .dump(2);
 
   LOG_S(INFO) << CalculateAngle(0, 0, 1, 0);
