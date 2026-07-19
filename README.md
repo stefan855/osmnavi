@@ -45,12 +45,16 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Add shape node coordinates to the memory mapped file. Shape nodes exist in OSM data to "shape" the curvature of a street. They are omitted from the routing graph itself, because they are not needed to find shortest routes.
   
 ## Current Tasks
-* Use shape coordinates in routing server, enabling route display following street curvature.
-* Add more tests for shape coordinate storage.
-* Remove the serialized graph, it is replaced by the memory mapped graph. 
+* Improve sequential access speed of shape coordinates by caching last acccess position.
+* Improve routing: Display shape coordinates (street curvature) for start/end segment.
+* Improve routing: Concatenate consecutive street segments of the same street in returned routes.
+* Imporve routing: Calculate angles
+* Imporve routing: Add A* routing to mm_routing_server.
+* Fix unrestricted areas behind restricted areas.
+* Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
+* Remove the serialized graph, it is replaced by the memory mapped graph.
 
 ## Tasks ahead
-1. Add A* to the new cluster based routing algorithm.
 2. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
 3. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
 4. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
