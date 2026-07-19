@@ -1,7 +1,7 @@
 # OpenStreetMap Routing Engine
 
 ## Project
-Extract the road graph from OSM data dumps, implement various graph algorithms to preprocess the graph (for example [Tarjan](https://en.wikipedia.org/wiki/Bridge_(graph_theory)#Tarjan%27s_bridge-finding_algorithm) or [Louvain](https://en.wikipedia.org/wiki/Louvain_method)), and implement with routing algorithms such as [Dijkstra](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm) or [A*](https://en.wikipedia.org/wiki/A*_search_algorithm).
+Extract the road graph from OSM data dumps, implement various graph algorithms to preprocess the graph (for example [Tarjan](https://en.wikipedia.org/wiki/Bridge_(graph_theory)#Tarjan%27s_bridge-finding_algorithm) or [Louvain](https://en.wikipedia.org/wiki/Louvain_method)), and implement routing algorithms such as [Dijkstra](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm) or [A*](https://en.wikipedia.org/wiki/A*_search_algorithm).
 
 ## Status
 Under Construction. Expect code to be buggy and unstable. Use at your own risk.
