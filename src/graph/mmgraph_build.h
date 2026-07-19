@@ -584,37 +584,6 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
       ++pos;
     }
   }
-
-#if 0
-  if (coords->size() != 3) {
-    return;
-  }
-
-  // Check if the middle point is close to the straight line from start to end.
-  LatE6 lat_a = coords->front().lat;
-  LonE6 lon_a = coords->front().lon;
-  LatE6 lat_b = coords->back().lat;
-  LonE6 lon_b = coords->back().lon;
-  LatE6 lat_pt = coords->at(1).lat;
-  LonE6 lon_pt = coords->at(1).lon;
-
-  DistanceToSegment d =
-      FastPointToSegmentDistance(lat_pt, lon_pt, lat_a, lon_a, lat_b, lon_b);
-
-  int64_t len1 = calculate_distance(lat_a, lon_a, lat_pt, lon_pt);
-  int64_t len2 = calculate_distance(lat_pt, lon_pt, lat_b, lon_b);
-  int32_t angle1 = angle_to_east_degrees(lat_a, lon_a, lat_pt, lon_pt, len1);
-  int32_t angle2 = angle_to_east_degrees(lat_pt, lon_pt, lat_b, lon_b, len2);
-
-  LOG_S(INFO) << absl::StrFormat(
-      "Distance of middle point d1:(%7d,%7d) d2:(%7d,%7d): %5.2fm len1:%5.2fm "
-      "len2:%5.2f angle:%d",
-      lat_pt.v() - lat_a.v(), lon_pt.v() - lon_a.v(), lat_b.v() - lat_pt.v(),
-      lon_b.v() - lon_pt.v(), d.distance_cm / 100.0, len1 / 100.0, len2 / 100.0,
-      angle1 - angle2);
-  LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", coords->at(0).id,
-                                 coords->at(1).id, coords->at(2).id);
-#endif
 }
 
 // Store the shape coords of edges in the temporary cluster information.

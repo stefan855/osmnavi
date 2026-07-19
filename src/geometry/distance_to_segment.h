@@ -11,8 +11,7 @@
 struct DistanceToSegment {
   double distance_to_seg_cm = 0;
   double fraction_closest = 0.0;
-  LatE6 lat_closest;
-  LonE6 lon_closest;
+  LatLon coord_closest;
 
   // "spaceship" operator, automatically defines ==, !=, <, <=, >, >=.
   auto operator<=>(const DistanceToSegment&) const = default;
@@ -66,8 +65,7 @@ constexpr DistanceToSegment FastPointToSegmentDistance(LatLon p, LatLon a,
     // Segment is a point
     return {.distance_to_seg_cm = std::hypot(x_p, y_p),
             .fraction_closest = 0.0,
-            .lat_closest = a.lat,
-            .lon_closest = a.lon};
+            .coord_closest = a};
   }
 
   // Project point onto line: t = dot(AP, AB) / |AB|^2
@@ -88,10 +86,11 @@ constexpr DistanceToSegment FastPointToSegmentDistance(LatLon p, LatLon a,
 
   return {.distance_to_seg_cm = std::hypot(x_p - closest_x, y_p - closest_y),
           .fraction_closest = fraction_closest,
-          .lat_closest = LatE6(
-              a.lat.v64() + static_cast<int64_t>(fraction_closest *
-                                                 (b.lat.v64() - a.lat.v64()))),
-          .lon_closest = LonE6(
-              a.lon.v64() + static_cast<int64_t>(fraction_closest *
-                                                 (b.lon.v64() - a.lon.v64())))};
+          .coord_closest = {
+              LatE6(a.lat.v64() +
+                    static_cast<int64_t>(fraction_closest *
+                                         (b.lat.v64() - a.lat.v64()))),
+              LonE6(a.lon.v64() +
+                    static_cast<int64_t>(fraction_closest *
+                                         (b.lon.v64() - a.lon.v64())))}};
 }

@@ -15,8 +15,9 @@ struct EdgePoint {
   // fe.from_node_idx. 1.0 means that the start is at the end of the edge. All
   // values between indicate a location between start and end.
   float to_fraction = 0.0;
-  LatE6 lat_at_fraction;
-  LonE6 lon_at_fraction;
+  LatLon ll_at_fraction;
+  // LatE6 lat_at_fraction;
+  // LonE6 lon_at_fraction;
   MMFullEdge fe = {};
 
   float GetFromFraction() const {

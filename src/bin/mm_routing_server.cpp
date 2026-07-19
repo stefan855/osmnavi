@@ -132,6 +132,7 @@ std::string EncodePolyline(const std::vector<LatLon>& coordinates) {
   return encoded;
 }
 
+#if 0
 void decode_polyline(const std::string& encoded) {
   size_t i = 0;  // what byte are we looking at
 
@@ -171,6 +172,7 @@ void decode_polyline(const std::string& encoded) {
     last_lat = lat;
   }
 }
+#endif
 
 struct JsonResult {
   nlohmann::json j;
@@ -178,14 +180,6 @@ struct JsonResult {
   double sum_duration = 0.0;
   std::string last_name;
 };
-
-LonE6 GetLon(const MMCluster& mc, uint32_t n_idx) {
-  return mc.node_to_lon(n_idx);
-}
-
-LatE6 GetLat(const MMCluster& mc, uint32_t n_idx) {
-  return mc.node_to_lat(n_idx);
-}
 
 std::string GetEdgeName(const MMCluster& mc, const MMFullEdge& fe) {
   uint32_t way_idx = fe.way_idx(mc);
@@ -209,21 +203,17 @@ class StepsData {
     const MMFullEdge& fe = res_.full_edges.at(pos);
     const MMCluster& mc = fe.mc(mg);
 
-    LonE6 from_lon = GetLon(mc, fe.from_node_idx);
-    LatE6 from_lat = GetLat(mc, fe.from_node_idx);
-    LonE6 to_lon = GetLon(mc, fe.target_idx(mc));
-    LatE6 to_lat = GetLat(mc, fe.target_idx(mc));
+    LatLon from_coord =  mc.node_to_latlon(fe.from_node_idx);
+    LatLon to_coord =  mc.node_to_latlon(fe.target_idx(mc));
     if (pos == 0) {
-      from_lon = res_.start.lon_at_fraction;
-      from_lat = res_.start.lat_at_fraction;
+      from_coord = res_.start.ll_at_fraction;
     }
     if (pos + 1 == num_steps()) {
-      to_lon = res_.target.lon_at_fraction;
-      to_lat = res_.target.lat_at_fraction;
+      to_coord = res_.target.ll_at_fraction;
     }
 
     std::vector<LatLon> coords;
-    coords.push_back({.lat = from_lat, .lon = from_lon});
+    coords.push_back(from_coord);
     // TODO: handle start/end segment.
     if (pos != 0 && pos + 1 != num_steps()) {
       const std::vector<LatLon> v =
@@ -231,7 +221,7 @@ class StepsData {
       // TODO: Not yet supported by gcc: coords.append_range(v);
       coords.insert(coords.end(), v.cbegin(), v.cend());
     }
-    coords.push_back({.lat = to_lat, .lon = to_lon});
+    coords.push_back(to_coord);
 
     // convert to seconds.
     const double duration = res_.edge_metric(pos) / 1000.0;
@@ -240,7 +230,7 @@ class StepsData {
     nlohmann::json maneuver = {
         {"bearing_after", 0},
         {"bearing_before", 0},
-        {"location", {from_lon.AsDouble(), from_lat.AsDouble()}},
+        {"location", {from_coord.lon.AsDouble(), from_coord.lat.AsDouble()}},
         {"modifier", "ModifierContinue"},
         {"type", (pos == 0 ? "depart" : "continue")}};
 
@@ -258,16 +248,14 @@ class StepsData {
   JsonResult CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
-    LonE6 to_lon = res_.target.lon_at_fraction;
-    LatE6 to_lat = res_.target.lat_at_fraction;
-
+    LatLon to_coord = res_.target.ll_at_fraction;
     std::vector<LatLon> coords;
-    coords.push_back({.lat = to_lat, .lon = to_lon});
+    coords.push_back(to_coord);
 
     nlohmann::json maneuver = {
         {"bearing_after", 0},
         {"bearing_before", 0},
-        {"location", {to_lon.AsDouble(), to_lat.AsDouble()}},
+        {"location", {to_coord.lon.AsDouble(), to_coord.lat.AsDouble()}},
         {"type", "arrive"}};
 
     nlohmann::json step = {{"geometry", EncodePolyline(coords)},
@@ -306,16 +294,16 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
         {{"distance", std::roundf(res.start.distance_to_seg_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.start.fe.mc(mg), res.start.fe)},
          {"location",
-          {res.start.lon_at_fraction.AsDouble(),
-           res.start.lat_at_fraction.AsDouble()}}});
+          {res.start.ll_at_fraction.lon.AsDouble(),
+           res.start.ll_at_fraction.lat.AsDouble()}}});
   }
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.target.distance_to_seg_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.target.fe.mc(mg), res.target.fe)},
          {"location",
-          {res.target.lon_at_fraction.AsDouble(),
-           res.target.lat_at_fraction.AsDouble()}}});
+          {res.target.ll_at_fraction.lon.AsDouble(),
+           res.target.ll_at_fraction.lat.AsDouble()}}});
   }
 
   // We currently support only one leg, so the only thing to fill are the
@@ -335,28 +323,27 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   return {{"code", "Ok"}, {"waypoints", waypoints}, {"routes", routes}};
 }
 
-nlohmann::json ComputeRoute(const MMGraph& mg, LatE6 lat1, LonE6 lon1,
-                            LatE6 lat2, LonE6 lon2) {
+nlohmann::json ComputeRoute(const MMGraph& mg, LatLon start_pt,
+                            LatLon target_pt) {
   FUNC_TIMER();
 
-  LOG_S(INFO) << "Search " << lat1.AsDouble() << " " << lon1.AsDouble();
   GeoAnchor start;
   GeoAnchor target;
   double find_closest_time;
   {
     absl::Time start_time = absl::Now();
-    start = FindClosestEdgesWithCache(mg, {lat1, lon1});
-    target = FindClosestEdgesWithCache(mg, {lat2, lon2});
+    start = FindClosestEdgesWithCache(mg, start_pt);
+    target = FindClosestEdgesWithCache(mg, target_pt);
     find_closest_time = ToDoubleSeconds(absl::Now() - start_time);
   }
   LOG_S(INFO) << absl::StrFormat("**** Find closest edges: %.2f secs",
                                  find_closest_time);
 
   for (const auto& e : start.edge_points()) {
-    LOG_S(INFO) << e.DebugString(mg, lat1, lon1);
+    LOG_S(INFO) << e.DebugString(mg, start_pt.lat, start_pt.lon);
   }
   for (const auto& e : target.edge_points()) {
-    LOG_S(INFO) << e.DebugString(mg, lat2, lon2);
+    LOG_S(INFO) << e.DebugString(mg, target_pt.lat, target_pt.lon);
   }
   LOG_S(INFO) << absl::StrFormat("Found: start:%d  target:%d",
                                  !start.edge_points().empty(),
@@ -542,8 +529,8 @@ int main(int argc, char* argv[]) {
               LOG_S(INFO) << "Return cached result length " << res_str.size()
                           << " bytes";
             } else {
-              nlohmann::json result = ComputeRoute(mg, LatE6(lat1), LonE6(lon1),
-                                                   LatE6(lat2), LonE6(lon2));
+              nlohmann::json result = ComputeRoute(
+                  mg, {LatE6(lat1), LonE6(lon1)}, {LatE6(lat2), LonE6(lon2)});
               res_str = result.dump();
               g_route_result_cache.put(route_key, res_str);
             }
@@ -596,10 +583,10 @@ int main(int argc, char* argv[]) {
           });
 
   // Try something on startup:
-  decode_polyline("ar~_Hwcft@Ny@");
-  decode_polyline("qq~_Hqeft@");
-  LOG_S(INFO) << ComputeRoute(mg, LatE6(47.3476881), LonE6(8.720121),
-                              LatE6(47.3476057), LonE6(8.7204095))
+  // decode_polyline("ar~_Hwcft@Ny@");
+  // decode_polyline("qq~_Hqeft@");
+  LOG_S(INFO) << ComputeRoute(mg, {LatE6(47.3476881), LonE6(8.720121)},
+                              {LatE6(47.3476057), LonE6(8.7204095)})
                      .dump(2);
 
   mg.PrintInfo();

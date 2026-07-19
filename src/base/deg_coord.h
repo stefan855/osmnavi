@@ -121,5 +121,8 @@ CHECK_IS_MM_OK(LonE6);
 struct LatLon {
   LatE6 lat;
   LonE6 lon;
+
+  auto operator<=>(const LatLon&) const = default;
 };
+CHECK_IS_MM_OK(LatLon);
 
