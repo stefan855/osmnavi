@@ -48,8 +48,8 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 * Improve sequential access speed of shape coordinates by caching last acccess position.
 * Improve routing: Display shape coordinates (street curvature) for start/end segment.
 * Improve routing: Concatenate consecutive street segments of the same street in returned routes.
-* Imporve routing: Calculate angles
-* Imporve routing: Add A* routing to mm_routing_server.
+* Improve routing: Calculate angles
+* Improve routing: Add A* routing to mm_routing_server.
 * Fix unrestricted areas behind restricted areas.
 * Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
 * Remove the serialized graph, it is replaced by the memory mapped graph.
