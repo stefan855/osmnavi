@@ -15,7 +15,7 @@ struct EdgePoint {
   // fe.from_node_idx. 1.0 means that the start is at the end of the edge. All
   // values between indicate a location between start and end.
   float to_fraction = 0.0;
-  LatLon ll_at_fraction;
+  LatLon coord_at_fraction;
   // LatE6 lat_at_fraction;
   // LonE6 lon_at_fraction;
   MMFullEdge fe = {};
@@ -190,6 +190,7 @@ class GeoAnchor {
 
   // The point selected by the user on the map.
   LatLon point_;
+  // The points on edges that are closest to point_.
   std::vector<EdgePoint> edge_points_;
 };
 

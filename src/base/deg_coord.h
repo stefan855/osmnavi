@@ -14,9 +14,9 @@ concept TAllowedIntDegE6 =
 
 // Encapsulate a degree coordinate (typically lat or lon) in a class.
 //
-// The template is used to create two identical types that can't be mixed and are used throughout the code:
-// LatE6: Store latitude coordinates with resolution 10^6.
-// LonE6: Store longitude coordinates with resolution 10^6.
+// The template is used to create two identical types that can't be mixed and
+// are used throughout the code: LatE6: Store latitude coordinates with
+// resolution 10^6. LonE6: Store longitude coordinates with resolution 10^6.
 //
 // Internals:
 // To store a floating point coordinate such as 47.341234, it is multiplied by
@@ -26,11 +26,11 @@ concept TAllowedIntDegE6 =
 //
 // This class mostly hides the multiplication factor and makes code that uses
 // such coordinates shorter, more readable and less error prone.
-enum class DegE6Type {DegE6Latitude, DegE6Longitude};
+enum class DegE6Type { DegE6Latitude, DegE6Longitude };
 template <DegE6Type deg_type>
 class DegE6Base {
  public:
-  DegE6Base() : DegE6Base(0) {}
+  constexpr DegE6Base() : DegE6Base(0) {}
   constexpr explicit DegE6Base(int32_t c) : coordinate_(c) {}
   constexpr explicit DegE6Base(int64_t c) : DegE6Base(static_cast<int32_t>(c)) {
     assert(c >= std::numeric_limits<int32_t>::min());
@@ -55,7 +55,6 @@ class DegE6Base {
 
   // Create from OSM coordinate, which is deg * 10^7.
   constexpr static DegE6Base<deg_type> FromOSM(int64_t deg_e7) {
-    // return DegE6Base(deg_e7);
     return DegE6Base((deg_e7 + 5) / 10);
   }
 
@@ -94,14 +93,15 @@ class DegE6Base {
   }
 
   // Unclear why this has to be defined. C++...
-  bool operator==(const DegE6Base<deg_type>& other) const {
+  constexpr bool operator==(const DegE6Base<deg_type>& other) const {
     return coordinate_ == other.coordinate_;
   }
-  bool operator!=(const DegE6Base<deg_type>& other) const {
+  constexpr bool operator!=(const DegE6Base<deg_type>& other) const {
     return !(coordinate_ == other.coordinate_);
   }
 
-  friend DegE6Base operator-(const DegE6Base<deg_type>& lhs, const DegE6Base<deg_type>& rhs) {
+  constexpr friend DegE6Base operator-(const DegE6Base<deg_type>& lhs,
+                             const DegE6Base<deg_type>& rhs) {
     // TODO: handle over/underflows?
     return DegE6Base<deg_type>(lhs.v64() - rhs.v64());
   }
@@ -125,4 +125,3 @@ struct LatLon {
   auto operator<=>(const LatLon&) const = default;
 };
 CHECK_IS_MM_OK(LatLon);
-

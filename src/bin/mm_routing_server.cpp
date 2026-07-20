@@ -6,6 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -193,6 +194,58 @@ std::string GetEdgeName(const MMCluster& mc, const MMFullEdge& fe) {
 
 double Round1(double val) { return std::round(val * 10.0) / 10.0; }
 
+// Given a start edge point, compute the vector of shape coordinates that
+// represent the start sequence of coordinates on that edge.
+std::vector<LatLon> ComputeStartShapeCoords(const MMCluster& mc,
+                                            const EdgePoint& ep) {
+  const MMFullEdge fe = ep.fe;
+  const std::vector<LatLon> shapes =
+      mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc), /*extend=*/true);
+  // We start traveling on the edge at this distance.
+  const uint32_t fraction_dist =
+      mc.edge_to_distance.at(fe.edge_idx(mc)) * ep.to_fraction;
+  uint64_t sum_dist = 0;
+  std::vector<LatLon> res = {ep.coord_at_fraction};
+  for (uint32_t pos = 0; pos + 1 < shapes.size(); ++pos) {
+    if (sum_dist >= fraction_dist) {
+      res.push_back(shapes.at(pos));
+    }
+    sum_dist += calculate_distance(shapes.at(pos), shapes.at(pos + 1));
+  }
+  res.push_back(shapes.back());
+  return res;
+}
+
+// Given is a target edge point and an existing shape coordinate list 'coords'
+// that starts at 'at_fraction' on the edge and continues to the end.
+// This function removes coordinates from the end of the list and terminates the
+// (potentially new) final segment at ep.coord_at_fraction.
+//
+// This idea behind this function is to terminate the last edge in a route
+// properly, in two scenarios:
+//   1) In a route with more than one edge. In this case the last path segment
+//      uses all shape coordinates except the ones after the target point.
+//   2) In a very short route with only one edge. In this case, the shape
+//      coordinate list has missing parts in the beginning and the end.
+void TerminateTargetShapeCoords(const MMCluster& mc, const EdgePoint& ep,
+                                double at_fraction,
+                                std::vector<LatLon>* shapes) {
+  CHECK_GE_S(ep.to_fraction, at_fraction) << "Target has to be after start";
+  // How much distance do we have to travel until we cut the vector?
+  const uint32_t fraction_dist = mc.edge_to_distance.at(ep.fe.edge_idx(mc)) *
+                                 (ep.to_fraction - at_fraction);
+  uint64_t sum_dist = 0;
+  for (uint32_t pos = 0; pos + 1 < shapes->size(); ++pos) {
+    sum_dist += calculate_distance(shapes->at(pos), shapes->at(pos + 1));
+    if (sum_dist >= fraction_dist) {
+      // Terminate current segment.
+      shapes->at(pos + 1) = ep.coord_at_fraction;
+      shapes->resize(pos + 2);  // Delete all elements after position pos + 1.
+      break;
+    }
+  }
+}
+
 class StepsData {
  public:
   StepsData(const MMGraph& mg, const MMRoutingResult& res) : res_(res) {}
@@ -202,17 +255,18 @@ class StepsData {
   JsonResult CreateOneStep(const MMGraph& mg, uint32_t pos) const {
     const MMFullEdge& fe = res_.full_edges.at(pos);
     const MMCluster& mc = fe.mc(mg);
+    std::vector<LatLon> coords;
 
-    LatLon from_coord =  mc.node_to_latlon(fe.from_node_idx);
-    LatLon to_coord =  mc.node_to_latlon(fe.target_idx(mc));
+#if 0
+    LatLon from_coord = mc.node_to_latlon(fe.from_node_idx);
+    LatLon to_coord = mc.node_to_latlon(fe.target_idx(mc));
     if (pos == 0) {
-      from_coord = res_.start.ll_at_fraction;
+      from_coord = res_.start.coord_at_fraction;
     }
     if (pos + 1 == num_steps()) {
-      to_coord = res_.target.ll_at_fraction;
+      to_coord = res_.target.coord_at_fraction;
     }
 
-    std::vector<LatLon> coords;
     coords.push_back(from_coord);
     // TODO: handle start/end segment.
     if (pos != 0 && pos + 1 != num_steps()) {
@@ -222,15 +276,34 @@ class StepsData {
       coords.insert(coords.end(), v.cbegin(), v.cend());
     }
     coords.push_back(to_coord);
+#endif
 
-    // convert to seconds.
+    // Compute the shape coordinates for the edge at pos. The most complicated
+    // case occurs when there is only one edge, i.e. the start and target are on
+    // the same edge. In this case, shape coordinates at the start *and* at the
+    // end of the edge might have to be cut.
+    double start_at_fraction;  // The shape list starts at this fraction.
+    if (pos == 0) {
+      coords = ComputeStartShapeCoords(mc, res_.start);
+      start_at_fraction = res_.start.to_fraction;
+    } else {
+      coords = mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc),
+                                   /*extend=*/true);
+      start_at_fraction = 0.0;
+    }
+    if (pos + 1 == num_steps()) {
+      TerminateTargetShapeCoords(mc, res_.target, start_at_fraction, &coords);
+    }
+
+    // convert to seconds/meters.
     const double duration = res_.edge_metric(pos) / 1000.0;
     const double dist = res_.distance_cm(mg, pos) / 100.0;
 
     nlohmann::json maneuver = {
         {"bearing_after", 0},
         {"bearing_before", 0},
-        {"location", {from_coord.lon.AsDouble(), from_coord.lat.AsDouble()}},
+        {"location",
+         {coords.front().lon.AsDouble(), coords.front().lat.AsDouble()}},
         {"modifier", "ModifierContinue"},
         {"type", (pos == 0 ? "depart" : "continue")}};
 
@@ -248,7 +321,7 @@ class StepsData {
   JsonResult CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
-    LatLon to_coord = res_.target.ll_at_fraction;
+    LatLon to_coord = res_.target.coord_at_fraction;
     std::vector<LatLon> coords;
     coords.push_back(to_coord);
 
@@ -294,16 +367,16 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
         {{"distance", std::roundf(res.start.distance_to_seg_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.start.fe.mc(mg), res.start.fe)},
          {"location",
-          {res.start.ll_at_fraction.lon.AsDouble(),
-           res.start.ll_at_fraction.lat.AsDouble()}}});
+          {res.start.coord_at_fraction.lon.AsDouble(),
+           res.start.coord_at_fraction.lat.AsDouble()}}});
   }
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.target.distance_to_seg_cm / 10.0) / 10.0},
          {"name", GetEdgeName(res.target.fe.mc(mg), res.target.fe)},
          {"location",
-          {res.target.ll_at_fraction.lon.AsDouble(),
-           res.target.ll_at_fraction.lat.AsDouble()}}});
+          {res.target.coord_at_fraction.lon.AsDouble(),
+           res.target.coord_at_fraction.lat.AsDouble()}}});
   }
 
   // We currently support only one leg, so the only thing to fill are the

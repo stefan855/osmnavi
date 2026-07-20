@@ -141,6 +141,14 @@ struct MMBoundingRect {
   // Upper left and lower right corner of the bounding rectangle;
   LatLon min;
   LatLon max;
+
+  // Extend boundaries of bounding rectangle such that point 'pt' is included.
+  void IncludePoint(const LatLon pt) {
+    min.lat = std::min(min.lat, pt.lat);
+    min.lon = std::min(min.lon, pt.lon);
+    max.lat = std::max(max.lat, pt.lat);
+    max.lon = std::max(max.lon, pt.lon);
+  }
 };
 
 // This is the memory mapped data structure that represents one cluster in the
@@ -397,42 +405,36 @@ struct MMCluster {
     return out_edges.at(pos);
   }
 
-  // For an edge, return the shape coordinates (excluding start/end node).
-  // Handles edges that are marked "use reverse edge".
+  // For an edge, return the shape coordinates or an empty list if they don't
+  // exist.
+  //
+  // Start-/end coordinates are excluded by default, unless 'extend' is true.
   std::vector<LatLon> get_shape_coords(uint32_t from_node_idx,
-                                         uint32_t edge_idx,
-                                         bool extend = false) const {
-    bool use_reverse_edge;
-    if (edge_shape_coords.is_empty(edge_idx, &use_reverse_edge)) {
-      if (!use_reverse_edge) {
-        return {};  // Edge doesn't have shape coords.
+                                       uint32_t edge_idx,
+                                       bool extend = false) const {
+    MMShapeCoords::Result res;
+    if (edge_shape_coords.is_empty(edge_idx, &res.use_reverse_edge)) {
+      if (res.use_reverse_edge) {
+        uint32_t rev_edge_idx =
+            find_edge_idx(get_edge(edge_idx).target_idx(), from_node_idx,
+                          edge_to_way.at(edge_idx));
+        // The edge *must* exist.
+        CHECK_NE_S(rev_edge_idx, INFU32);
+        edge_shape_coords.get(node_to_latlon(get_edge(edge_idx).target_idx()),
+                              rev_edge_idx, &res);
+        // The list *must* be non-empty.
+        CHECK_S(!res.latlon.empty());
+        std::reverse(res.latlon.begin(), res.latlon.end());
       }
-      uint32_t rev_edge_idx =
-          find_edge_idx(get_edge(edge_idx).target_idx(), from_node_idx,
-                        edge_to_way.at(edge_idx));
-      // The edge *must* exist.
-      CHECK_NE_S(rev_edge_idx, INFU32);
-      MMShapeCoords::Result res;
-      edge_shape_coords.get(node_to_latlon(get_edge(edge_idx).target_idx()),
-                            rev_edge_idx, &res);
-      // The list *must* be non-empty.
-      CHECK_S(!res.latlon.empty());
-      CHECK_S(!res.use_reverse_edge);
-      std::reverse(res.latlon.begin(), res.latlon.end());
-      if (extend) {
-        extend_shape_coords(from_node_idx, edge_idx, &res.latlon);
-      }
-      return res.latlon;  // We found shape coords at the reverse edge.
     } else {
-      MMShapeCoords::Result res;
       edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
-      CHECK_S(!res.use_reverse_edge);
       CHECK_S(!res.latlon.empty());
-      if (extend) {
-        extend_shape_coords(from_node_idx, edge_idx, &res.latlon);
-      }
-      return res.latlon;  // We found shape coords at the normal edge.
     }
+    CHECK_S(!res.use_reverse_edge);
+    if (extend) {
+      extend_shape_coords(from_node_idx, edge_idx, &res.latlon);
+    }
+    return res.latlon;
   }
 
   // Convenience function, which, given an non-empty shape list without

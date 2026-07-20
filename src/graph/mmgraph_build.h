@@ -491,20 +491,11 @@ void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
     tci->mm_node_to_latlon.push_back(n.ll);
   }
 
-  tci->mm_bounding_rect = {};
-  if (!tci->mm_node_to_latlon.empty()) {
-    tci->mm_bounding_rect.min = tci->mm_node_to_latlon.front();
-    tci->mm_bounding_rect.max = tci->mm_node_to_latlon.front();
-    for (const auto& x : tci->mm_node_to_latlon) {
-      tci->mm_bounding_rect.min.lat =
-          std::min(tci->mm_bounding_rect.min.lat, x.lat);
-      tci->mm_bounding_rect.min.lon =
-          std::min(tci->mm_bounding_rect.min.lon, x.lon);
-      tci->mm_bounding_rect.max.lat =
-          std::max(tci->mm_bounding_rect.max.lat, x.lat);
-      tci->mm_bounding_rect.max.lon =
-          std::max(tci->mm_bounding_rect.max.lon, x.lon);
-    }
+  CHECK_S(!tci->mm_node_to_latlon.empty());
+  tci->mm_bounding_rect.min = tci->mm_node_to_latlon.front();
+  tci->mm_bounding_rect.max = tci->mm_node_to_latlon.front();
+  for (const auto& x : tci->mm_node_to_latlon) {
+    tci->mm_bounding_rect.IncludePoint(x);
   }
 }
 
@@ -598,8 +589,8 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
   // This vector contains edges with shape lists that have been deleted (because
   // of simplification, see SimplifyPolyline()).
   //
-  // This is needed to fix edges that use the shapes of the reverse edge, but
-  // the target shapes have been deleted.
+  // The list is needed to fix edges that refer to the shapes of the reverse
+  // edge, but the target shapes have been deleted.
   std::vector<DelShape> shape_was_deleted;
 
   uint32_t num_edges = tci->cedge_to_gedge_offset.size();
@@ -670,6 +661,11 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
         }
       }
     }
+  }
+
+  // Adapt bounding rectangle to account for shape coordinates.
+  for (const auto& pt : tci->shape_coords_arr) {
+    tci->mm_bounding_rect.IncludePoint(pt);
   }
 }
 

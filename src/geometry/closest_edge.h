@@ -178,7 +178,7 @@ GeoAnchor ConvertClosestEdgesToAnchor(
            // .to_fraction =
            // static_cast<float>(ce.shape_dts.fraction_closest),
            .to_fraction = static_cast<float>(ComputeGlobalEdgeFraction(mg, ce)),
-           .ll_at_fraction = ce.shape_dts.coord_closest,
+           .coord_at_fraction = ce.shape_dts.coord_closest,
            .fe = ce.fe});
     }
   }
@@ -193,7 +193,7 @@ GeoAnchor ConvertClosestEdgesToAnchor(
     if (backward_idx != INFU32) {
       a.AddEdge({.distance_to_seg_cm = ep.distance_to_seg_cm,
                  .to_fraction = 1.0f - ep.to_fraction,
-                 .ll_at_fraction = ep.ll_at_fraction,
+                 .coord_at_fraction = ep.coord_at_fraction,
                  .fe = MMFullEdge::CreateWithEdgeIdx(mc, ep.fe.target_idx(mc),
                                                      backward_idx)});
     }
