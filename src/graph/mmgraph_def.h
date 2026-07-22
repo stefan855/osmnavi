@@ -409,9 +409,9 @@ struct MMCluster {
   // exist.
   //
   // Start-/end coordinates are excluded by default, unless 'extend' is true.
-  std::vector<LatLon> get_shape_coords(uint32_t from_node_idx,
-                                       uint32_t edge_idx,
-                                       bool extend = false) const {
+  std::vector<LatLon> get_shape_coords(
+      uint32_t from_node_idx, uint32_t edge_idx,
+      MMShapeCoords::SequentialAccessCache* seq_cache = nullptr) const {
     MMShapeCoords::Result res;
     if (edge_shape_coords.is_empty(edge_idx, &res.use_reverse_edge)) {
       if (res.use_reverse_edge) {
@@ -419,7 +419,15 @@ struct MMCluster {
             find_edge_idx(get_edge(edge_idx).target_idx(), from_node_idx,
                           edge_to_way.at(edge_idx));
         // The edge *must* exist.
-        CHECK_NE_S(rev_edge_idx, INFU32);
+        if (rev_edge_idx == INFU32) {
+          for (uint32_t node_idx = 0; node_idx < 60; ++node_idx) {
+            LOG_S(INFO) << node_idx << ". id=" << get_node_id(node_idx);
+          }
+        }
+        CHECK_NE_S(rev_edge_idx, INFU32) << absl::StrFormat(
+            "edge %ld->%ld way:%ld has no reverse", get_node_id(from_node_idx),
+            get_node_id(get_edge(edge_idx).target_idx()),
+            get_edge_to_way_id(edge_idx));
         edge_shape_coords.get(node_to_latlon(get_edge(edge_idx).target_idx()),
                               rev_edge_idx, &res);
         // The list *must* be non-empty.
@@ -427,23 +435,21 @@ struct MMCluster {
         std::reverse(res.latlon.begin(), res.latlon.end());
       }
     } else {
-      edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
+      // edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res);
+      edge_shape_coords.get(node_to_latlon(from_node_idx), edge_idx, &res,
+                            seq_cache);
       CHECK_S(!res.latlon.empty());
     }
     CHECK_S(!res.use_reverse_edge);
-    if (extend) {
-      extend_shape_coords(from_node_idx, edge_idx, &res.latlon);
-    }
     return res.latlon;
   }
 
-  // Convenience function, which, given an non-empty shape list without
-  // start/end node, adds the coordinates of the start node (beginning) and the
-  // target node (at the end) to the shape list.
-  void extend_shape_coords(uint32_t from_node_idx, uint32_t edge_idx,
-                           std::vector<LatLon>* coords) const {
-    coords->insert(coords->begin(), node_to_latlon(from_node_idx));
-    coords->push_back(node_to_latlon(get_edge(edge_idx).target_idx()));
+  std::vector<LatLon> get_shape_coords_extended(uint32_t from_node_idx,
+                                                uint32_t edge_idx) const {
+    std::vector<LatLon> coords = get_shape_coords(from_node_idx, edge_idx);
+    coords.insert(coords.begin(), node_to_latlon(from_node_idx));
+    coords.push_back(node_to_latlon(get_edge(edge_idx).target_idx()));
+    return coords;
   }
 
   // Return the "FullEdge" debug string for this edge.

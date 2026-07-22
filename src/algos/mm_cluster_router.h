@@ -124,7 +124,7 @@ class MMClusterRouter final {
           vis.ignore_target_edge = true;
         } else {
           // Special case, we start and stop on the same edge.
-          use_fraction = std::max(0.0f, target_fraction - ep.to_fraction);
+          use_fraction = std::max(0.0, target_fraction - ep.to_fraction);
         }
       }
       vis.min_metric =

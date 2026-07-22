@@ -48,8 +48,7 @@ struct ShapeCoordOracle {
 // 'latlon' contains the shape coordinates of an edge for encoding, excluding
 // the start- and end-node of the edge. Does forward encoding, using the first
 // element to form deltas and ignoring the last element.
-inline void EncodeShapeCoords(const LatLon base,
-                              std::span<const LatLon> latlon,
+inline void EncodeShapeCoords(const LatLon base, std::span<const LatLon> latlon,
                               WriteBuff* buff) {
   static size_t counter = 0;
   const bool debug = (++counter % 50000 == 0);
@@ -83,7 +82,6 @@ inline void EncodeShapeCoords(const LatLon base,
 // 'base' is the latlon of the start node of the edge.
 // 'latlon' contains the shape coordinates of an edge for encoding, excluding
 // the start- and end-node of the edge. Does forward encoding, using the first
-// element to form deltas and ignoring the last element.
 inline uint32_t DecodeShapeCoords(const uint8_t* ptr, uint32_t num_coords,
                                   const LatLon base,
                                   std::vector<LatLon>* latlon) {
@@ -101,3 +99,14 @@ inline uint32_t DecodeShapeCoords(const uint8_t* ptr, uint32_t num_coords,
   }
   return cnt;
 }
+
+inline uint32_t SkipDecodeShapeCoords(const uint8_t* ptr, uint32_t num_coords) {
+  int64_t val;
+  uint32_t cnt = 0;
+  while (num_coords-- > 0) {
+    cnt += DecodeInt(ptr + cnt, &val);
+    cnt += DecodeInt(ptr + cnt, &val);
+  }
+  return cnt;
+}
+// element to form deltas and ignoring the last element.

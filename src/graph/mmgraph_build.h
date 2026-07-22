@@ -18,6 +18,14 @@
 
 namespace {
 
+// Used for sorting nodes within clusters.
+enum class TmpNodeClass {
+  Border = 0,
+  OffBorder = 1,  // Border node in other cluster.
+  Normal = 2,
+  DeadEnd = 3
+};
+
 struct TmpComplexTR {
   bool forbidden;
   uint32_t first_node_idx;
@@ -87,6 +95,15 @@ struct TmpClusterInfo {
   std::vector<WaySharedAttrs> mm_way_shared_attrs;
 };
 
+TmpNodeClass GetTmpNodeClass(uint32_t cluster_id, const GNode& n) {
+  if (n.cluster_border_node) {
+    CHECK_S(!n.dead_end);
+    return n.cluster_id == cluster_id ? TmpNodeClass::Border
+                                      : TmpNodeClass::OffBorder;
+  }
+  return n.dead_end ? TmpNodeClass::DeadEnd : TmpNodeClass::Normal;
+}
+
 // For each cluster, initialise TmpClusterInfo and collect the nodes belonging
 // to the cluster in tci.cnode_to_gnode.
 //
@@ -134,24 +151,20 @@ inline void CollectClusterNodes(const Graph& g,
   //   2. "off cluster nodes"
   //   3. "normal nodes"
   //   4. "dead-end nodes"
-  // Within each category, nodes are sorted by both idx and osm id
+  // Within each category, nodes are sorted by gnode-idx.
   for (TmpClusterInfo& tci : *cluster_infos) {
     // Sort.
-    std::sort(tci.cnode_to_gnode.begin(), tci.cnode_to_gnode.end(),
-              [&g, &tci](const uint32_t a, const uint32_t b) {
-                const GNode& na = g.nodes.at(a);
-                const GNode& nb = g.nodes.at(b);
-                if (na.cluster_border_node != nb.cluster_border_node) {
-                  return na.cluster_border_node == 1;
-                }
-                if (na.cluster_id != nb.cluster_id) {
-                  return na.cluster_id == tci.cluster_id;
-                }
-                if (na.dead_end != nb.dead_end) {
-                  return na.dead_end == 0;
-                }
-                return a < b;  // Default sort: by idx (and by construction id).
-              });
+    std::sort(
+        tci.cnode_to_gnode.begin(), tci.cnode_to_gnode.end(),
+        [&g, &tci](const uint32_t a, const uint32_t b) {
+          const auto class_a = GetTmpNodeClass(tci.cluster_id, g.nodes.at(a));
+          const auto class_b = GetTmpNodeClass(tci.cluster_id, g.nodes.at(b));
+          if (class_a != class_b) {
+            return class_a < class_b;
+          } else {
+            return a < b;  // Default sort: by idx (and by construction id).
+          }
+        });
     // De-duplicate (only works when it is sorted).
     // See above why this is needed.
     auto last =
@@ -489,6 +502,18 @@ void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
     tci->mm_nodes.push_back(nb.data__);
     tci->mm_node_to_osm_id.push_back(n.node_id);
     tci->mm_node_to_latlon.push_back(n.ll);
+  }
+
+  {
+    absl::flat_hash_set<int64_t> ids;
+    for (uint32_t pos = 0; pos < tci->mm_node_to_osm_id.size(); ++pos) {
+      int64_t id = tci->mm_node_to_osm_id.at(pos);
+      if (ids.contains(id)) {
+        CHECK_S(false) << "Duplicate node id " << id << " at pos " << pos;
+        // LOG_S(INFO) << "Duplicate node id " << id << " at pos " << pos;
+      }
+      ids.insert(id);
+    }
   }
 
   CHECK_S(!tci->mm_node_to_latlon.empty());

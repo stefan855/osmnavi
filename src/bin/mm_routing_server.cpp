@@ -200,7 +200,7 @@ std::vector<LatLon> ComputeStartShapeCoords(const MMCluster& mc,
                                             const EdgePoint& ep) {
   const MMFullEdge fe = ep.fe;
   const std::vector<LatLon> shapes =
-      mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc), /*extend=*/true);
+      mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
   // We start traveling on the edge at this distance.
   const uint32_t fraction_dist =
       mc.edge_to_distance.at(fe.edge_idx(mc)) * ep.to_fraction;
@@ -287,8 +287,7 @@ class StepsData {
       coords = ComputeStartShapeCoords(mc, res_.start);
       start_at_fraction = res_.start.to_fraction;
     } else {
-      coords = mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc),
-                                   /*extend=*/true);
+      coords = mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
       start_at_fraction = 0.0;
     }
     if (pos + 1 == num_steps()) {

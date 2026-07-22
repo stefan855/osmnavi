@@ -714,21 +714,6 @@ int main(int argc, char* argv[]) {
       WriteCrossCountryEdges(meta, "/tmp/cross.csv");
     });
     pool.AddWork([&g](int thread_idx) {
-      WriteRestrictedRoadsToCSV(g, VH_MOTORCAR, "/tmp/experimental1.csv");
-    });
-    pool.AddWork([&g](int thread_idx) {
-      WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED, false, "mag",
-                        "/tmp/experimental2.csv");
-    });
-    pool.AddWork([&g](int thread_idx) {
-      WriteLabeledEdges(g, GEdge::LABEL_RESTRICTED_SECONDARY, false, "red",
-                        "/tmp/experimental3.csv");
-    });
-    pool.AddWork([&g](int thread_idx) {
-      WriteLabeledEdges(g, GEdge::LABEL_UNSET, true, "black",
-                        "/tmp/experimental4.csv");
-    });
-    pool.AddWork([&g](int thread_idx) {
       WriteClusterSkeletonEdges(g, "green", "/tmp/experimental9.csv");
     });
     pool.Start(std::min(meta.opt.n_threads, std::min(8, opt.n_threads)));

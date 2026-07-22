@@ -565,6 +565,28 @@ struct MMShapeCoords {
     bool use_reverse_edge;  // When true then search at reverse edge.
   };
 
+  struct SequentialAccessCache {
+    uint32_t edge_idx = INFU32;
+    // Byte offset into the blob after reading item 'edge_idx'.
+    uint32_t cnt = 0;
+  };
+
+ private:
+  inline uint32_t SkipItem(const uint8_t* ptr, uint8_t header) const {
+    if (header == 0 || header == CoordGroup::STORED_AT_REVERSE_EDGE) {
+      return 0;
+    }
+    uint32_t cnt = 0;
+    uint32_t num_coords = header;
+    if (num_coords == CoordGroup::LENGTH_GREATER_EQUAL_14) {
+      cnt += DecodeUInt(ptr + cnt, &num_coords);
+      num_coords += 14;
+    }
+    cnt += SkipDecodeShapeCoords(ptr + cnt, num_coords);
+    return cnt;
+  }
+
+ public:
   // Gets the list of shape coordinates (excluding start and end node) for
   // edge 'edge_idx'.
   // 'base':       The latlon of the start node of the edge 'edge_idx'.
@@ -577,7 +599,8 @@ struct MMShapeCoords {
   //
   // Note: Use MMCluster::get_shape_coords() instead of the functions defined
   // here, it has a much simpler API.
-  void get(const LatLon base, uint32_t edge_idx, Result* res) const {
+  void get(const LatLon base, uint32_t edge_idx, Result* res,
+           SequentialAccessCache* seq_cache = nullptr) const {
     const CoordGroup& group = GetGroup(edge_idx);
     res->latlon.clear();
     {
@@ -589,21 +612,24 @@ struct MMShapeCoords {
     }
 
     // Skip stuff.
-    uint32_t cnt = 0;
     const uint8_t* ptr = ABS_BLOB_PTR(this, group.relative_blob_offset__);
-    uint32_t skip = edge_idx % kShapeCoordsGroupSize;
-    for (uint32_t off = 0; off < skip; ++off) {
-      uint8_t header = group.GetHeaderVal(off);
-      if (header == 0 || header == CoordGroup::STORED_AT_REVERSE_EDGE) {
-        continue;
+    uint32_t cnt;
+
+    if (seq_cache != nullptr &&
+        edge_idx / kShapeCoordsGroupSize ==
+            seq_cache->edge_idx / kShapeCoordsGroupSize &&
+        edge_idx > seq_cache->edge_idx) {
+      cnt = seq_cache->cnt;
+      for (uint32_t off = seq_cache->edge_idx % kShapeCoordsGroupSize + 1;
+           off < edge_idx % kShapeCoordsGroupSize; ++off) {
+        cnt += SkipItem(ptr + cnt, group.GetHeaderVal(off));
       }
-      uint32_t num_coords = header;
-      if (header == CoordGroup::LENGTH_GREATER_EQUAL_14) {
-        cnt += DecodeUInt(ptr + cnt, &num_coords);
-        num_coords += 14;
+    } else {
+      const uint32_t skip = edge_idx % kShapeCoordsGroupSize;
+      cnt = 0;
+      for (uint32_t off = 0; off < skip; ++off) {
+        cnt += SkipItem(ptr + cnt, group.GetHeaderVal(off));
       }
-      cnt += DecodeShapeCoords(ptr + cnt, num_coords, {LatE6(0), LonE6(0)},
-                               &res->latlon);
     }
 
     // Now read the data.
@@ -614,7 +640,10 @@ struct MMShapeCoords {
       cnt += DecodeUInt(ptr + cnt, &num_coords);
       num_coords += 14;
     }
-    DecodeShapeCoords(ptr + cnt, num_coords, base, &res->latlon);
+    cnt += DecodeShapeCoords(ptr + cnt, num_coords, base, &res->latlon);
+    if (seq_cache != nullptr) {
+      *seq_cache = {.edge_idx = edge_idx, .cnt = cnt};
+    }
   }
 
   // Check if an entry has an empty shape coord list and return true if so,
@@ -751,10 +780,10 @@ struct MMShapeCoords {
             group.SetHeaderVal(offset, CoordGroup::LENGTH_GREATER_EQUAL_14);
             EncodeUInt(naked_length - 14, &buff);  // store length in-stream.
           }
-          EncodeShapeCoords(latlon.at(coord_pos),
-                            std::span<const LatLon>(&latlon.at(coord_pos + 1),
-                                                      naked_length),
-                            &buff);
+          EncodeShapeCoords(
+              latlon.at(coord_pos),
+              std::span<const LatLon>(&latlon.at(coord_pos + 1), naked_length),
+              &buff);
         }
 
         coord_pos += length.at(pos);
