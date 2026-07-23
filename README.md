@@ -43,16 +43,15 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Implement a routing engine using the memory mapped file.
 1. Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
 1. Add shape node coordinates to the memory mapped file. Shape nodes exist in OSM data to "shape" the curvature of a street. They are omitted from the routing graph itself, because they are not needed to find shortest routes.
+2. Improve routing: Display shape coordinates (street curvature) for start/end segment.
   
 ## Current Tasks
-* Improve sequential access speed of shape coordinates by caching last acccess position.
-* Improve routing: Display shape coordinates (street curvature) for start/end segment.
 * Improve routing: Concatenate consecutive street segments of the same street in returned routes.
-* Improve routing: Calculate angles
-* Improve routing: Add A* routing to mm_routing_server.
+* Improve routing: Calculate angles at transitions, say things like "turn right on ..."
 * Fix unrestricted areas behind restricted areas.
 * Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
 * Remove the serialized graph, it is replaced by the memory mapped graph.
+* Improve routing: Add A* routing to mm_routing_server.
 
 ## Tasks ahead
 2. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
