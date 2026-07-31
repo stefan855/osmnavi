@@ -115,16 +115,16 @@ struct TurnClassification {
 };
 
 inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vt, const GEdge& e1,
-                       const GEdge& e2, int32_t turning_angle) {
+                       const GEdge& e2, int32_t turn_angle) {
   return TT_CURVE;
 }
 #endif
 
 // Return the maximal velocity (km/h) in a curve for a typical car.
-// arc_length_cm: The distance for which we have a turning_angle. Typically this
+// arc_length_cm: The distance for which we have a turn_angle. Typically this
 //                is 1/2 of the length of the incoming edge plus 1/2 of the
 //                length of the outgoing edge.
-// turning_angle: angle change in degrees between incoming and outgoing edge.
+// turn_angle:    angle change in degrees between incoming and outgoing edge.
 //                0 degrees indicate a straight continuation, 180 degrees
 //                indicate a u-turn.
 //
@@ -140,9 +140,9 @@ inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vt, const GEdge& e1,
 //           a:     angle change in degrees
 // Example for a curve with length 100m and 90 degree change in direction:
 //   v-max = 63.615 km/h = 3.6 * math.sqrt(0.5*9.81*100/(90*math.pi/180))
-inline double MaxCurveVelocity(uint32_t arc_length_cm, int32_t turning_angle) {
+inline double MaxCurveVelocity(uint32_t arc_length_cm, int32_t turn_angle) {
   return std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * 0.01 * arc_length_cm) /
-                   (turning_angle * std::numbers::pi / 180.0));
+                   (turn_angle * std::numbers::pi / 180.0));
 }
 
 // This computes the distance (cm) for accelerating or decelerating a vehicle
@@ -208,15 +208,15 @@ namespace {
 // Compute the time loss in milliseconds of a turn from edge e1 to e2. A smaller
 // angle has higher cost.
 uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vt, const GEdge& e1,
-                           const GEdge& e2, int32_t turning_angle) {
-  turning_angle = std::labs(turning_angle);
-  if (turning_angle <= 20) {
+                           const GEdge& e2, int32_t turn_angle) {
+  turn_angle = std::labs(turn_angle);
+  if (turn_angle <= 20) {
     return 0;
-  } else if (turning_angle <= 60) {
+  } else if (turn_angle <= 60) {
     return 500;
-  } else if (turning_angle <= 120) {
+  } else if (turn_angle <= 120) {
     return 2000;
-  } else if (turning_angle <= 179) {
+  } else if (turn_angle <= 179) {
     return 4000;
   } else {
     // u-turn.
@@ -388,12 +388,12 @@ uint32_t CurveCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   const GNode& node2 = n3p.node2(g);
 
   const int32_t edge0_angle =
-      angle_to_east_degrees(node0.ll, node1.ll, n3p.edge0(g).distance_cm);
+      true_north_bearing(node0.ll, node1.ll, n3p.edge0(g).distance_cm);
   const int32_t edge1_angle =
-      angle_to_east_degrees(node1.ll, node2.ll, n3p.edge1(g).distance_cm);
-  const int32_t turning_angle = angle_between_edges(edge0_angle, edge1_angle);
+      true_north_bearing(node1.ll, node2.ll, n3p.edge1(g).distance_cm);
+  const int32_t turn_angle = angle_between_edges(edge0_angle, edge1_angle);
 
-  return TurnAngleTimeLoss(g, vt, n3p.edge0(g), n3p.edge1(g), turning_angle);
+  return TurnAngleTimeLoss(g, vt, n3p.edge0(g), n3p.edge1(g), turn_angle);
 }
 
 // Compute costs for obstacles that are not blocking but "cost" time.
@@ -445,23 +445,34 @@ uint32_t NodeTagsCost(const Graph& g, const N3Path& n3p) {
 // TODO: Handle left/right turns differently (depends on country).
 // TODO: The code below is somewhat hand-waving and uses constants that come
 //       from thin air...
-uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
+uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p,
+                      bool debug) {
   const uint32_t num_unique =
       gnode_num_unique_edges(g, n3p.node1_idx, /*ignore_loops=*/true);
   if (num_unique < 3) {
     // Probably shape node.
+    if (debug) {
+      LOG_S(INFO) << "    Crossing cost (<3 unique): 0";
+    }
     return 0;
   }
   const GEdge& edge0 = n3p.edge0(g);
   if (edge0.road_priority == GEdge::PRIO_HIGH ||
       edge0.road_priority == GEdge::PRIO_SIGNALS) {
     // Almost frictionless
+    if (debug) {
+      LOG_S(INFO) << "    Crossing cost (PRIO_HIGH/SIGNALS): "
+                  << (num_unique - 2) * 500;
+    }
     return (num_unique - 2) * 500;
   }
 
   // there was a "give_way" sign or something like that before arriving at the
   // crossing. Assume it takes some considerable time.
   if (edge0.road_priority == GEdge::PRIO_LOW) {
+    if (debug) {
+      LOG_S(INFO) << "    Crossing cost: (PRIO_LOW): " << num_unique * 2000;
+    }
     return num_unique * 2000;
   }
 
@@ -475,14 +486,26 @@ uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
         // highway category, and no other edge does this. So assume we have
         // higher priority than other traffic and can continue without much
         // issues.
+        if (debug) {
+          LOG_S(INFO) << "    Crossing cost (best_hw.num_incoming<=1): "
+                      << (num_unique - 2) * 1000;
+        }
         return (num_unique - 2) * 1000;
       } else {
         // Other edges are arriving with the same high priority;
+        if (debug) {
+          LOG_S(INFO) << "    Crossing cost (best_hw.num_incoming>1): "
+                      << best_hw.num_incoming * 1500;
+        }
         return best_hw.num_incoming * 1500;
       }
     }
   }
 
+  if (debug) {
+    LOG_S(INFO) << "    Crossing cost (num_unique * 1500): "
+                << num_unique * 1500;
+  }
   return num_unique * 1500;
 }
 
@@ -506,8 +529,17 @@ uint32_t EnterNewWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
 inline uint32_t ComputeTurnCostForN3Path(
     const Graph& g, VEHICLE vt, const IndexedTurnRestrictions& indexed_trs,
     const N3Path& n3p) {
+  const bool debug = n3p.node1(g).node_id == 2308160957;
+
+  if (debug) {
+    LOG_S(INFO) << "Compute turn cost for " << n3p.DebugStr(g);
+  }
+
   const TRStatus tr_status = CheckSimpleTurnRestriction(g, indexed_trs, n3p);
   if (tr_status == TRStatus::FORBIDDEN) {
+    if (debug) {
+      LOG_S(INFO) << "  Cost infinity " << TURN_COST_INFINITY;
+    }
     // If the leg is explicitly forbidden (also u-turns), then block it.
     return TURN_COST_INFINITY;
   }
@@ -521,12 +553,21 @@ inline uint32_t ComputeTurnCostForN3Path(
     if (tr_status == TRStatus::ALLOWED) {
       // LOG_S(INFO) << "FF1 Allowed UTurn " << n3p.DebugStr(g);
       // Explicitly allowed by turn restriction.
+      if (debug) {
+        LOG_S(INFO) << "  Cost u turn " << TURN_COST_U_TURN;
+      }
       return TURN_COST_U_TURN;
     }
     if (!IsUTurnAllowed(g, vt, node_tags, n3p)) {
+      if (debug) {
+        LOG_S(INFO) << "  Cost infinity " << TURN_COST_INFINITY;
+      }
       return TURN_COST_INFINITY;
     }
     // LOG_S(INFO) << "FF2 Allowed UTurn " << n3p.DebugStr(g);
+    if (debug) {
+      LOG_S(INFO) << "  Cost u turn " << TURN_COST_U_TURN;
+    }
     return TURN_COST_U_TURN;
   }
 
@@ -534,6 +575,9 @@ inline uint32_t ComputeTurnCostForN3Path(
   if (VehicleBlockedAtNode(g, vt, node_tags, n3p)) {
     const GWay& way0 = g.ways.at(n3p.edge0(g).way_idx);
     if (!way0.area || n3p.edge0(g).way_idx != n3p.edge1(g).way_idx) {
+      if (debug) {
+        LOG_S(INFO) << "  Cost infinity " << TURN_COST_INFINITY;
+      }
       return TURN_COST_INFINITY;
     }
   }
@@ -548,12 +592,20 @@ inline uint32_t ComputeTurnCostForN3Path(
   // with direction 'reversible'.
 
   const uint32_t cost_node_tags = NodeTagsCost(g, n3p);
-  const uint32_t cost_crossing = CrossingCost(g, vt, n3p);
+  const uint32_t cost_crossing = CrossingCost(g, vt, n3p, debug);
   const uint32_t cost_curve = CurveCost(g, vt, n3p);
   const uint32_t cost_enter_new_way = EnterNewWayCost(g, vt, n3p);
+  const uint32_t cost =
+      std::max({cost_node_tags, cost_curve, cost_crossing, cost_enter_new_way});
 
-  return std::max(
-      {cost_node_tags, cost_curve, cost_crossing, cost_enter_new_way});
+  if (debug) {
+    LOG_S(INFO) << "  Cost node tags " << cost_node_tags;
+    LOG_S(INFO) << "  Cost crossing " << cost_crossing;
+    LOG_S(INFO) << "  Cost curve " << cost_curve;
+    LOG_S(INFO) << "  Cost enter new way " << cost_enter_new_way;
+    LOG_S(INFO) << "  Cost max " << cost;
+  }
+  return cost;
 }
 
 }  // namespace

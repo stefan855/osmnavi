@@ -29,7 +29,7 @@ inline int64_t calculate_distance(LatE6 lat1, LonE6 lon1, LatE6 lat2,
 namespace {
 // Length of a segment on a longitude circle in cm, given its size in degrees.
 // This assumes that the earth is a perfect sphere (although it isn't).
-inline int64_t length_lat_segment_cm(const LatE6 lat_diff) {
+inline int64_t length_lat_diff_cm(const LatE6 lat_diff) {
   constexpr double kEarthCircumferenceThroughPoles =
       kEarthRadiusCm * std::numbers::pi * 2;
 
@@ -38,6 +38,7 @@ inline int64_t length_lat_segment_cm(const LatE6 lat_diff) {
 }
 }  // namespace
 
+#if 0
 // Return the counterclockwise angle α ([0..359] deg) between an edge and the
 // latitude circle at the starting point of the edge.
 //
@@ -50,19 +51,23 @@ inline int64_t length_lat_segment_cm(const LatE6 lat_diff) {
 //   *  α        |
 // + ------------------- latitude circle
 //
-// The edge length is a parameter. The height is easy to compute from the
-// latitude difference of start and endpoint of the edge (see
-// length_lat_segment_cm()). Angle α is computed from the formula
+// The edge length is a parameter or can be computed with calculate_distance()
+// above. . The height is easy to compute from the latitude difference of start
+// and endpoint of the edge (see length_lat_diff_cm()). Angle α is computed
+// from the formula
 //   sin(α) = height / edge_length.
 //
-inline int32_t angle_to_east_degrees(LatLon ll1, LatLon ll2, 
+// TODO: bearing is normally measured clockwise against true north, so maybe we
+// should do this here too. Rename function to "TrueBearing()".
+// See https://en.wikipedia.org/wiki/Bearing_(navigation)
+inline int32_t angle_to_east_degrees(LatLon pt1, LatLon pt2,
                                      uint32_t edge_length_cm) {
   if (edge_length_cm == 0) {
     return 0;
   }
 
-  const LatE6 lat_diff(std::abs(ll2.lat.v64() - ll1.lat.v64()));
-  const double height_cm = length_lat_segment_cm(lat_diff);
+  const LatE6 lat_diff(std::abs(pt2.lat.v64() - pt1.lat.v64()));
+  const double height_cm = length_lat_diff_cm(lat_diff);
 
   int64_t angle = 90;
   // asin is only defined for [-1..1]. Here all numbers are positive, so
@@ -79,21 +84,85 @@ inline int32_t angle_to_east_degrees(LatLon ll1, LatLon ll2,
 
   // Compute result, depending on the quadrant the target of the edge is
   // relative to the origin of the edge.
-  if (ll2.lat >= ll1.lat) {
-    if (ll2.lon >= ll1.lon) {  // 1. Quadrant
+  if (pt2.lat >= pt1.lat) {
+    if (pt2.lon >= pt1.lon) {  // 1. Quadrant
       return angle;
     } else {  // 2. Quadrant
       return 180 - angle;
     }
   } else {
-    if (ll2.lon >= ll1.lon) {  // 4. Quadrant
+    if (pt2.lon >= pt1.lon) {  // 4. Quadrant
       return (360 - angle) % 360;
     } else {  // 3. Quadrant
       return 180 + angle;
     }
   }
 }
+#endif
 
+// Given an edge, return the clockwise angle α ([0..359] deg) to true north
+// (geographic north pole).
+//
+// Computation:
+//           +++++++++++++++
+//           |           *
+//           |         *
+//    height |       *  edge
+//           |     *
+//           | α *
+//           | *
+// + --------*---------- latitude circle
+//
+// The edge length is a parameter. The height is easy to compute from the
+// latitude difference of start and endpoint of the edge (see
+// length_lat_diff_cm()). Angle α is computed from the formula
+//   cos(α) = height / edge_length.
+//
+// For background see https://en.wikipedia.org/wiki/Bearing_(navigation)
+inline int32_t true_north_bearing(LatLon pt1, LatLon pt2,
+                                  uint32_t edge_length_cm) {
+  if (edge_length_cm == 0) {
+    return 0;
+  }
+
+  const LatE6 lat_diff(std::abs(pt2.lat.v64() - pt1.lat.v64()));
+  const double height_cm = length_lat_diff_cm(lat_diff);
+
+  int64_t angle = 0;
+  // acos is only defined for [-1..1]. Here all numbers are positive, so
+  // make sure h/l < 1 and assume 0 deg for h/l >= 1, which might occur due to
+  // rounding errors.
+  if (height_cm < edge_length_cm) {
+    angle = std::llround(
+        180.0 * (std::acos(height_cm / edge_length_cm) / std::numbers::pi));
+  }
+
+  // length and height are positive, so angle should be positive too.
+  CHECK_GE_S(angle, 0);
+  CHECK_LE_S(angle, 90);
+
+  // Compute result, depending on the quadrant the target of the edge is
+  // relative to the origin of the edge.
+  if (pt2.lat >= pt1.lat) {
+    if (pt2.lon >= pt1.lon) {  // 1. Quadrant
+      return angle;
+    } else {  // 2. Quadrant
+      return (360 - angle) % 360;
+    }
+  } else {
+    if (pt2.lon >= pt1.lon) {  // 4. Quadrant
+      return 180 - angle;
+    } else {  // 3. Quadrant
+      return 180 + angle;
+    }
+  }
+}
+
+inline int32_t true_north_bearing(LatLon pt1, LatLon pt2) {
+  return true_north_bearing(pt1, pt2, calculate_distance(pt1, pt2));
+}
+
+#if 0
 // Compute the angle change between two consecutive edges. Input for each edge
 // is the angle computed by angle_to_east_degrees().
 //
@@ -101,11 +170,35 @@ inline int32_t angle_to_east_degrees(LatLon ll1, LatLon ll2,
 // change in direction, and angle of 180 degrees denotes a full u-turn. Negative
 // values happen when the second edge goes to the right side, positive values
 // when it goes to the left side of the first edge.
+inline int32_t angle_between_edges_old(int32_t edge_angle_1,
+                                       int32_t edge_angle_2) {
+  int32_t a = edge_angle_2 - edge_angle_1;
+  if (a >= 180) {
+    a = a - 360;
+  } else if (a < -180) {
+    a = a + 360;
+  }
+  return a;
+}
+#endif
+
+// Compute the angle change between two consecutive edges. Input for each edge
+// is the angle computed by true_north_bearing().
+//
+// The angle returned is in the range [-180..179].
+//
+// Value  Meaning
+// -------------------------------------------
+// 0      No change in direction.
+// <0     Second edge goes to the left side.
+// >0     Second edge goes to the right side.
+// -180   Full u-turn.
 inline int32_t angle_between_edges(int32_t edge_angle_1, int32_t edge_angle_2) {
   int32_t a = edge_angle_2 - edge_angle_1;
-  if (a > 180) {
+  while (a >= 180) {
     a = a - 360;
-  } else if (a <= -180) {
+  }
+  while (a < -180) {
     a = a + 360;
   }
   return a;

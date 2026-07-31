@@ -25,20 +25,35 @@ struct EdgePoint {
     return std::max(0.0, std::min(1.0, to_fraction));
   }
 
-  std::string DebugString(const MMCluster& mc, LatE6 origin_lat = {},
-                          LonE6 origin_lon = {}) const {
+  std::string DebugString(const MMCluster& mc) const {
+    CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
+    return absl::StrFormat("dist:%.2fm cl:%u n0:%lli n1:%lli tfrac:%.2f",
+                           distance_to_seg_cm / 100.0, fe.cluster_id,
+                           mc.get_node_id(fe.from_node_idx),
+                           mc.get_node_id(fe.edge(mc).target_idx()),
+                           to_fraction);
+  }
+
+  std::string DebugString(const MMGraph& mg) const {
+    return DebugString(fe.mc(mg));
+  }
+
+  std::string DebugStringExt(const MMCluster& mc, LatE6 origin_lat = {},
+                             LonE6 origin_lon = {}) const {
     CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
     return absl::StrFormat(
-        "Closest Edge to (%.7f, %.7f) dist:%.2fm cl:%u n0:%lli n1:%lli fc:%.2f",
+        "Closest Edge to (%.7f, %.7f) dist:%.2fm cl:%u n0:%lli n1:%lli "
+        "tfrac:%.2f",
         origin_lat.AsDouble(), origin_lon.AsDouble(),
         distance_to_seg_cm / 100.0, fe.cluster_id,
         mc.get_node_id(fe.from_node_idx),
         mc.get_node_id(fe.edge(mc).target_idx()), to_fraction);
   }
 
-  std::string DebugString(const MMGraph& mg, LatE6 origin_lat = {},
-                          LonE6 origin_lon = {}) const {
-    return DebugString(mg.clusters.at(fe.cluster_id), origin_lat, origin_lon);
+  std::string DebugStringExt(const MMGraph& mg, LatE6 origin_lat = {},
+                             LonE6 origin_lon = {}) const {
+    return DebugStringExt(mg.clusters.at(fe.cluster_id), origin_lat,
+                          origin_lon);
   }
 };
 

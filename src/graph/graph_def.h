@@ -102,27 +102,31 @@ struct WaySharedAttrs final {
   static constexpr VEHICLE RA_VEHICLES[] = {VH_MOTORCAR, VH_BICYCLE, VH_FOOT};
   static constexpr uint32_t RA_MAX =
       2 * sizeof(RA_VEHICLES) / sizeof(RA_VEHICLES[0]);
+
+  HIGHWAY_LABEL highway_label_ : NUM_HIGHWAY_LABEL_BITS;
   // Routing info in forward and backward direction.
   RoutingAttrs ra[RA_MAX];
 
-  static WaySharedAttrs Create(const RoutingAttrs dflt) {
-    WaySharedAttrs wsa;
-    for (RoutingAttrs& val : wsa.ra) {
+  // Initialise with invalid highway label.
+  WaySharedAttrs() : WaySharedAttrs(HW_MAX) {}
+
+  WaySharedAttrs(HIGHWAY_LABEL highway_label) {
+    memset(&ra, 0, sizeof(ra));
+    highway_label_ = highway_label;
+  }
+
+  WaySharedAttrs(HIGHWAY_LABEL highway_label, const RoutingAttrs dflt)
+      : WaySharedAttrs(highway_label) {
+    for (RoutingAttrs& val : ra) {
       val = dflt;
     }
-    return wsa;
   }
 };
-CHECK_IS_POD(WaySharedAttrs);
-
-// Check that WaySharedAttrs is POD. Note the struct has to be completely zeroed
-// when creating one, because bot the equal operator and hash function below
-// assume there are no unset areas in the data structure.
-static_assert(std::is_standard_layout_v<WaySharedAttrs> == true);
-static_assert(std::is_trivial_v<WaySharedAttrs> == true);
+CHECK_IS_MM_OK(WaySharedAttrs);
 
 inline bool operator==(const WaySharedAttrs& a, const WaySharedAttrs& b) {
-  return memcmp(&a, &b, sizeof(WaySharedAttrs)) == 0;
+  return a.highway_label_ == b.highway_label_ &&
+         memcmp(&a, &b, sizeof(WaySharedAttrs)) == 0;
 }
 
 namespace std {
@@ -137,7 +141,7 @@ struct hash<WaySharedAttrs> {
 }  // namespace std
 
 constexpr std::uint32_t GWAY_ID_BITS = 40;
-constexpr std::uint32_t NUM_HIGHWAY_LABEL_BITS = 5;
+// constexpr std::uint32_t NUM_HIGHWAY_LABEL_BITS = 5;
 struct GWay {
   std::int64_t id : GWAY_ID_BITS;
   HIGHWAY_LABEL highway_label : NUM_HIGHWAY_LABEL_BITS = HW_MAX;

@@ -206,8 +206,8 @@ class Router {
     // TODO: support mexspeed for different vehicles.
     // SOLUTION: Should use per (country, vehicle) maxspeed. If target
     // is in other country then use mix.
-    static const WaySharedAttrs g_wsa =
-        WaySharedAttrs::Create({.dir = 1, .access = ACC_YES, .maxspeed = 120});
+    static const WaySharedAttrs g_wsa(
+        HW_TERTIARY, {.dir = 1, .access = ACC_YES, .maxspeed = 120});
 
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,

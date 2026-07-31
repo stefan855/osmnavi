@@ -741,9 +741,7 @@ void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
   const WayTaggedZones rural = ExtractWayZones(tagh, wc.pti.tags());
   LogCountryConflict(rural, wc.way);
 
-  WaySharedAttrs wsa;
-  // Set all numbers to 0, enums to first value.
-  memset(&wsa.ra, 0, sizeof(wsa.ra));
+  WaySharedAttrs wsa(highway_label);
 
   // TODO: Use real country instead of always using CH (Switzerland).
   wc.config_forw = meta->per_country_config->GetDefault(

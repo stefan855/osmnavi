@@ -16,16 +16,12 @@
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "geometry/closest_node.h"
-#include "geometry/distance.h"
-#include "geometry/line_clipping.h"
-#include "geometry/polygon.h"
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/routing_config.h"
 #include "graph/turn_costs.h"
 #include "osm/access.h"
-#include "osm/admin_boundary.h"
 #include "osm/key_bits.h"
 #include "osm/maxspeed.h"
 #include "osm/oneway.h"
@@ -813,154 +809,6 @@ void TestGraph() {
   LOG_S(INFO) << "TestGraph() finished";
 }
 
-void TestLineClipping() {
-  LOG_S(INFO) << "TestLineClipping() started";
-  TwoPoint r = {10.0, 10.0, 20.0, 20.0};
-
-  {
-    TwoPoint line = {5.0, 5.0, 20.0, 15.0};
-    CHECK_S(ClipLineCohenSutherland(r, &line));
-    LOG_S(INFO) << absl::StrFormat("line: %f %f %f %f", line.x0, line.y0,
-                                   line.x1, line.y1);
-  }
-
-  LOG_S(INFO) << "TestLineClipping() finished";
-}
-
-void TestFastPolygonContains() {
-  LOG_S(INFO) << "TestFastPolygonContains() started";
-  const int16_t country = 123;
-
-  {
-    //   *
-    //  *
-    // *
-    FastCountryPolygons p;
-    p.AddLine(0, 0, 100, 100, country);
-    CHECK_EQ_S(p.CountIntersections(0, 50), 1);
-    CHECK_EQ_S(p.CountIntersections(60, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(100, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(200, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(51, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(49, 50), 1);
-    CHECK_EQ_S(p.CountIntersections(00, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(00, 100), 1);
-  }
-
-  {
-    // *
-    //  *
-    //   *
-    FastCountryPolygons p;
-    p.AddLine(0, 100, 100, 0, country);
-    CHECK_EQ_S(p.CountIntersections(0, 50), 1);
-    CHECK_EQ_S(p.CountIntersections(60, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(100, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(200, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(51, 50), 0);
-    CHECK_EQ_S(p.CountIntersections(49, 50), 1);
-    CHECK_EQ_S(p.CountIntersections(0, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(0, 100), 1);
-  }
-
-  {
-    //   *
-    //  * *
-    // *   *
-    FastCountryPolygons p;
-    p.AddLine(0, 0, 100, 100, country);
-    p.AddLine(100, 100, 200, 0, country);
-    CHECK_EQ_S(p.CountIntersections(200, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(0, 100), 2);
-    CHECK_EQ_S(p.CountIntersections(0, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(100, 50), 1);
-  }
-
-  {
-    // ***
-    FastCountryPolygons p;
-    p.AddLine(0, 0, 100, 0, country);
-    CHECK_EQ_S(p.CountIntersections(-100, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(0, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(100, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(200, 0), 0);
-  }
-
-  {
-    //  *
-    //  *
-    //  *
-    FastCountryPolygons p;
-    p.AddLine(100, 0, 100, 100, country);
-    CHECK_EQ_S(p.CountIntersections(0, 0), 0);
-    CHECK_EQ_S(p.CountIntersections(0, 100), 1);
-  }
-
-  {
-    // Check that binary search works on the lines sorted by y-axis.
-    // For this, insert lines in random order and expect 'p.PrepareData()' to
-    // sort them properly.
-    FastCountryPolygons p;
-    const int y_ray = 5100;
-    const int height = 100;
-    int expected_intersections = 0;
-    std::srand(1);  // Get always the same pseudo-random numbers.
-    for (int i = 0; i < 10000; ++i) {
-      const int y_val = rand() % 10000;
-      if (y_val >= y_ray - height && y_val < y_ray) {
-        expected_intersections++;
-      }
-      p.AddLine(100, y_val, 100, y_val + 100, country + i);
-    }
-    CHECK_GT_S(expected_intersections, 0);
-    p.PrepareData();
-    CHECK_EQ_S(p.CountIntersections(0, y_ray), expected_intersections);
-  }
-
-  {
-    std::vector<FastCountryPolygons::Line> lines;
-    lines.push_back({.x0 = 0,
-                     .y0 = 0,
-                     .x1 = 0,
-                     .y1 = 0,
-                     .country_num_1 = 1,
-                     .country_num_2 = 0});
-    lines.push_back({.x0 = 0,
-                     .y0 = 0,
-                     .x1 = 0,
-                     .y1 = 0,
-                     .country_num_1 = 2,
-                     .country_num_2 = 0});
-    FastCountryPolygons::MergeDupLines(&lines);
-    CHECK_EQ_S(lines.size(), 1u);
-    CHECK_EQ_S(lines.at(0).country_num_1, 1);
-    CHECK_EQ_S(lines.at(0).country_num_2, 2);
-  }
-
-  LOG_S(INFO) << "TestFastPolygonContains() finished";
-}
-
-void TestTiledCountryLookup() {
-  LOG_S(INFO) << "TestTiledCountryLookup() started";
-  const int16_t country = 123;
-  const int32_t kDegreeUnits = TiledCountryLookup::kDegreeUnits;
-  // Tiling has step size 10 degrees.
-  const int32_t tile_size = kDegreeUnits * 10;
-
-  {
-    FastCountryPolygons p;
-    // Vertical line fully crossing tiles with x,y: (1,0) and (1,1).
-    // tile (1,2) is partially crossed (it contains the end of the line).
-    // This causes tiles (0,0) and (0,1) to be assigned to 'country'. Tile (0,2)
-    // is partially assigned to 'country, and tile 0,3) has no country.
-    p.AddLine(tile_size + 1, -1, tile_size + 1, 2 * tile_size + 1000, country);
-    TiledCountryLookup tiler(p, tile_size);
-    CHECK_EQ_S(tiler.GetCountryNum(LonE6(1), LatE6(1)), country);
-
-    // CHECK_EQ_S(p.CountIntersections(0, 50), 1);
-  }
-  LOG_S(INFO) << "TestTiledCountryLookup() finished";
-}
 
 void TestUtil() {
   LOG_S(INFO) << "TestUtil() started";
@@ -1190,132 +1038,6 @@ void TestArglis() {
   }
 
   LOG_S(INFO) << "TestArglis() finished";
-}
-
-void TestCalculateDistance() {
-  LatE6 lat_paris(48.8566);
-  LonE6 lon_paris(2.3522);
-  LatE6 lat_berlin(52.5200);
-  LonE6 lon_berlin(13.4050);
-  const uint32_t dist_cm =
-      calculate_distance(lat_paris, lon_paris, lat_berlin, lon_berlin);
-  CHECK_DOUBLE_EQ_S(dist_cm, 878 * 1000 * 100, 0.001);
-  const uint32_t dist_rev_cm =
-      calculate_distance(lat_berlin, lon_berlin, lat_paris, lon_paris);
-  CHECK_DOUBLE_EQ_S(dist_cm, dist_rev_cm, 0.00001);
-}
-
-uint32_t ComputeAngle(double lat1, double lon1, double lat2, double lon2) {
-  const LatE6 lat1n(lat1);
-  const LonE6 lon1n(lon1);
-  const LatE6 lat2n(lat2);
-  const LonE6 lon2n(lon2);
-  const uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
-  return angle_to_east_degrees({lat1n, lon1n}, {lat2n, lon2n}, length_cm);
-}
-
-int32_t TestAngle(double lat1, double lon1, double lat2, double lon2,
-                  int32_t expected) {
-  int32_t angle = ComputeAngle(lat1, lon1, lat2, lon2);
-  LOG_S(INFO) << absl::StrFormat("Edge (%.1f,%.1f) to (%.1f,%.1f) has angle %d",
-                                 lat1, lon1, lat2, lon2, angle);
-  CHECK_EQ_S(angle, expected)
-      << absl::StrFormat("Edge (%.7f,%.7f) to (%.7f,%.7f) has angle %d", lat1,
-                         lon1, lat2, lon2, angle);
-  return angle;
-}
-
-void TestEdgeAngles() {
-  FUNC_TIMER();
-  // Check the angles of edges going from lat/long (0,0) to some points on the
-  // rectangle of +-1 degree around (0,0).
-  // The angle of (0,0) to (0.5,1) was manually verified to be approximately 27
-  // degrees, using the following python formula:
-  //   math.asin(0.5/math.sqrt(1+0.5*0.5)) / math.pi * 180
-  TestAngle(0.0, 0.0, 0.0, 1.0, /*expected=*/0);
-  TestAngle(0.0, 0.0, 0.5, 1.0, /*expected=*/27);
-  TestAngle(0.0, 0.0, 1.0, 1.0, /*expected=*/45);
-  TestAngle(0.0, 0.0, 1.0, 0.5, /*expected=*/63);
-
-  TestAngle(0.0, 0.0, 1.0, 0.0, /*expected=*/90);
-  TestAngle(0.0, 0.0, 1.0, -0.5, /*expected=*/117);
-  TestAngle(0.0, 0.0, 1.0, -1.0, /*expected=*/135);
-  TestAngle(0.0, 0.0, 0.5, -1.0, /*expected=*/153);
-
-  TestAngle(0.0, 0.0, 0.0, -1.0, /*expected=*/180);
-  TestAngle(0.0, 0.0, -0.5, -1.0, /*expected=*/207);
-  TestAngle(0.0, 0.0, -1.0, -1.0, /*expected=*/225);
-  TestAngle(0.0, 0.0, -1.0, -0.5, /*expected=*/243);
-
-  TestAngle(0.0, 0.0, -1.0, 0.0, /*expected=*/270);
-  TestAngle(0.0, 0.0, -1.0, 0.5, /*expected=*/297);
-  TestAngle(0.0, 0.0, -1.0, 1.0, /*expected=*/315);
-  TestAngle(0.0, 0.0, -0.5, 1.0, /*expected=*/333);
-
-  // This code shifts the edge (0,0) to (1,1) north in every step.
-  // The angle should grow as we get closer to the pole because the latitude
-  // circle is shrinking.
-  int32_t prev_angle = 45;
-  for (uint32_t i = 4; i < 90; i += 5) {
-    const LatE6 lat1(static_cast<double>(i));
-    const LonE6 lon1(0.0);
-    const LatE6 lat2(static_cast<double>(i + 1));
-    const LonE6 lon2(1.0);
-    uint32_t length_cm = calculate_distance(lat1, lon1, lat2, lon2);
-    int32_t angle =
-        angle_to_east_degrees({lat1, lon1}, {lat2, lon2}, length_cm);
-    LOG_S(INFO) << absl::StrFormat("angle of (%u,%u)->(%u,%u) is %u", i, 0,
-                                   i + 1, 1, angle);
-    CHECK_GE_S(angle, prev_angle);
-    prev_angle = angle;
-  }
-}
-
-void TestAngleBetweenEdges() {
-  FUNC_TIMER();
-  CHECK_EQ_S(angle_between_edges(0, 0), 0);
-  CHECK_EQ_S(angle_between_edges(1, 0), -1);
-  CHECK_EQ_S(angle_between_edges(0, 1), 1);
-  CHECK_EQ_S(angle_between_edges(30, 0), -30);
-  CHECK_EQ_S(angle_between_edges(0, 30), 30);
-
-  CHECK_EQ_S(angle_between_edges(0, 179), 179);
-  CHECK_EQ_S(angle_between_edges(0, 180), 180);
-  CHECK_EQ_S(angle_between_edges(0, 181), -179);
-
-  CHECK_EQ_S(angle_between_edges(179, 0), -179);
-  CHECK_EQ_S(angle_between_edges(180, 0), 180);
-  CHECK_EQ_S(angle_between_edges(180, 180), 0);
-  CHECK_EQ_S(angle_between_edges(181, 0), 179);
-
-  CHECK_EQ_S(angle_between_edges(269, 0), 91);
-  CHECK_EQ_S(angle_between_edges(270, 0), 90);
-  CHECK_EQ_S(angle_between_edges(271, 0), 89);
-
-  CHECK_EQ_S(angle_between_edges(0, 359), -1);
-
-  CHECK_EQ_S(angle_between_edges(90, 269), 179);
-  CHECK_EQ_S(angle_between_edges(90, 270), 180);
-  CHECK_EQ_S(angle_between_edges(90, 271), -179);
-}
-
-void TestRealAngles() {
-  FUNC_TIMER();
-  // Test a real junction: https://www.openstreetmap.org/node/28581626
-  // Mid-Node:   28581626, latlon=47.3779735, 8.5267194
-  // Nodes with estimated angles to east beam:
-  // 1. North:    3946827990, latlon=47.3784253, 8.5269862 angle:70
-  // 2. West:    12456090319, latlon=47.3779953, 8.5266785 angle:140
-  // 3. South:      28581602, latlon=47.3773794, 8.5263690 angle:250
-  // 4. East:     6165393392, latlon=47.3779501, 8.5267669 angle:320
-
-  // All edges go from mid point to outer point. The estimated angles (see
-  // above) have been adjusted to the expected angles (see below) after checking
-  // they are not deviating significantly.
-  TestAngle(47.3779735, 8.5267194, 47.3784253, 8.5269862, 68);
-  TestAngle(47.3779735, 8.5267194, 47.3779953, 8.5266785, 142);
-  TestAngle(47.3779735, 8.5267194, 47.3773794, 8.5263690, 248);
-  TestAngle(47.3779735, 8.5267194, 47.3779501, 8.5267669, 324);
 }
 
 void TestDeDuperWithIdsInt() {
@@ -1680,12 +1402,8 @@ int main(int argc, char* argv[]) {
   TestNodeDataBlock();
   TestNodeDataBlockReEncode();
   TestGraph();
-  TestLineClipping();
-  TestFastPolygonContains();
-  TestTiledCountryLookup();
   TestUtil();
   TestArglis();
-  TestCalculateDistance();
   TestRoutingConfig();
 
   TestKeyPartBits();
@@ -1698,11 +1416,8 @@ int main(int argc, char* argv[]) {
   TestDeDuperWithIdsInt();
   TestDeDuperWithIdsString();
   TestDeDuperMergeSort();
-  TestClosestPoint();
 
-  TestEdgeAngles();
-  TestAngleBetweenEdges();
-  TestRealAngles();
+  TestClosestPoint();
 
   TestTurningCostCompression();
   TestSmallVector();

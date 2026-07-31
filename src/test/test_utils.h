@@ -70,7 +70,7 @@ inline void AddCluster(Graph& g, uint32_t cluster_id, GCluster c) {
 inline void AddDefaultWSA(Graph& g,
                           RoutingAttrs dflt = {
                               .dir = 1, .access = ACC_YES, .maxspeed = 50}) {
-  g.way_shared_attrs.push_back(WaySharedAttrs::Create(dflt));
+  g.way_shared_attrs.emplace_back(HW_TERTIARY, dflt);
 }
 
 inline void AddWay(Graph& g, uint32_t way_idx,

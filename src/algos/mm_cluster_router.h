@@ -14,7 +14,7 @@
 #include "algos/routing_metric.h"
 #include "base/util.h"
 
-#define DEBUG_PRINT 0
+#define DEBUG_PRINT_MCR 0
 
 class MMClusterRouter final {
  public:
@@ -94,10 +94,9 @@ class MMClusterRouter final {
       if (edge.complex_turn_restriction_trigger()) {
         AddTriggeringCTRs(mc_, edge_idx, &active_ctrs);
       }
-#if DEBUG_PRINT
-      LOG_S(INFO) << absl::StrFormat(
-          "Add initial edge from_idx:%u to_idx:%u way_idx:%u #ctrs:%llu",
-          start_idx, edge.target_idx(), edge.way_idx, active_ctrs.size());
+#if DEBUG_PRINT_MCR
+      LOG_S(INFO) << absl::StrFormat("Push start edge %s #ctrs:%llu",
+                                     ep.DebugString(mc_), active_ctrs.size());
 #endif
 
       // TODO: restricted access area: should be 1 if the edge is in a
@@ -157,11 +156,6 @@ class MMClusterRouter final {
         opt_.include_dead_end ? mc_.edges.size() : mc_.num_non_dead_end_edges();
     CHECK_LE_S(num_base_edges_, mcw_.edge_weights.size());
 
-#if DEBUG_PRINT
-    LOG_S(INFO) << absl::StrFormat("MMClusterRouter: Start routing at %u",
-                                   start_idx);
-#endif
-
     CHECK_LT_S(num_base_edges_, 1 << 31) << "currently not supported";
     vis_.assign(num_base_edges_ + num_base_edges_ / 50,  // Add 2%.
                 {.min_metric = INFU32,
@@ -183,7 +177,7 @@ class MMClusterRouter final {
     CHECK_S(!edge.complex_turn_restriction_trigger());
     CHECK_S(!edge.restricted());
 
-#if DEBUG_PRINT
+#if DEBUG_PRINT_MCR
     LOG_S(INFO) << "Add " << in_edge.DebugString();
 #endif
     ActiveCtrs active_ctrs;  // empty.
@@ -216,16 +210,26 @@ class MMClusterRouter final {
     // Make a copy, because the vector might see reallocations below, which
     // invalidates references.
     const VisitedEdge prev_v = vis_.at(qedge.ve_idx);
+    const uint32_t prev_v_base_idx = GetBaseIdx(qedge.ve_idx);
+    const MMEdge prev_edge(mc_.edges.at(prev_v_base_idx));
 
-#if DEBUG_PRINT
-    LOG_S(INFO) < absl::StrFormat(
-                      "prev_v(%u): minw:%u from_v_idx:%u active_ctr_id:%u "
-                      "in_target_ra:%u "
-                      "done:%u next:%u ",
-                      qedge.ve_idx, prev_v.min_metric, prev_v.from_v_idx,
-                      prev_v.active_ctr_id,
-                      prev_v.in_target_restricted_access_area, prev_v.done,
-                      prev_v.next);
+#if DEBUG_PRINT_MCR
+    {
+      std::string edge_dbg_str;
+      if (prev_v.from_v_idx != INFU32) {
+        edge_dbg_str = mc_.DebugStringEdge(
+            mc_.get_edge(GetBaseIdx(prev_v.from_v_idx)).target_idx(),
+            prev_v_base_idx);
+      } else {
+        edge_dbg_str = mc_.DebugStringEdgeSlow(prev_v_base_idx);
+      }
+
+      LOG_S(INFO) << absl::StrFormat(
+          "POP prev edge <%s>: tot_metric:%.2fs active_ctr_id:%u "
+          "in_target_ra:%u done:%u next:%u ",
+          edge_dbg_str, prev_v.min_metric / 1000.0, prev_v.active_ctr_id,
+          prev_v.in_target_restricted_access_area, prev_v.done, prev_v.next);
+    }
 #endif
 
     if (prev_v.done == 1) {
@@ -237,9 +241,6 @@ class MMClusterRouter final {
     if (prev_v.is_target_edge && !prev_v.ignore_target_edge) {
       return {.finished = true, .found = true, .last_v_idx = qedge.ve_idx};
     }
-
-    const uint32_t prev_v_base_idx = GetBaseIdx(qedge.ve_idx);
-    const MMEdge prev_edge(mc_.edges.at(prev_v_base_idx));
 
     const uint32_t edge_start_idx = mc_.edge_start_idx(prev_edge.target_idx());
     const uint32_t num_edges =
@@ -258,10 +259,12 @@ class MMClusterRouter final {
         continue;
       }
 
-#if DEBUG_PRINT
+#if DEBUG_PRINT_MCR
       LOG_S(INFO) << absl::StrFormat(
-          "Examine edge from_idx:%u to_idx:%u way_idx:%u",
-          prev_edge.target_idx(), e.target_idx(), e.way_idx);
+          "EXAMINE edge %s tc:%.2fs m:%.2fs",
+          mc_.DebugStringEdge(prev_edge.target_idx(), edge_idx),
+          decompress_turn_cost(turn_costs[off]) / 1000.0,
+          mcw_.edge_weights.at(edge_idx) / 1000.0);
 #endif
 
       if ((turn_costs[off] == TURN_COST_INFINITY_COMPRESSED) ||
@@ -281,7 +284,7 @@ class MMClusterRouter final {
       if (!UpdateActiveCtrs(mc_, prev_v, edge_idx,
                             e.complex_turn_restriction_trigger(),
                             &active_ctrs_)) {
-#if DEBUG_PRINT
+#if DEBUG_PRINT_MCR
         LOG_S(INFO) << "Forbidden by TR";
 #endif
 
@@ -308,11 +311,10 @@ class MMClusterRouter final {
       const uint32_t new_v_idx =
           FindOrAllocEdge(edge_idx, in_target_raa, active_ctrs_);
 
-#if DEBUG_PRINT
+#if DEBUG_PRINT_MCR
       LOG_S(INFO) << absl::StrFormat(
-          "Push edge from_idx:%u to_idx:%u way_idx:%u target_ra:%u #ctr:%llu",
-          prev_edge.target_idx(), e.target_idx(), e.way_idx, in_target_raa,
-          active_ctrs_.size());
+          "PUSH edge target_ra:%u #ctr:%lu tot_metric:%.2fs", in_target_raa,
+          active_ctrs_.size(), new_metric / 1000.0);
 #endif
 
       VisitedEdge& ve = vis_.at(new_v_idx);

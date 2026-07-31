@@ -170,7 +170,7 @@ WaySharedAttrs RandomWaySharedAttrs(uint64_t seed) {
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
 
-  WaySharedAttrs wsa = {};
+  WaySharedAttrs wsa(HW_TERTIARY);
   for (RoutingAttrs& ra : wsa.ra) {
     ra.dir = dist(myrand) % (1llu << 1);
     ra.access = static_cast<ACCESS>(dist(myrand) % (1llu << 4));
@@ -346,7 +346,7 @@ void TestWaySharedAttrs() {
 
   uint8_t* ptr = wb.base_ptr();
   for (uint32_t i = 0; i < 100; ++i) {
-    WaySharedAttrs dec = {};
+    WaySharedAttrs dec(HW_MAX);
     ptr += DecodeWaySharedAttrs(ptr, &dec);
     const WaySharedAttrs re = RandomWaySharedAttrs(i);
     CHECK_WAY_SHARED_ATTRS_EQUAL(re, dec);

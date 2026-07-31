@@ -175,14 +175,22 @@ void decode_polyline(const std::string& encoded) {
 }
 #endif
 
-struct JsonResult {
+struct JsonData {
   nlohmann::json j;
   double sum_dist = 0.0;
   double sum_duration = 0.0;
-  std::string last_name;
 };
 
-std::string GetEdgeName(const MMCluster& mc, const MMFullEdge& fe) {
+std::string GetStreetName(const MMGraph& mg, const MMFullEdge& fe) {
+  const MMCluster& mc = fe.mc(mg);
+  uint32_t way_idx = fe.way_idx(mc);
+  return absl::StrFormat(
+      "%s (%s)", mc.get_streetname(way_idx),
+      HighwayLabelToString(mc.get_wsa(way_idx).highway_label_));
+}
+
+std::string GetEdgeName(const MMGraph& mg, const MMFullEdge& fe) {
+  const MMCluster& mc = fe.mc(mg);
   uint32_t way_idx = fe.way_idx(mc);
   std::string_view streetname = mc.get_streetname(way_idx);
   int64_t way_id = mc.grouped_way_to_osm_id.at(way_idx);
@@ -252,72 +260,73 @@ class StepsData {
 
   size_t num_steps() const { return res_.full_edges.size(); }
 
-  JsonResult CreateOneStep(const MMGraph& mg, uint32_t pos) const {
-    const MMFullEdge& fe = res_.full_edges.at(pos);
-    const MMCluster& mc = fe.mc(mg);
-    std::vector<LatLon> coords;
+  // Create the description of one step in the route. This includes the edges in
+  // the range [from_pos..to_pos].
+  JsonData CreateOneStep(const MMGraph& mg, uint32_t from_pos,
+                           uint32_t to_pos) const {
+    std::vector<LatLon> total_coords;
+    uint64_t sum_duration = 0;
+    uint64_t sum_distance = 0;
 
-#if 0
-    LatLon from_coord = mc.node_to_latlon(fe.from_node_idx);
-    LatLon to_coord = mc.node_to_latlon(fe.target_idx(mc));
-    if (pos == 0) {
-      from_coord = res_.start.coord_at_fraction;
-    }
-    if (pos + 1 == num_steps()) {
-      to_coord = res_.target.coord_at_fraction;
-    }
+    for (uint32_t pos = from_pos; pos <= to_pos; ++pos) {
+      const MMFullEdge& fe = res_.full_edges.at(pos);
+      const MMCluster& mc = fe.mc(mg);
+      sum_duration += res_.edge_metric(pos);
+      sum_distance += res_.distance_cm(mg, pos);
 
-    coords.push_back(from_coord);
-    // TODO: handle start/end segment.
-    if (pos != 0 && pos + 1 != num_steps()) {
-      const std::vector<LatLon> v =
-          mc.get_shape_coords(fe.from_node_idx, fe.edge_idx(mc));
-      // TODO: Not yet supported by gcc: coords.append_range(v);
-      coords.insert(coords.end(), v.cbegin(), v.cend());
-    }
-    coords.push_back(to_coord);
-#endif
+      // Compute the shape coordinates for the edge at pos. The most complicated
+      // case occurs when there is only one edge, i.e. the start and target are
+      // on the same edge. In this case, shape coordinates at the start *and* at
+      // the end of the edge might have to be cut.
+      std::vector<LatLon> coords;
+      double start_at_fraction;  // The shape list starts at this fraction.
+      if (pos == 0) {
+        coords = ComputeStartShapeCoords(mc, res_.start);
+        start_at_fraction = res_.start.to_fraction;
+      } else {
+        coords =
+            mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
+        start_at_fraction = 0.0;
+      }
+      if (pos + 1 == num_steps()) {
+        TerminateTargetShapeCoords(mc, res_.target, start_at_fraction, &coords);
+      }
 
-    // Compute the shape coordinates for the edge at pos. The most complicated
-    // case occurs when there is only one edge, i.e. the start and target are on
-    // the same edge. In this case, shape coordinates at the start *and* at the
-    // end of the edge might have to be cut.
-    double start_at_fraction;  // The shape list starts at this fraction.
-    if (pos == 0) {
-      coords = ComputeStartShapeCoords(mc, res_.start);
-      start_at_fraction = res_.start.to_fraction;
-    } else {
-      coords = mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
-      start_at_fraction = 0.0;
-    }
-    if (pos + 1 == num_steps()) {
-      TerminateTargetShapeCoords(mc, res_.target, start_at_fraction, &coords);
+      if (pos == from_pos) {
+        std::swap(coords, total_coords);
+      } else {
+        // Append.
+        CHECK_S(total_coords.back() == coords.front()) << fe.DebugString(mg);
+        ;
+        // TODO: Not yet supported by gcc: coords.append_range(v);
+        total_coords.insert(total_coords.end(), coords.cbegin() + 1,
+                            coords.cend());
+      }
     }
 
     // convert to seconds/meters.
-    const double duration = res_.edge_metric(pos) / 1000.0;
-    const double dist = res_.distance_cm(mg, pos) / 100.0;
+    const double duration = sum_duration / 1000.0;
+    const double dist = sum_distance / 100.0;
 
+    const MMFullEdge& fe = res_.full_edges.at(from_pos);
     nlohmann::json maneuver = {
         {"bearing_after", 0},
         {"bearing_before", 0},
         {"location",
-         {coords.front().lon.AsDouble(), coords.front().lat.AsDouble()}},
+         {total_coords.front().lon.AsDouble(),
+          total_coords.front().lat.AsDouble()}},
         {"modifier", "ModifierContinue"},
-        {"type", (pos == 0 ? "depart" : "continue")}};
+        {"type", (from_pos == 0 ? "depart" : "continue")}};
 
-    nlohmann::json step = {{"geometry", EncodePolyline(coords)},
+    nlohmann::json step = {{"geometry", EncodePolyline(total_coords)},
                            {"maneuver", maneuver},
-                           {"name", GetEdgeName(mc, fe)},
+                           {"name", GetStreetName(mg, fe)},
                            {"duration", Round1(duration)},
                            {"distance", Round1(dist)}};
-    return {.j = step,
-            .sum_dist = dist,
-            .sum_duration = duration,
-            .last_name = GetEdgeName(mc, fe)};
+    return {.j = step, .sum_dist = dist, .sum_duration = duration};
   }
 
-  JsonResult CreateArrivalStep(const MMGraph& mg) const {
+  JsonData CreateArrivalStep(const MMGraph& mg) const {
     MMFullEdge fe = res_.full_edges.back();
 
     LatLon to_coord = res_.target.coord_at_fraction;
@@ -332,22 +341,42 @@ class StepsData {
 
     nlohmann::json step = {{"geometry", EncodePolyline(coords)},
                            {"maneuver", maneuver},
-                           {"name", GetEdgeName(fe.mc(mg), fe)},
+                           {"name", GetEdgeName(mg, fe)},
                            {"duration", 0},
                            {"distance", 0}};
     return {.j = step};
+  }
+
+  const MMRoutingResult& GetRoutingResult() const {
+    return res_;
   }
 
  private:
   const MMRoutingResult& res_;
 };
 
-JsonResult CreateSteps(const MMGraph& mg, const StepsData& steps_data) {
-  JsonResult result;
+JsonData CreateSteps(const MMGraph& mg, const StepsData& steps_data) {
+  JsonData result;
   result.j = nlohmann::json::array();
+  const MMRoutingResult& r = steps_data.GetRoutingResult();
 
   for (uint32_t pos = 0; pos < steps_data.num_steps(); ++pos) {
-    JsonResult tmp = steps_data.CreateOneStep(mg, pos);
+    const MMFullEdge fe = r.full_edges.at(pos);
+    const HIGHWAY_LABEL hw_tag = fe.get_wsa(fe.mc(mg)).highway_label_;
+    const std::string name = GetStreetName(mg, fe);
+    uint32_t start_pos = pos;
+    while (pos + 1 < steps_data.num_steps()) {
+      const MMFullEdge fe_next = r.full_edges.at(pos + 1);
+      if (fe_next.get_wsa(fe_next.mc(mg)).highway_label_ != hw_tag) {
+        break;
+      }
+      if (GetStreetName(mg, fe_next) != name) {
+        break;
+      }
+      ++pos;
+    }
+
+    JsonData tmp = steps_data.CreateOneStep(mg, start_pos, pos);
     result.sum_dist += tmp.sum_dist;
     result.sum_duration += tmp.sum_duration;
     // TODO: Collapse if name is same.
@@ -364,7 +393,7 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.start.distance_to_seg_cm / 10.0) / 10.0},
-         {"name", GetEdgeName(res.start.fe.mc(mg), res.start.fe)},
+         {"name", GetEdgeName(mg, res.start.fe)},
          {"location",
           {res.start.coord_at_fraction.lon.AsDouble(),
            res.start.coord_at_fraction.lat.AsDouble()}}});
@@ -372,7 +401,7 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   {
     waypoints.push_back(
         {{"distance", std::roundf(res.target.distance_to_seg_cm / 10.0) / 10.0},
-         {"name", GetEdgeName(res.target.fe.mc(mg), res.target.fe)},
+         {"name", GetEdgeName(mg, res.target.fe)},
          {"location",
           {res.target.coord_at_fraction.lon.AsDouble(),
            res.target.coord_at_fraction.lat.AsDouble()}}});
@@ -382,7 +411,7 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   // steps.
   StepsData steps_data(mg, res);
 
-  JsonResult res_steps = CreateSteps(mg, steps_data);
+  JsonData res_steps = CreateSteps(mg, steps_data);
   nlohmann::json leg = {{"steps", res_steps.j},
                         {"summary", "step_summary"},
                         {"duration", Round1(res_steps.sum_duration)},
@@ -412,10 +441,10 @@ nlohmann::json ComputeRoute(const MMGraph& mg, LatLon start_pt,
                                  find_closest_time);
 
   for (const auto& e : start.edge_points()) {
-    LOG_S(INFO) << e.DebugString(mg, start_pt.lat, start_pt.lon);
+    LOG_S(INFO) << e.DebugStringExt(mg, start_pt.lat, start_pt.lon);
   }
   for (const auto& e : target.edge_points()) {
-    LOG_S(INFO) << e.DebugString(mg, target_pt.lat, target_pt.lon);
+    LOG_S(INFO) << e.DebugStringExt(mg, target_pt.lat, target_pt.lon);
   }
   LOG_S(INFO) << absl::StrFormat("Found: start:%d  target:%d",
                                  !start.edge_points().empty(),

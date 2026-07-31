@@ -563,14 +563,9 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
 
     DistanceToSegment dts = FastPointToSegmentDistance(M.ll, A.ll, B.ll);
 
-    int64_t len1 = calculate_distance(A.ll, M.ll);
-    int64_t len2 = calculate_distance(M.ll, B.ll);
-    int32_t angle1 = angle_to_east_degrees(A.ll, M.ll, len1);
-    int32_t angle2 = angle_to_east_degrees(M.ll, B.ll, len2);
-    int32_t angle_at_m = std::abs(angle1 - angle2);
-    if (angle_at_m > 180) {
-      angle_at_m = std::abs(angle_at_m - 360);
-    }
+    int32_t bearing1 = true_north_bearing(A.ll, M.ll);
+    int32_t bearing2 = true_north_bearing(M.ll, B.ll);
+    int32_t angle_at_m = std::abs(angle_between_edges(bearing1, bearing2));
 
     if (debug) {
       LOG_S(INFO) << absl::StrFormat(
@@ -578,8 +573,9 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
           "len1:%5.2fm len2:%5.2f angle:%d",
           M.ll.lat.v() - A.ll.lat.v(), M.ll.lon.v() - A.ll.lon.v(),
           B.ll.lat.v() - M.ll.lat.v(), B.ll.lon.v() - M.ll.lon.v(),
-          dts.distance_to_seg_cm / 100.0, len1 / 100.0, len2 / 100.0,
-          angle_at_m);
+          dts.distance_to_seg_cm / 100.0,
+          calculate_distance(A.ll, M.ll) / 100.0,
+          calculate_distance(M.ll, B.ll) / 100.0, angle_at_m);
       LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", A.id, M.id,
                                      B.id);
     }

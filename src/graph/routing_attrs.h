@@ -39,6 +39,7 @@ enum HIGHWAY_LABEL : uint8_t {
   HW_MAX
   // handle: footway=sidewalk, junction=*
 };
+constexpr std::uint32_t NUM_HIGHWAY_LABEL_BITS = 5;
 
 namespace {
 std::vector<std::string_view> HighWayLabelStringVector() {
@@ -709,11 +710,10 @@ struct alignas(2) RoutingAttrs {
   // is on right side. Both left_side and right_side can be 1!
   uint16_t right_side : 1;
   // 0 = unknown, otherwise width in decimeters.
-  uint16_t width_dm : 8;
+  uint8_t width_dm;
 };
 static_assert(std::is_standard_layout<RoutingAttrs>::value);
 static_assert(std::is_trivial<RoutingAttrs>::value);
-
 
 inline void ClearRoutingAttrs(RoutingAttrs* ra) {
   std::memset(ra, 0, sizeof(RoutingAttrs));

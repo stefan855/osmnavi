@@ -16,7 +16,7 @@
 
 constexpr uint64_t kMMMagic = 7715514337782280064ull;
 constexpr uint32_t kMMVersionMajor = 0;
-constexpr uint32_t kMMVersionMinor = 7;
+constexpr uint32_t kMMVersionMinor = 8;
 
 // Stores basic node data in an uint64_t.
 struct MMNode {
@@ -245,6 +245,30 @@ struct MMCluster {
                : edges.size();
   }
 
+  // Find the from_node_idx given an edge_idx.
+  // This is O(log n) because the node is found by doing a binary search over
+  // the edge start indexes. Return INFU32 if the edge wasn't found.
+  //
+  // TODO: Could do interpolation search instead, since the positions should
+  // be evenly distributed.
+  uint32_t find_from_node_of_edge_slow(uint32_t edge_idx) const {
+    if (edge_idx >= edges.size()) {
+      return INFU32;
+    }
+    uint32_t L = 0;
+    uint32_t R = nodes.size();
+    // Find the first entry strictly larger than the search key 'edge_idx';.
+    while (L < R) {
+      uint32_t M = L + (R - L) / 2;
+      if (get_node(M).edge_start_idx() <= edge_idx) {
+        L = M + 1;
+      } else {
+        R = M;
+      }
+    }
+    return L > 0 ? L - 1 : INFU32;
+  }
+
   inline std::ranges::iota_view<uint32_t, uint32_t> edge_indices(
       uint32_t node_idx) const {
     return std::views::iota(edge_start_idx(node_idx), edge_stop_idx(node_idx));
@@ -454,6 +478,10 @@ struct MMCluster {
 
   // Return the "FullEdge" debug string for this edge.
   std::string DebugStringEdge(uint32_t from_idx, uint32_t edge_idx) const;
+  // Return the "FullEdge" debug string for this edge. Uses
+  // find_from_node_of_edge_slow() to find the from_nide_idx for the edge,
+  // therefore it is labelled slow.
+  std::string DebugStringEdgeSlow(uint32_t edge_idx) const;
 };
 CHECK_IS_MM_OK(MMCluster);
 
@@ -638,6 +666,9 @@ struct MMFullEdge {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
     return mc.edge_to_way.at(edge_idx(mc));
   }
+  const WaySharedAttrs& get_wsa(const MMCluster& mc) const {
+    return mc.get_wsa(way_idx(mc));
+  }
   const MMCluster& mc(const MMGraph& mg) const {
     return mg.clusters.at(cluster_id);
   }
@@ -660,6 +691,21 @@ struct MMFullEdge {
   }
   const MMOutgoingEdge& ToOutgoingEdge(const MMGraph& mg) const {
     return ToOutgoingEdge(mc(mg));
+  }
+  // Get the turn costs between this edge and 'to_edge'.
+  uint32_t GetTurnCost(const MMCluster& mc, const MMFullEdge& to_edge) const {
+    CHECK_EQ_S(cluster_id, mc.cluster_id);
+    if (to_edge.cluster_id != cluster_id) {
+      return 0;  // TODO: fix cross cluster case.
+    }
+    // Check that to_edge is actually a connected edge.
+    CHECK_EQ_S(target_idx(mc), to_edge.from_node_idx);
+    const auto turn_cost_arr = mc.get_turn_costs(edge_idx(mc));
+    CHECK_LT_S(to_edge.edge_offset, turn_cost_arr.size());
+    return decompress_turn_cost(turn_cost_arr[to_edge.edge_offset]);
+  }
+  uint32_t GetTurnCost(const MMGraph& mg, const MMFullEdge& to_edge) const {
+    return GetTurnCost(mc(mg), to_edge);
   }
 
   // Returns the cluster id of the connected external cluster. Check fails if
@@ -703,10 +749,15 @@ struct MMFullEdge {
         cluster_id_to = mc.find_outgoing_edge(edge_idx(mc)).to_cluster_id;
       }
     }
-    return absl::StrFormat(
-        "Edge %lld->%lld cl-id:%u->%u", mc.get_node_id(from_node_idx),
-        mc.get_node_id(target_idx(mc)), cluster_id_from, cluster_id_to);
+    return absl::StrFormat("%lld->%lld w:%lld <%s> dist:%.2fm cl-id:%u->%u",
+                           mc.get_node_id(from_node_idx),
+                           mc.get_node_id(target_idx(mc)),
+                           mc.get_edge_to_way_id(edge_idx(mc)),
+                           HighwayLabelToString(get_wsa(mc).highway_label_),
+                           mc.edge_to_distance.at(edge_idx(mc)) / 100.0,
+                           cluster_id_from, cluster_id_to);
   }
+
   std::string DebugString(const MMGraph& mg) const {
     return DebugString(mc(mg));
   }
@@ -729,6 +780,10 @@ inline std::string MMCluster::DebugStringEdge(uint32_t from_idx,
                                               uint32_t edge_idx) const {
   return MMFullEdge::CreateWithEdgeIdx(*this, from_idx, edge_idx)
       .DebugString(*this);
+}
+
+inline std::string MMCluster::DebugStringEdgeSlow(uint32_t edge_idx) const {
+  return DebugStringEdge(find_from_node_of_edge_slow(edge_idx), edge_idx);
 }
 
 inline MMFullEdge MMOutgoingEdge::ToFullEdge(const MMGraph& mg) const {
