@@ -46,6 +46,9 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 2. Improve routing: Display shape coordinates (street curvature) for start/end segment.
   
 ## Current Tasks
+* Fix CrossingCost() to compute better turn costs at crossings. Currently, going straight on a maior street incurs costs when a minor street enters from either side.
+* Compute different turn costs for a left turn vs. a right turn. This also depends on the driving mode in the country (left/right).
+* Compute speed reduction for roads with shape nodes depending on curvature.
 * Improve routing: Concatenate consecutive street segments of the same street in returned routes.
 * Improve routing: Calculate angles at transitions, say things like "turn right on ..."
 * Fix unrestricted areas behind restricted areas.
@@ -57,7 +60,6 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 2. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
 3. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
 4. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
-1. Assess the 'curviness' of ways and use it to lower maxspeed to real life values.
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 2. Make the routing server use https instead of http.
 3. Experiment and potentially replace the Louvain clustering algorithm with a MaximumFlow/MinCut based algorithm, which should provide better clusters. See [Schild, Aaron, and Christian Sommer. "On balanced separators in road networks.", 2015](https://aschild.github.io/papers/roadseparator.pdf)
