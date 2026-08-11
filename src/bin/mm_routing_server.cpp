@@ -365,6 +365,7 @@ JsonData CreateSteps(const MMGraph& mg, const StepsData& steps_data) {
     const HIGHWAY_LABEL hw_tag = fe.get_wsa(fe.mc(mg)).highway_label_;
     const std::string name = GetStreetName(mg, fe);
     uint32_t start_pos = pos;
+    // Find the end of the sequence of the current highway tag and street name.
     while (pos + 1 < steps_data.num_steps()) {
       const MMFullEdge fe_next = r.full_edges.at(pos + 1);
       if (fe_next.get_wsa(fe_next.mc(mg)).highway_label_ != hw_tag) {

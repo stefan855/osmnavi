@@ -691,12 +691,13 @@ class MMHybridRouter final {
   }
 
   static void LogPath(const MMGraph& mg, const MMRoutingResult& res) {
+    constexpr uint32_t num_legs = 24;  // Shows up to <num_legs> entries.
     LOG_S(INFO) << "**************** PATH ***************";
     for (size_t i = 0; i < res.full_edges.size(); ++i) {
-      if (i == 8 && res.full_edges.size() > 16) {
-        LOG_S(INFO) << "       ... (" << res.full_edges.size() - 16
+      if (i == num_legs / 2 && res.full_edges.size() > 24) {
+        LOG_S(INFO) << "       ... (" << res.full_edges.size() - 24
                     << " omitted)";
-        i = res.full_edges.size() - 8;
+        i = res.full_edges.size() - num_legs / 2;
       }
       uint32_t tc = 0;
       if (i > 0) {
@@ -704,9 +705,9 @@ class MMHybridRouter final {
       }
       CHECK_GE_S(res.edge_metric(i), tc);
       LOG_S(INFO) << absl::StrFormat(
-          "%5i. tc:%.2fs m:%.2fs tot:%.2fs %s", i + 1, tc / 1000.0,
-          (res.edge_metric(i) - tc) / 1000.0, res.min_metrics.at(i) / 1000.0,
-          res.full_edges.at(i).DebugString(mg));
+          "%5i. tc:%.2fs m:%.2fs d:%.2fm tot:%.2fs fe:<%s>", i + 1, tc / 1000.0,
+          (res.edge_metric(i) - tc) / 1000.0, res.distance_cm(mg, i) / 100.0,
+          res.min_metrics.at(i) / 1000.0, res.full_edges.at(i).DebugString(mg));
     }
     LOG_S(INFO) << "*************************************";
   }

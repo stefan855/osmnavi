@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "geometry/distance.h"
+#include "graph/crossing.h"
 #include "graph/graph_def.h"
 #include "graph/graph_def_utils.h"
 
@@ -383,6 +384,7 @@ inline TRStatus CheckSimpleTurnRestriction(
 }
 
 uint32_t CurveCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
+  /*
   const GNode& node0 = n3p.node0(g);
   const GNode& node1 = n3p.node1(g);
   const GNode& node2 = n3p.node2(g);
@@ -392,6 +394,8 @@ uint32_t CurveCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   const int32_t edge1_angle =
       true_north_bearing(node1.ll, node2.ll, n3p.edge1(g).distance_cm);
   const int32_t turn_angle = angle_between_edges(edge0_angle, edge1_angle);
+  */
+  const int16_t turn_angle = n3p.edge0(g).GetTurnAngle(n3p.edge1(g));
 
   return TurnAngleTimeLoss(g, vt, n3p.edge0(g), n3p.edge1(g), turn_angle);
 }
@@ -439,74 +443,6 @@ uint32_t NodeTagsCost(const Graph& g, const N3Path& n3p) {
     }
   }
   return cost;
-}
-
-// TODO: roads with >1 lanes.
-// TODO: Handle left/right turns differently (depends on country).
-// TODO: The code below is somewhat hand-waving and uses constants that come
-//       from thin air...
-uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p,
-                      bool debug) {
-  const uint32_t num_unique =
-      gnode_num_unique_edges(g, n3p.node1_idx, /*ignore_loops=*/true);
-  if (num_unique < 3) {
-    // Probably shape node.
-    if (debug) {
-      LOG_S(INFO) << "    Crossing cost (<3 unique): 0";
-    }
-    return 0;
-  }
-  const GEdge& edge0 = n3p.edge0(g);
-  if (edge0.road_priority == GEdge::PRIO_HIGH ||
-      edge0.road_priority == GEdge::PRIO_SIGNALS) {
-    // Almost frictionless
-    if (debug) {
-      LOG_S(INFO) << "    Crossing cost (PRIO_HIGH/SIGNALS): "
-                  << (num_unique - 2) * 500;
-    }
-    return (num_unique - 2) * 500;
-  }
-
-  // there was a "give_way" sign or something like that before arriving at the
-  // crossing. Assume it takes some considerable time.
-  if (edge0.road_priority == GEdge::PRIO_LOW) {
-    if (debug) {
-      LOG_S(INFO) << "    Crossing cost: (PRIO_LOW): " << num_unique * 2000;
-    }
-    return num_unique * 2000;
-  }
-
-  const GWay& w0 = g.ways.at(n3p.edge0(g).way_idx);
-  if (w0.highway_label < HW_UNCLASSIFIED) {
-    const BestHighwayAtNode best_hw =
-        GetBestHighwayAtNode(g, vt, n3p.node1_idx);
-    if (w0.highway_label == best_hw.highway_label) {
-      if (best_hw.num_incoming <= 1) {
-        // We arrive on a road with highest priority when considering the
-        // highway category, and no other edge does this. So assume we have
-        // higher priority than other traffic and can continue without much
-        // issues.
-        if (debug) {
-          LOG_S(INFO) << "    Crossing cost (best_hw.num_incoming<=1): "
-                      << (num_unique - 2) * 1000;
-        }
-        return (num_unique - 2) * 1000;
-      } else {
-        // Other edges are arriving with the same high priority;
-        if (debug) {
-          LOG_S(INFO) << "    Crossing cost (best_hw.num_incoming>1): "
-                      << best_hw.num_incoming * 1500;
-        }
-        return best_hw.num_incoming * 1500;
-      }
-    }
-  }
-
-  if (debug) {
-    LOG_S(INFO) << "    Crossing cost (num_unique * 1500): "
-                << num_unique * 1500;
-  }
-  return num_unique * 1500;
 }
 
 // The cost that occurs when entering a new way, i.e. when turning from way A
@@ -588,8 +524,8 @@ inline uint32_t ComputeTurnCostForN3Path(
   // 1) Time loss because of node (stop sign, signals, etc.)
   // 2) Time loss because of curve.
   // 3) Real crossing
-  // 4) Entering a new way. Currently this has costs of 30m when entering a way
-  // with direction 'reversible'.
+  // 4) Entering a new way. Currently this has costs of 30m when entering a
+  // way with direction 'reversible'.
 
   const uint32_t cost_node_tags = NodeTagsCost(g, n3p);
   const uint32_t cost_crossing = CrossingCost(g, vt, n3p, debug);

@@ -109,7 +109,7 @@ TiledCountryLookup* InitCountryTiler(int16_t country) {
 build_graph::GraphMetaData CreateMeta() {
   build_graph::GraphMetaData meta;
 
-  meta.node_table.reset(new DataBlockTable(/*alloc_unit*/ 1024));
+  // meta.graph.node_table.reset(new DataBlockTable(/*alloc_unit*/ 1024));
   meta.tiler.reset(InitCountryTiler(NCC_CH));
   meta.per_country_config.reset(new PerCountryConfig);
   meta.per_country_config->ReadConfig("../config/routing.cfg");
@@ -165,7 +165,7 @@ void TestWay1() {
 )";
   constexpr int num_nodes = 2;  // Our way has two nodes.
   build_graph::GraphMetaData meta = CreateMeta();
-  StoreNodes(num_nodes, meta.node_table.get());
+  StoreNodes(num_nodes, &meta.graph.node_table);
   DeDuperWithIds<WaySharedAttrs> deduper;
   DeDuperWithIds<std::string> streetname_deduper;
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);
@@ -203,7 +203,7 @@ void TestWay2() {
   constexpr int num_nodes = 2;  // Our way has two nodes.
   build_graph::GraphMetaData meta = CreateMeta();
   meta.opt.vt = VH_MOTORCAR;
-  StoreNodes(num_nodes, meta.node_table.get());
+  StoreNodes(num_nodes, &meta.graph.node_table);
   DeDuperWithIds<WaySharedAttrs> deduper;
   DeDuperWithIds<std::string> streetname_deduper;
   OsmWayWrapper wr = FillWayData(WayData, num_nodes);

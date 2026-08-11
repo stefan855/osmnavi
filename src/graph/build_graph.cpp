@@ -95,7 +95,9 @@ void ValidateGraph(const Graph& g) {
       // if one or both endpoints are in a deadend, the the edge is marked
       // 'dead_end' or 'bridge'.
       CHECK_EQ_S(node.dead_end | target.dead_end, e.bridge | e.dead_end)
-          << debug_str(node) << debug_str(target) << debug_str(g, e);
+          << debug_str(node) << "\n"
+          << debug_str(target) << "\n"
+          << debug_str(g, e);
 
       // if one endpoint is in a dead end and the other not, then it must be an
       // bridge and vice versa.
@@ -106,7 +108,8 @@ void ValidateGraph(const Graph& g) {
 
       // Only cluster border edges connect different clusters.
       CHECK_S(e.cross_cluster_edge || node.cluster_id == target.cluster_id)
-          << debug_str(node) << debug_str(target);
+          << debug_str(node) << "\n"
+          << debug_str(target);
     }
   }
   // Validate.
@@ -350,7 +353,7 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
     }
 
     NodeBuilder::VNode node;
-    if (!NodeBuilder::FindNode(*meta.node_table, running_id, &node)) {
+    if (!NodeBuilder::FindNode(meta.graph.node_table, running_id, &node)) {
       // Node is referenced by osm_way, but the node was not loaded.
       // This happens often when a clipped country file does contain a way but
       // not all the nodes of the way.
@@ -452,12 +455,13 @@ void MarkSeenAndNeeded(GraphMetaData* meta,
     stats->num_ways_closed++;
   }
 
-  // Find loops in the way nodes and mark all nodes in the loop as needed.
+  // Find loops in the way nodes and mark some nodes in the loop as needed.
   for (size_t i = 0; i < ncs.size() - 1; ++i) {
     const ExtractedWayNode& nc1 = ncs.at(i);
     if (!nc1.dup_later) {
       continue;
     }
+
     for (size_t j = i + 1; j < ncs.size(); ++j) {
       if (ncs.at(j).id == nc1.id) {
         // [i..j] is a loop.
@@ -466,11 +470,40 @@ void MarkSeenAndNeeded(GraphMetaData* meta,
               "LOOP of length %llu in way %lld node %lld", j - i, osm_way.id(),
               nc1.id);
         }
-        for (size_t k = i; k < j; ++k) {
-          meta->way_nodes_needed->SetBit(ncs.at(k).id, true);
+        if (true || j == ncs.size() - 1) {
+          // A simple loop to the end of the way. Mark two arbitrary nodes
+          // as needed, this should be enough to not get dup edges.
+          // Note that is checked in ValidateGraph().
+          meta->way_nodes_needed->SetBit(ncs.at(i + 1).id, true);
+          meta->way_nodes_needed->SetBit(ncs.at(j - 1).id, true);
+        } else {
+          // Not simple, just mark all nodes.
+          for (size_t k = i; k < j; ++k) {
+            meta->way_nodes_needed->SetBit(ncs.at(k).id, true);
+          }
         }
       }
     }
+
+#if 0
+    for (size_t j = i + 1; j < ncs.size(); ++j) {
+      if (ncs.at(j).id == nc1.id) {
+        // [i..j] is a loop.
+        if (j - i <= 3) {
+          LOG_S(INFO) << absl::StrFormat(
+              "LOOP of length %llu in way %lld node %lld", j - i, osm_way.id(),
+              nc1.id);
+        }
+        meta->way_nodes_needed->SetBit(ncs.at(i + 1).id, true);
+        meta->way_nodes_needed->SetBit(ncs.at(j - 1).id, true);
+#if 0
+        for (size_t k = i; k < j; ++k) {
+          meta->way_nodes_needed->SetBit(ncs.at(k).id, true);
+        }
+#endif
+      }
+    }
+#endif
   }
 }
 
@@ -802,6 +835,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const bool inverted, const bool contra_way, const bool has_shapes,
              const bool has_reverse_shapes, const bool both_directions,
              const size_t way_idx, const std::uint64_t distance_cm,
+             uint16_t start_bearing, uint16_t target_bearing,
              bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
@@ -846,6 +880,8 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.bridge = 0;
   e.cross_cluster_edge = 0;
   e.dead_end = 0;
+  e.start_bearing = start_bearing;
+  e.target_bearing = target_bearing;
 
   const GWay& way = g.ways.at(way_idx);
   if ((way.priority_road_forward && !contra_way) ||
@@ -985,7 +1021,7 @@ void MarkNodesWithAttributesAsNeeded(GraphMetaData* meta) {
 void AllocateGNodes(GraphMetaData* meta) {
   FUNC_TIMER();
   meta->graph.nodes.reserve(meta->way_nodes_needed->CountBits());
-  NodeBuilder::GlobalNodeIter iter(*meta->node_table);
+  NodeBuilder::GlobalNodeIter iter(meta->graph.node_table);
   const NodeBuilder::VNode* node;
   while ((node = iter.Next()) != nullptr) {
     if (meta->way_nodes_needed->GetBit(node->id)) {
@@ -1088,6 +1124,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
   std::vector<uint64_t> ids;
   std::vector<size_t> node_idx;
   std::vector<uint64_t> dist_sums;
+  std::vector<uint16_t> bearings;
   absl::flat_hash_set<uint32_t> id_set;
 
   // Compute distances between the nodes of the way and store
@@ -1097,6 +1134,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
     // Contains the node index in g.nodes or max() if it is a shape node.
     node_idx.clear();
     dist_sums.clear();
+    // Contains the bearing from [pos-1..pos]. The first value is 0.
+    bearings.clear();
     // Decode node_ids.
     std::uint64_t num_nodes;
     const std::uint8_t* ptr = graph.way_node_ids.at(way_idx);
@@ -1109,16 +1148,19 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
     NodeBuilder::VNode prev_node = {.id = 0, .ll = {LatE6(), LonE6()}};
     int64_t sum = 0;
     for (const uint64_t id : ids) {
+      uint16_t bearing = 0;
       if (meta->way_nodes_seen->GetBit(id)) {
         NodeBuilder::VNode node;
-        if (!NodeBuilder::FindNode(*meta->node_table, id, &node)) {
+        if (!NodeBuilder::FindNode(meta->graph.node_table, id, &node)) {
           // Should not happen, all 'seen' nodes should exist.
           ABORT_S() << absl::StrFormat("Way:%llu has missing node %llu", way.id,
                                        id);
         }
         // Sum up distance so far.
         if (prev_node.id != 0) {
-          sum += calculate_distance(prev_node.ll, node.ll);
+          uint32_t distance_cm = calculate_distance(prev_node.ll, node.ll);
+          sum += distance_cm;
+          bearing = true_north_bearing(prev_node.ll, node.ll, distance_cm);
         }
         prev_node = node;
       } else {
@@ -1126,6 +1168,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
         ABORT_S() << "should be needed";
       }
       dist_sums.push_back(sum);
+      bearings.push_back(bearing);
       if (meta->way_nodes_needed->GetBit(id)) {
         std::size_t idx = graph.FindNodeIndex(id);
         CHECK_S(idx < graph.nodes.size());
@@ -1135,6 +1178,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
       }
     }
     CHECK_EQ_S(ids.size(), dist_sums.size());
+    CHECK_EQ_S(ids.size(), bearings.size());
     CHECK_EQ_S(ids.size(), node_idx.size());
 
     // Go through 'needed' nodes (skip the others) and output edges.
@@ -1167,16 +1211,14 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
             const std::size_t idx1 = node_idx.at(prev_pos);
             const std::size_t idx2 = node_idx.at(pos);
             uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(prev_pos);
-
+            /// The bearings may be different if pos > prev_pos+1, because of
+            /// shape coordinates.
+            const uint16_t start_bearing = bearings.at(prev_pos + 1);
+            const uint16_t target_bearing = bearings.at(pos);
             const bool has_shapes = pos - prev_pos > 1;
             if (prev_pos_is_repeated_id && has_shapes) {
               // This can only occur in ways that have a loop and that have a
               // shape edge starting at the *end* of the loop.
-#if 0
-              LOG_S(INFO) << "TTT way:" << way.id
-                          << " node:" << ids.at(prev_pos)
-                          << " prev_pos:" << prev_pos;
-#endif
               graph.edge_in_way_start_pos_map[{idx1, idx2, way_idx}] =
                   static_cast<uint32_t>(prev_pos);
             }
@@ -1187,18 +1229,19 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/false, has_shapes,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/true, way_idx, distance_cm,
-                      restr_car_f);
+                      start_bearing, target_bearing, restr_car_f);
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
                       /*contra_way=*/true, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/has_shapes,
                       /*both_directions=*/true, way_idx, distance_cm,
-                      restr_car_b);
+                      invert_bearing(target_bearing),
+                      invert_bearing(start_bearing), restr_car_b);
             } else if (vt_forward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false, has_shapes,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
-                      restr_car_f);
+                      start_bearing, target_bearing, restr_car_f);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
               // querying the way information works the same for inverted and
@@ -1207,23 +1250,26 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/false, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
-                      restr_car_f);
+                      invert_bearing(target_bearing),
+                      invert_bearing(start_bearing), restr_car_f);
             } else {
               CHECK_S(vt_backward) << way.id;
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
                       /*contra_way=*/true, has_shapes,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
-                      restr_car_b);
+                      invert_bearing(target_bearing),
+                      invert_bearing(start_bearing), restr_car_b);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
               // querying the way information works the same for inverted and
               // non-inverted edges.
+              // Note that there are no shape coordinates available.
               AddEdge(graph, idx1, idx2, /*inverted=*/true,
                       /*contra_way=*/true, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance_cm,
-                      restr_car_b);
+                      start_bearing, target_bearing, restr_car_b);
             }
           }
           prev_pos = pos;
@@ -1616,11 +1662,11 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
 
   LOG_S(INFO) << "========= Various Stats ==========";
   LOG_S(INFO) << absl::StrFormat("Num var-nodes:      %12lld",
-                                 meta.node_table->total_records());
+                                 meta.graph.node_table.total_records());
   LOG_S(INFO) << absl::StrFormat(
       "  bytes/var-node:   %12.2f",
-      static_cast<double>(meta.node_table->mem_allocated()) /
-          meta.node_table->total_records());
+      static_cast<double>(meta.graph.node_table.mem_allocated()) /
+          meta.graph.node_table.total_records());
   LOG_S(INFO) << absl::StrFormat("Num t-restr success: %11lld",
                                  stats.num_turn_restriction_success);
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors:   %10lld",
@@ -1818,8 +1864,9 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  (meta.way_nodes_seen->NumUsedBytes() +
                                   meta.way_nodes_needed->NumUsedBytes()) /
                                      1000000.0);
-  LOG_S(INFO) << absl::StrFormat("Varnode memory:     %12.2f MB",
-                                 meta.node_table->mem_allocated() / 1000000.0);
+  LOG_S(INFO) << absl::StrFormat(
+      "Varnode memory:     %12.2f MB",
+      meta.graph.node_table.mem_allocated() / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Node graph memory:  %12.2f MB",
                                  (node_bytes) / 1000000.0);
   LOG_S(INFO) << absl::StrFormat("Edge graph memory:  %12.2f MB",
@@ -2147,7 +2194,6 @@ BuildGraphStats CollectThreadStats(
 GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   GraphMetaData meta;
   meta.opt = opt;
-  meta.node_table.reset(new DataBlockTable);
 
   // Reading is fastest with 7 threads on my hardware.
   OsmPbfReader reader(opt.pbf, std::min(16, opt.n_threads));
@@ -2173,7 +2219,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
     pool.WaitAllFinished();
   }
 
-  LoadNodeCoordsAndAttrributes(opt.vt, &reader, meta.node_table.get(), &meta);
+  LoadNodeCoordsAndAttrributes(opt.vt, &reader, &meta.graph.node_table, &meta);
   LoadGWays(&reader, &meta);
   SortGWays(&meta);
   MarkNodesWithAttributesAsNeeded(&meta);

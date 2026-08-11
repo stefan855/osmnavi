@@ -19,14 +19,7 @@ class SimpleMemPool {
         num_pieces_(0),
         total_used_(0) {}
   ~SimpleMemPool() {
-    Piece* head = current_;
-    while (head != nullptr) {
-      Piece* b = head;
-      head = b->next;
-      free(b->buff);
-      delete b;
-    }
-    current_ = nullptr;
+    Clear();
   }
 
   // Allocate 'num' bytes from the pool and return a pointer to it.
@@ -63,6 +56,19 @@ class SimpleMemPool {
   }
 
   std::uint64_t MemAllocated() const { return total_used_; }
+
+  void Clear() {
+    num_pieces_ = 0;
+    total_used_ = 0;
+    Piece* head = current_;
+    while (head != nullptr) {
+      Piece* b = head;
+      head = b->next;
+      free(b->buff);
+      delete b;
+    }
+    current_ = nullptr;
+  }
 
  private:
   struct Piece {

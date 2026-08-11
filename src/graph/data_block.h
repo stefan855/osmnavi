@@ -103,6 +103,12 @@ class DataBlockTable {
   }
   const std::vector<DataBlock>& GetBlocks() const { return blocks_; }
 
+  void Clear() {
+    blocks_ = {};
+    pool_.Clear();
+    total_records_ = 0;
+  }
+
  private:
   std::vector<DataBlock> blocks_;
   SimpleMemPool pool_;

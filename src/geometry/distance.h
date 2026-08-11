@@ -119,7 +119,7 @@ inline int32_t angle_to_east_degrees(LatLon pt1, LatLon pt2,
 //   cos(α) = height / edge_length.
 //
 // For background see https://en.wikipedia.org/wiki/Bearing_(navigation)
-inline int32_t true_north_bearing(LatLon pt1, LatLon pt2,
+inline uint16_t true_north_bearing(LatLon pt1, LatLon pt2,
                                   uint32_t edge_length_cm) {
   if (edge_length_cm == 0) {
     return 0;
@@ -158,8 +158,17 @@ inline int32_t true_north_bearing(LatLon pt1, LatLon pt2,
   }
 }
 
-inline int32_t true_north_bearing(LatLon pt1, LatLon pt2) {
+inline uint16_t true_north_bearing(LatLon pt1, LatLon pt2) {
   return true_north_bearing(pt1, pt2, calculate_distance(pt1, pt2));
+}
+
+inline uint16_t invert_bearing(uint16_t bearing) {
+  CHECK_LT_S(bearing, 360);
+  if (bearing < 180) {
+    return bearing + 180;
+  } else {
+    return bearing - 180;
+  }
 }
 
 #if 0
@@ -193,8 +202,8 @@ inline int32_t angle_between_edges_old(int32_t edge_angle_1,
 // <0     Second edge goes to the left side.
 // >0     Second edge goes to the right side.
 // -180   Full u-turn.
-inline int32_t angle_between_edges(int32_t edge_angle_1, int32_t edge_angle_2) {
-  int32_t a = edge_angle_2 - edge_angle_1;
+inline int16_t angle_between_edges(uint16_t bearing0, uint16_t bearing1) {
+  int16_t a = static_cast<int16_t>(bearing1) - static_cast<int16_t>(bearing0);
   while (a >= 180) {
     a = a - 360;
   }

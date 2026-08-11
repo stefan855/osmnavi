@@ -524,33 +524,6 @@ void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
   }
 }
 
-inline std::vector<NodeBuilder::VNode> GetCoords(
-    const Graph& g, const DataBlockTable& node_table, uint32_t from_idx,
-    uint32_t target_idx, uint32_t way_idx) {
-  std::vector<uint64_t> id_list = g.GetGWayNodeIds(g.ways.at(way_idx));
-  // May be >0 when from node ('from_idx') is a repeated node.
-  uint32_t start_pos = FindInMapOrDefault(g.edge_in_way_start_pos_map,
-                                          {from_idx, target_idx, way_idx}, 0);
-
-  const uint64_t id_from = g.nodes.at(from_idx).node_id;
-  const uint64_t id_to = g.nodes.at(target_idx).node_id;
-  std::vector<NodeBuilder::VNode> coords;
-  for (uint32_t i = start_pos; i < id_list.size(); ++i) {
-    uint64_t id = id_list.at(i);
-    if ((id == id_from && coords.empty()) || !coords.empty()) {
-      NodeBuilder::VNode vn;
-      CHECK_S(NodeBuilder::FindNode(node_table, id, &vn)) << id;
-      coords.push_back(vn);
-      if (coords.size() > 1 && id == id_to) {
-        break;
-      }
-    }
-  }
-  // We expect at least start/end node and one shape node in between.
-  CHECK_GT_S(coords.size(), 2);
-  return coords;
-}
-
 // Simplify a polyline by removing points that only deviate marginally from a
 // straight line. For this, for each sequence of three points, the perpendicular
 // distance of the middle point is computed, and also the angle
@@ -599,9 +572,7 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
 }
 
 // Store the shape coords of edges in the temporary cluster information.
-inline void FillTmpClusterShapeCoords(const Graph& g,
-                                      const DataBlockTable& node_table,
-                                      TmpClusterInfo* tci) {
+inline void FillTmpClusterShapeCoords(const Graph& g, TmpClusterInfo* tci) {
   struct DelShape {
     uint32_t cfrom_node_idx;
     uint32_t cedge_idx;
@@ -637,9 +608,9 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
         tci->cedge_shape_coord_length.push_back(0);
       } else {
         // Store coords for this edge.
-        std::vector<NodeBuilder::VNode> coords =
-            GetCoords(g, node_table, ge.contra_way ? ge.target_idx : gfrom_idx,
-                      ge.contra_way ? gfrom_idx : ge.target_idx, ge.way_idx);
+        std::vector<NodeBuilder::VNode> coords = g.GetEdgeShapeCoords(
+            ge.contra_way ? ge.target_idx : gfrom_idx,
+            ge.contra_way ? gfrom_idx : ge.target_idx, ge.way_idx);
         CHECK_GT_S(coords.size(), 2);
         SimplifyPolyline(&coords);
         if (coords.size() <= 2) {
@@ -690,8 +661,7 @@ inline void FillTmpClusterShapeCoords(const Graph& g,
   }
 }
 
-void FillTmpClusterInfo(const Graph& g, const DataBlockTable& node_table,
-                        TmpClusterInfo* tci) {
+void FillTmpClusterInfo(const Graph& g, TmpClusterInfo* tci) {
   FillTmpClusterNodes(g, tci);
   FillTmpClusterEdges(g, tci);
   FillTmpClusterWayData(g, tci);
@@ -701,19 +671,16 @@ void FillTmpClusterInfo(const Graph& g, const DataBlockTable& node_table,
   FillTmpClusterInEdges(g, tci);
   FillTmpClusterOutEdges(g, tci);
 
-  FillTmpClusterShapeCoords(g, node_table, tci);
+  FillTmpClusterShapeCoords(g, tci);
 }
 
-void ComputeTmpClusterInfos(const Graph& g, const DataBlockTable& node_table,
-                            int n_threads,
+void ComputeTmpClusterInfos(const Graph& g, int n_threads,
                             std::vector<TmpClusterInfo>* tmp_cluster_infos) {
   FUNC_TIMER();
   // Create input data.
   ThreadPool pool;
   for (TmpClusterInfo& tci : *tmp_cluster_infos) {
-    pool.AddWork([&g, &node_table, &tci](int) {
-      FillTmpClusterInfo(g, node_table, &tci);
-    });
+    pool.AddWork([&g, &tci](int) { FillTmpClusterInfo(g, &tci); });
   }
   pool.Start(n_threads);
   pool.WaitAllFinished();
@@ -1536,11 +1503,8 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
 
 // Convert the monolithic graph to a list of clusters and store them in a
 // memory mapped file.
-// Note that 'node_table' contains - in a compressed way - all node coordinates
-// of nodes referenced by ways. This is needed for shape coordinates.
-void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
-                        const std::string& mm_path, int n_threads = 4,
-                        bool check_mmgraph = false) {
+void WriteGraphToMMFile(const Graph& g, const std::string& mm_path,
+                        int n_threads = 4, bool check_mmgraph = false) {
   FUNC_TIMER();
   int fd = ::open(mm_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) FileAbortOnError("open");
@@ -1569,14 +1533,14 @@ void WriteGraphToMMFile(const Graph& g, const DataBlockTable& node_table,
   CHECK_EQ_S(g.clusters.size(), tmp_cluster_infos.size());
 
   // Create input data.
-  ComputeTmpClusterInfos(g, node_table, n_threads, &tmp_cluster_infos);
+  ComputeTmpClusterInfos(g, n_threads, &tmp_cluster_infos);
 
   LogMemoryUsage();
 
   // Hybrid Cluster Data
   LOG_S(INFO) << "Start WriteMMClusterHybridPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
-    // FillTmpClusterInfo(g, node_table, &tci);
+    // FillTmpClusterInfo(g, &tci);
     WriteMMClusterHybridPart(
         tci, &clusters.at(tci.cluster_id),
         // global file offset of this MMCluster object.

@@ -786,7 +786,7 @@ int main(int argc, char* argv[]) {
   }
 #endif
 
-  WriteGraphToMMFile(g, *(meta.node_table), "/tmp/mmgraph.file", opt.n_threads,
+  WriteGraphToMMFile(g, "/tmp/mmgraph.file", opt.n_threads,
                      check_mmgraph);
   {
     int fd = ::open("/tmp/mmgraph.file", O_RDWR | O_CLOEXEC, 0644);

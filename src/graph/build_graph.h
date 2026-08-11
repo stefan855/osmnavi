@@ -279,7 +279,7 @@ struct GraphMetaData final {
 
   // Nodes in-memory table. This contains node coordinates loaded from pbf
   // file. All nodes in 'way_nodes_seen' are present.
-  std::unique_ptr<DataBlockTable> node_table;
+  // std::unique_ptr<DataBlockTable> node_table;
 
   // Resulting graph data structure used for routing.
   Graph graph;

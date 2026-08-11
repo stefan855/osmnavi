@@ -444,11 +444,11 @@ void TestBearingBetweenEdges() {
   CHECK_EQ_S(angle_between_edges(0, 30), 30);
 
   CHECK_EQ_S(angle_between_edges(0, 179), 179);
-  CHECK_EQ_S(angle_between_edges(0, 180), 180);
+  CHECK_EQ_S(angle_between_edges(0, 180), -180);
   CHECK_EQ_S(angle_between_edges(0, 181), -179);
 
   CHECK_EQ_S(angle_between_edges(179, 0), -179);
-  CHECK_EQ_S(angle_between_edges(180, 0), 180);
+  CHECK_EQ_S(angle_between_edges(180, 0), -180);
   CHECK_EQ_S(angle_between_edges(180, 180), 0);
   CHECK_EQ_S(angle_between_edges(181, 0), 179);
 
@@ -459,7 +459,7 @@ void TestBearingBetweenEdges() {
   CHECK_EQ_S(angle_between_edges(0, 359), -1);
 
   CHECK_EQ_S(angle_between_edges(90, 269), 179);
-  CHECK_EQ_S(angle_between_edges(90, 270), 180);
+  CHECK_EQ_S(angle_between_edges(90, 270), -180);
   CHECK_EQ_S(angle_between_edges(90, 271), -179);
 }
 

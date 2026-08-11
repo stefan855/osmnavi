@@ -11,6 +11,8 @@
 #include "base/simple_mem_pool.h"
 #include "base/util.h"
 #include "base/varbyte.h"
+#include "geometry/distance.h"
+#include "graph/data_block.h"
 #include "graph/routing_attrs.h"
 #include "osm/turn_restriction_defs.h"
 
@@ -237,7 +239,7 @@ constexpr std::uint32_t MAX_EDGE_DISTANCE_CM_BITS = 32;
 // roughly 1342 km.
 constexpr std::uint32_t MAX_EDGE_DISTANCE_CM =
     (1ull << MAX_EDGE_DISTANCE_CM_BITS) - 1;
-constexpr uint32_t MAX_TURN_COST_IDX_BITS = 16;
+constexpr uint32_t MAX_TURN_COST_IDX_BITS = 17;
 constexpr uint32_t MAX_TURN_COST_IDX = (1ull << MAX_TURN_COST_IDX_BITS) - 1;
 constexpr uint32_t INVALID_TURN_COST_IDX = MAX_TURN_COST_IDX;
 
@@ -295,9 +297,11 @@ struct GEdge {
   // This way, using EDGE_DIR(e) when querying the way's access (or other
   // information) works the same for inverted and non-inverted edges.
   std::uint32_t contra_way : 1;
-  // 1 iff the edges passes one or more shape nodes.
+  // 1 iff the edges passes one or more shape nodes in forward direction
+  // (contray_way==false) or backward direction (contra_way==true).
   std::uint32_t has_shapes : 1;
-  // 1 iff the edges has no shapes, but the reverse edge has them.
+  // 1 iff the edges has no shapes, but the reverse edge has them, and the
+  // reverse edge exists!
   std::uint32_t has_reverse_shapes : 1;
   // 1 iff edge connects two points in different countries, 0 if both points
   // belong to the same country.
@@ -325,6 +329,7 @@ struct GEdge {
   // Traffic sign/light at the target node of the edge.
   std::uint32_t traffic_signal : 1;
   // Priority of the road when arriving at the target node.
+  // For example, this is set to low when there is a stop sign.
   ROAD_PRIORITY road_priority : NUM_GEDGE_ROAD_PRIORITY_BITS;
 
   // This edge connects two components in the undirected graph. Removing it
@@ -338,6 +343,13 @@ struct GEdge {
   // 1 iff the edge is in a dead end (excluding the bride), 0 for all other
   // edges.
   std::uint32_t dead_end : 1;
+
+  std::uint16_t start_bearing : 9;
+  std::uint16_t target_bearing : 9;
+
+  int16_t GetTurnAngle(const GEdge& to_edge) const {
+    return angle_between_edges(target_bearing, to_edge.start_bearing);
+  }
 };
 
 // Contains the list of border nodes and some metadata for a cluster.
@@ -426,6 +438,10 @@ struct GCluster {
   }
 };
 
+struct Graph;
+inline int64_t GetGNodeIdSafe(const Graph& g, uint32_t node_idx);
+inline int64_t GetGWayIdSafe(const Graph& g, uint32_t way_idx);
+
 struct Graph {
   struct Component {
     // Node indexes of all nodes in the component.
@@ -448,6 +464,10 @@ struct Graph {
 
   std::vector<GCluster> clusters;
 
+  // Nodes in-memory table. This contains node coordinates loaded from pbf
+  // file. All nodes in 'way_nodes_seen' are present. This includes shape nodes.
+  DataBlockTable node_table;
+
   // SimpleMemPool aligned_pool_;
   SimpleMemPool unaligned_pool_;
   // For each way_idx, this stores all the node ids that make up the way, in
@@ -465,7 +485,7 @@ struct Graph {
   // list of way node ids. This is easy when the node occurs only once in the
   // list - just take the first position. But in the *rare* case that a node
   // repeats in the list and we don't want the first occurrence, we need to
-  // remember the actual position of the node For this, we maintain a map
+  // remember the actual position of the node for this, so we maintain a map
   // 'edge_in_way_start_pos_map' of
   //     (from_node_idx, target_node_idx, way_idx) -> start_pos.
   using TEdgeInWayStartPosKey = std::tuple<uint32_t, uint32_t, uint32_t>;
@@ -531,6 +551,42 @@ struct Graph {
     ptr += DecodeNodeIds(ptr, num_nodes, &ids);
     CHECK_S(!ids.empty());
     return ids;
+  }
+
+  // Get the shape coords between from_idx and target_idx on way_idx.
+  // Note that this is only handling forward direction in the way, so you have
+  // to reverse query and result for backward edges. Also, this check fails if
+  // there are no shape nodes found.
+  //
+  // The returned list includes the start and the end node of the edge.
+  inline std::vector<NodeBuilder::VNode> GetEdgeShapeCoords(
+      uint32_t from_idx, uint32_t target_idx, uint32_t way_idx) const {
+    std::vector<uint64_t> id_list = GetGWayNodeIds(ways.at(way_idx));
+    // May be >0 when from node ('from_idx') is repeating within in way.
+    uint32_t start_pos = FindInMapOrDefault(edge_in_way_start_pos_map,
+                                            {from_idx, target_idx, way_idx}, 0);
+
+    const uint64_t id_from = nodes.at(from_idx).node_id;
+    const uint64_t id_to = nodes.at(target_idx).node_id;
+    std::vector<NodeBuilder::VNode> coords;
+    for (uint32_t i = start_pos; i < id_list.size(); ++i) {
+      uint64_t id = id_list.at(i);
+      if ((id == id_from && coords.empty()) || !coords.empty()) {
+        NodeBuilder::VNode vn;
+        CHECK_S(NodeBuilder::FindNode(node_table, id, &vn)) << id;
+        coords.push_back(vn);
+        if (coords.size() > 1 && id == id_to) {
+          break;
+        }
+      }
+    }
+    // We expect at least start/end node and one shape node in between.
+    CHECK_GT_S(coords.size(), 2) << absl::StrFormat(
+        "from:%lu to:%lu way:%lu #ids:%lu start_pos:%u",
+        GetGNodeIdSafe(*this, from_idx), GetGNodeIdSafe(*this, target_idx),
+        GetGWayIdSafe(*this, way_idx), id_list.size(), start_pos);
+    ;
+    return coords;
   }
 
   // Given a way with the original node id list, return the list of the way
@@ -659,7 +715,7 @@ inline int64_t GetGWayIdSafe(const Graph& g, uint32_t way_idx) {
 }
 
 inline std::string debug_str(const GNode& n) {
-  return absl::StrFormat("\nNode %lld ci:%u cbn:%u nfe:%u de:%u ncc:%u ipc:%u",
+  return absl::StrFormat("Node %lld ci:%u cbn:%u nfe:%u de:%u ncc:%u ipc:%u",
                          n.node_id, n.cluster_id, n.cluster_border_node,
                          n.num_forward_edges, n.dead_end, n.ncc,
                          n.is_pedestrian_crossing);
@@ -667,7 +723,7 @@ inline std::string debug_str(const GNode& n) {
 
 inline std::string debug_str(const Graph& g, const GEdge& e) {
   return absl::StrFormat(
-      "\nEdge to %lld w:%lld di:%u ut:%u tb:%u cw:%u cc:%u iv:%u bd:%u cl:%u "
+      "Edge to %lld w:%lld di:%u ut:%u tb:%u cw:%u cc:%u iv:%u bd:%u cl:%u "
       "ctrt:%u ss:%u ts:%u rp:%u br:%u cbe:%u de:%u",
       GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx),
       e.distance_cm, e.unique_target, e.to_bridge, e.contra_way,
