@@ -1171,8 +1171,8 @@ void TestClosestPoint() {
     // Random coordinates in the range [-10, +10) degrees.
     LatE6 lat(static_cast<double>((rand() % (2 * 90)) - 90));
     LonE6 lon(static_cast<double>((rand() % (2 * 180)) - 180));
-    auto slow = FindClosestNodeSlow(g, lat, lon);
-    auto fast = FindClosestNodeFast(g, idx, lat, lon);
+    ClosestNodeResult slow = FindClosestNodeSlow(g, lat, lon);
+    ClosestNodeResult fast = FindClosestNodeFast(g, idx, lat, lon);
     if (slow.dist != fast.dist) {
       const GNode& nslow = g.nodes.at(slow.node_pos);
       const GNode& nfast = g.nodes.at(fast.node_pos);
@@ -1183,9 +1183,9 @@ void TestClosestPoint() {
           "(%.6f,%.6f) "
           "qdist:%d cm:%d",
           lat.AsDouble(), lon.AsDouble(), nslow.ll.lat.AsDouble(),
-          nslow.ll.lon.AsDouble(), slow_qdist, slow.dist,
+          nslow.ll.lon.AsDouble(), slow_qdist, slow.dist.cm(),
           nfast.ll.lat.AsDouble(), nfast.ll.lon.AsDouble(), fast_qdist,
-          fast.dist);
+          fast.dist.cm());
     }
   }
 }

@@ -100,27 +100,6 @@ inline constexpr uint32_t decompress_turn_cost(uint32_t compressed_cost) {
   return compressed_turn_cost_values[compressed_cost];
 }
 
-#if 0
-// Classify a turn based on an entry edge and an exit edge.
-enum TURN_TYPE : uint8_t {
-  TT_STRAIGHT,
-  TT_CURVE,
-  TT_STOP_TO_LEFT,
-  TT_LOWER_TO_LEFT,
-  TT_HIGHER_TO_LEFT,
-  TT_MAX
-};
-
-struct TurnClassification {
-  TURN_TYPE tt;
-};
-
-inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vt, const GEdge& e1,
-                       const GEdge& e2, int32_t turn_angle) {
-  return TT_CURVE;
-}
-#endif
-
 // Return the maximal velocity (km/h) in a curve for a typical car.
 // arc_length_cm: The distance for which we have a turn_angle. Typically this
 //                is 1/2 of the length of the incoming edge plus 1/2 of the
@@ -138,12 +117,12 @@ inline TURN_TYPE ClassifyTurn(const Graph& g, VEHICLE vt, const GEdge& e1,
 //                  We use 0.5, which is on the conservative side.
 //           g:     9.81
 //           s:     arc length (Bogenlänge)
-//           a:     angle change in degrees
+//           a:     angle change in degrees [-180..179].
 // Example for a curve with length 100m and 90 degree change in direction:
 //   v-max = 63.615 km/h = 3.6 * math.sqrt(0.5*9.81*100/(90*math.pi/180))
 inline double MaxCurveVelocity(uint32_t arc_length_cm, int32_t turn_angle) {
-  return std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * 0.01 * arc_length_cm) /
-                   (turn_angle * std::numbers::pi / 180.0));
+  return std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * arc_length_cm / 100.0) /
+                   (std::abs(turn_angle) * std::numbers::pi / 180.0));
 }
 
 // This computes the distance (cm) for accelerating or decelerating a vehicle
@@ -151,41 +130,46 @@ inline double MaxCurveVelocity(uint32_t arc_length_cm, int32_t turn_angle) {
 //
 // Uses the following formula for speed changes:
 //     dist = (v1^2 - v2^2) / (2 * a).
-inline uint32_t DistanceForSpeedChange(VEHICLE vt, double speed1_kmh,
-                                       double speed2_kmh) {
+//
+// Based on the formula for 0->v or v->0.
+//   dist = (v^2) / (2a)
+inline DistanceType DistanceForSpeedChange(VEHICLE vt, double speed1_kmh,
+                                           double speed2_kmh) {
   // Rough assumptions about vehicle specific acceleration/deceleration
   // constants.
   // TODO: Maybe this should be moved to a config file.
-  constexpr double acc_car = 3;
-  constexpr double dec_car = 2;
-  constexpr double acc_hgv = 2;
-  constexpr double dec_hgv = 1.5;
-  constexpr double acc_bicycle = 1.5;
+  constexpr double acc_car = 2.0;
+  constexpr double dec_car = 3.0;
+  constexpr double acc_hgv = 1.0;
+  constexpr double dec_hgv = 2.0;
+  constexpr double acc_bicycle = 1.0;
   constexpr double dec_bicycle = 1.5;
 
-  const double sp1 = speed1_kmh / 3.6;
-  const double sp2 = speed2_kmh / 3.6;
+  const double sp1_m = speed1_kmh / 3.6;
+  const double sp2_m = speed2_kmh / 3.6;
+
   double a;
   switch (vt) {
     case VH_MOTORCAR:
     case VH_MOTORCYCLE:
-      a = (sp1 >= sp2) ? dec_car : acc_car;
+      a = (sp1_m >= sp2_m) ? dec_car : acc_car;
       break;
     case VH_BICYCLE:
     case VH_MOPED:
     case VH_HORSE:
-      a = (sp1 >= sp2) ? dec_bicycle : acc_bicycle;
+      a = (sp1_m >= sp2_m) ? dec_bicycle : acc_bicycle;
       break;
     case VH_PSV:
     case VH_BUS:
     case VH_HGV:
-      a = (sp1 >= sp2) ? dec_hgv : acc_hgv;
+      a = (sp1_m >= sp2_m) ? dec_hgv : acc_hgv;
       break;
     default:
       ABORT_S() << vt;
   }
 
-  return std::abs(std::lround(100 * (sp1 * sp1 - sp2 * sp2) / (2 * a)));
+  return DistanceType(static_cast<uint64_t>(
+      std::abs(std::lround(100 * (sp1_m * sp1_m - sp2_m * sp2_m) / (2 * a)))));
 }
 
 // Compute the time loss in milliseconds that is caused by a curve that
@@ -195,11 +179,11 @@ inline uint32_t TimeLossFromCurve(const Graph& g, VEHICLE vt, const GEdge& e,
                                   double curve_speed) {
   const double max_speed =
       GetRAFromWSA(GetWSA(g, e.way_idx), vt, EDGE_DIR(e)).maxspeed;
-  if (curve_speed >= max_speed || e.distance_cm == 0) {
+  if (curve_speed >= max_speed || e.distance == DistanceType(0u)) {
     return 0;
   }
-  double time_max_speed_ms = e.distance_cm / (max_speed * 100.0 / 3.6);
-  double time_curve_speed_ms = e.distance_cm / (curve_speed * 100.0 / 3.6);
+  double time_max_speed_ms = e.distance.meters() / (max_speed / 3.6);
+  double time_curve_speed_ms = e.distance.meters() / (curve_speed / 3.6);
 
   return std::max(0l, std::lround(time_curve_speed_ms - time_max_speed_ms));
 }
@@ -223,6 +207,130 @@ uint32_t TurnAngleTimeLoss(const Graph& g, VEHICLE vt, const GEdge& e1,
     // u-turn.
     return TURN_COST_U_TURN;
   }
+}
+
+// Compute the average speed when decelerating before a curve that allows
+// 'max_speed_curve' at point mr. The average speed is computed for
+// 'distance_cm' leading to the curve.
+// Speeds are in km/h.
+//
+//      distance_cm
+// ====================+
+// mr                 mc *
+//                         *
+//                           *
+//                             *
+// mr = max_speed_road
+// mc = max_speed_curve
+//
+// There are 3 cases:
+// 1) mr <= mc: return mr
+// 2) mr > mc and 'distance_cm' is long enough to actually decelerate
+// 3) mr > mc and 'distance_cm' is to short to decelerate, mr needs to be
+//    smaller.
+inline double avg_speed_before_curve(VEHICLE vt, double max_speed_road,
+                                     DistanceType distance,
+                                     double max_speed_curve) {
+  if (max_speed_road <= max_speed_curve || distance == DistanceType(0u)) {
+    // Case 1)
+    return max_speed_road;
+  }
+  // We know: max_speed_road > max_speed_curve.
+
+  DistanceType dist_needed =
+      DistanceForSpeedChange(vt, max_speed_road, max_speed_curve);
+  if (dist_needed <= distance) {
+    // Case 2)
+    return (max_speed_road * (distance.meters() - dist_needed.meters()) +
+            (max_speed_road + max_speed_curve) / 2.0 * dist_needed.meters()) /
+           distance.meters();
+  }
+  // We know: max_speed_road > max_speed_curve and
+  //          dist_needed    > distance_cm
+
+  // Case 3)
+  // Compute the start_speed 'a'.
+  double start_speed =
+      max_speed_curve + (distance.meters() / dist_needed.meters()) *
+                            (max_speed_road - max_speed_curve);
+  return (start_speed + max_speed_curve) / 2;
+}
+
+// Compute the average speed when accelerating to 'max_spped_road' after a curve
+// that allows 'max_speed_curve'.
+// Speeds are in km/h.
+//
+// mc = max_speed_curve
+// mr = max_speed_road
+//
+// There are 3 cases:
+// 1) mc >= mr: return mr.
+// 2) mc < mr and 'distance_cm' is long enough to actually accelerate to mr
+// 3) mc < mr and 'distance_cm' is to short to accelerate to mr.
+inline double avg_speed_after_curve(VEHICLE vt, double max_speed_curve,
+                                    DistanceType distance,
+                                    double max_speed_road) {
+  if (max_speed_road <= max_speed_curve || distance == DistanceType(0u)) {
+    // Case 1)
+    return max_speed_road;
+  }
+  // We know: max_speed_road > max_speed_curve.
+
+  DistanceType dist_needed =
+      DistanceForSpeedChange(vt, max_speed_curve, max_speed_road);
+  if (dist_needed <= distance) {
+    // Case 2)
+    return (max_speed_road * (distance.meters() - dist_needed.meters()) +
+            (max_speed_road + max_speed_curve) / 2.0 * dist_needed.meters()) /
+           distance.meters();
+  }
+  // We know: max_speed_road > max_speed_curve and
+  //          dist_needed    > distance_cm
+
+  // Case 3)
+  // Compute the final speed after accelerating.
+  double final_speed =
+      max_speed_curve + (distance.meters() / dist_needed.meters()) *
+                            (max_speed_road - max_speed_curve);
+  return (max_speed_curve + final_speed) / 2;
+}
+
+// The time loss in a curve is computed from the maximum curve speed and the
+// distance (and time) that is needed to decelerate/accelerate to/from the curve
+// speed.
+inline uint32_t CurveTimeLoss(const Graph& g, VEHICLE vt, const GEdge& e0,
+                              const GEdge& e1) {
+#if 0
+  uint32_t turn_angle = std::labs(e0.GetTurnAngle(e1));
+  const uint32_t speed0 =
+      GetRAFromWSA(GetWSA(g, e0.way_idx), vt, EDGE_DIR(e0)).maxspeed;
+  const uint32_t speed1 =
+      GetRAFromWSA(GetWSA(g, e1.way_idx), vt, EDGE_DIR(e1)).maxspeed;
+  // Assume that the angle has to be driven in 10m, i.e. 5m before and 5m
+  // after the curve point.
+  double speed_curve = MaxCurveVelocity(/*arc_length=*/10 * 100, turn_angle);
+
+  double avg_speed0 =
+      avg_speed_before_curve(vt, speed0, e1.distance_cm / 2, speed_curve);
+  double avg_speed1 =
+      avg_speed_after_curve(vt, speed_curve, e1.distance_cm / 2, speed1);
+#endif
+
+#if 0
+  // Now compute the time loss on each leg, use t = s / v (from s = v * t).
+  double loss0 = (e1.distance_cm / 2)
+
+  double avg_speed =
+      (avg_speed_before_curve(vt, speed0, e1.distance_cm / 2, speed_curve) +
+       avg_speed_after_curve(vt, speed_curve, e1.distance_cm / 2, speed1)) /
+      2;
+
+  // Use t = s / v (from s = v * t).
+  uint32_t dist = (e1.distance_cm + e1.distance_cm) / 2;
+  double t = dist / (avg_speed / 3.6) - dist / (/ 3.6);
+  return static_cast<uint32_t>(t * 1000.0 + 0.5);
+#endif
+  return 0;
 }
 
 // Check if access through a node is blocked.
@@ -430,7 +538,7 @@ uint32_t NodeTagsCost(const Graph& g, const N3Path& n3p) {
         const NodeTags* attr_prev = g.FindNodeTags(n3p.node0(g).node_id);
         if (attr_prev == nullptr || !attr_prev->bit_railway_crossing ||
             !attr_prev->bit_railway_crossing_barrier ||
-            n3p.edge0(g).distance_cm > 5000) {
+            n3p.edge0(g).distance.cm() > 5000) {
           // TODO: Maybe guess how busy the railway is? This is very inexact!
           cost += 40'000;
         }

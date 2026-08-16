@@ -218,7 +218,7 @@ std::vector<LatLon> ComputeStartShapeCoords(const MMCluster& mc,
     if (sum_dist >= fraction_dist) {
       res.push_back(shapes.at(pos));
     }
-    sum_dist += calculate_distance(shapes.at(pos), shapes.at(pos + 1));
+    sum_dist += calculate_distance(shapes.at(pos), shapes.at(pos + 1)).cm();
   }
   res.push_back(shapes.back());
   return res;
@@ -244,7 +244,7 @@ void TerminateTargetShapeCoords(const MMCluster& mc, const EdgePoint& ep,
                                  (ep.to_fraction - at_fraction);
   uint64_t sum_dist = 0;
   for (uint32_t pos = 0; pos + 1 < shapes->size(); ++pos) {
-    sum_dist += calculate_distance(shapes->at(pos), shapes->at(pos + 1));
+    sum_dist += calculate_distance(shapes->at(pos), shapes->at(pos + 1)).cm();
     if (sum_dist >= fraction_dist) {
       // Terminate current segment.
       shapes->at(pos + 1) = ep.coord_at_fraction;
@@ -263,16 +263,17 @@ class StepsData {
   // Create the description of one step in the route. This includes the edges in
   // the range [from_pos..to_pos].
   JsonData CreateOneStep(const MMGraph& mg, uint32_t from_pos,
-                           uint32_t to_pos) const {
+                         uint32_t to_pos) const {
     std::vector<LatLon> total_coords;
     uint64_t sum_duration = 0;
     uint64_t sum_distance = 0;
+    int16_t prev_bearing = 0;
 
     for (uint32_t pos = from_pos; pos <= to_pos; ++pos) {
       const MMFullEdge& fe = res_.full_edges.at(pos);
       const MMCluster& mc = fe.mc(mg);
       sum_duration += res_.edge_metric(pos);
-      sum_distance += res_.distance_cm(mg, pos);
+      sum_distance += res_.distance(mg, pos).cm();
 
       // Compute the shape coordinates for the edge at pos. The most complicated
       // case occurs when there is only one edge, i.e. the start and target are
@@ -283,6 +284,9 @@ class StepsData {
       if (pos == 0) {
         coords = ComputeStartShapeCoords(mc, res_.start);
         start_at_fraction = res_.start.to_fraction;
+        // We dont have a prev, so use the start bearing of the route.
+        CHECK_GE_S(coords.size(), 2);
+        prev_bearing = true_north_bearing(coords.at(0), coords.at(1));
       } else {
         coords =
             mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
@@ -295,34 +299,41 @@ class StepsData {
       if (pos == from_pos) {
         std::swap(coords, total_coords);
       } else {
-        // Append.
         CHECK_S(total_coords.back() == coords.front()) << fe.DebugString(mg);
-        ;
+        // Append.
         // TODO: Not yet supported by gcc: coords.append_range(v);
         total_coords.insert(total_coords.end(), coords.cbegin() + 1,
                             coords.cend());
       }
     }
+    CHECK_GE_S(total_coords.size(), 2);
 
     // convert to seconds/meters.
     const double duration = sum_duration / 1000.0;
     const double dist = sum_distance / 100.0;
+    const int16_t bearing =
+        true_north_bearing(total_coords.at(0), total_coords.at(1));
 
     const MMFullEdge& fe = res_.full_edges.at(from_pos);
     nlohmann::json maneuver = {
-        {"bearing_after", 0},
-        {"bearing_before", 0},
         {"location",
          {total_coords.front().lon.AsDouble(),
           total_coords.front().lat.AsDouble()}},
-        {"modifier", "ModifierContinue"},
-        {"type", (from_pos == 0 ? "depart" : "continue")}};
+        {"bearing_before", prev_bearing},
+        {"bearing_after", bearing},
+        {"type", (from_pos == 0 ? "depart" : "continue")},
+        {"modifier", "ModifierContinue"}};
 
     nlohmann::json step = {{"geometry", EncodePolyline(total_coords)},
                            {"maneuver", maneuver},
                            {"name", GetStreetName(mg, fe)},
                            {"duration", Round1(duration)},
                            {"distance", Round1(dist)}};
+
+    // Use the final bearing as 'prev_bearing' in the next step.
+    prev_bearing = true_north_bearing(total_coords.at(total_coords.size() - 2),
+                                      total_coords.at(total_coords.size() - 1));
+
     return {.j = step, .sum_dist = dist, .sum_duration = duration};
   }
 
@@ -334,9 +345,9 @@ class StepsData {
     coords.push_back(to_coord);
 
     nlohmann::json maneuver = {
-        {"bearing_after", 0},
-        {"bearing_before", 0},
         {"location", {to_coord.lon.AsDouble(), to_coord.lat.AsDouble()}},
+        {"bearing_before", 90},
+        {"bearing_after", 90},
         {"type", "arrive"}};
 
     nlohmann::json step = {{"geometry", EncodePolyline(coords)},
@@ -347,9 +358,7 @@ class StepsData {
     return {.j = step};
   }
 
-  const MMRoutingResult& GetRoutingResult() const {
-    return res_;
-  }
+  const MMRoutingResult& GetRoutingResult() const { return res_; }
 
  private:
   const MMRoutingResult& res_;
@@ -380,7 +389,6 @@ JsonData CreateSteps(const MMGraph& mg, const StepsData& steps_data) {
     JsonData tmp = steps_data.CreateOneStep(mg, start_pos, pos);
     result.sum_dist += tmp.sum_dist;
     result.sum_duration += tmp.sum_duration;
-    // TODO: Collapse if name is same.
     result.j.push_back(tmp.j);
   }
   result.j.push_back(steps_data.CreateArrivalStep(mg).j);
@@ -393,7 +401,8 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   nlohmann::json waypoints = nlohmann::json::array();
   {
     waypoints.push_back(
-        {{"distance", std::roundf(res.start.distance_to_seg_cm / 10.0) / 10.0},
+        {{"distance",
+          std::roundf(res.start.distance_to_seg.cm() / 10.0) / 10.0},
          {"name", GetEdgeName(mg, res.start.fe)},
          {"location",
           {res.start.coord_at_fraction.lon.AsDouble(),
@@ -401,7 +410,8 @@ nlohmann::json RouteToJson(const MMGraph& mg, const MMRoutingResult& res) {
   }
   {
     waypoints.push_back(
-        {{"distance", std::roundf(res.target.distance_to_seg_cm / 10.0) / 10.0},
+        {{"distance",
+          std::roundf(res.target.distance_to_seg.cm() / 10.0) / 10.0},
          {"name", GetEdgeName(mg, res.target.fe)},
          {"location",
           {res.target.coord_at_fraction.lon.AsDouble(),

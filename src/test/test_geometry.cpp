@@ -34,11 +34,11 @@ void TestDistanceToSegment() {
     LonE6 lon_p(1.5);
     DistanceToSegment dist = FastPointToSegmentDistance(
         {lat_p, lon_p}, {lat_a, lon_a}, {lat_b, lon_b});
-    LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
-                                   dist.distance_to_seg_cm);
+    LOG_S(INFO) << absl::StrFormat("Distance:           %.3fm",
+                                   dist.distance_to_seg.meters());
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    CHECK_DOUBLE_EQ_S(dist.distance_to_seg_cm, expected, 0.01);
+    CHECK_DOUBLE_EQ_S(dist.distance_to_seg.cm(), expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 0.5, 0.01)
   }
   {
@@ -50,11 +50,11 @@ void TestDistanceToSegment() {
 
     DistanceToSegment dist = FastPointToSegmentDistance(
         {lat_p, lon_p}, {lat_a, lon_a}, {lat_b, lon_b});
-    LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
-                                   dist.distance_to_seg_cm);
+    LOG_S(INFO) << absl::StrFormat("Distance:           %.2fm",
+                                   dist.distance_to_seg.meters());
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    CHECK_DOUBLE_EQ_S(dist.distance_to_seg_cm, expected, 0.01);
+    CHECK_DOUBLE_EQ_S(dist.distance_to_seg.cm(), expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 0.0, 0.01)
   }
   {
@@ -66,11 +66,11 @@ void TestDistanceToSegment() {
 
     DistanceToSegment dist = FastPointToSegmentDistance(
         {lat_p, lon_p}, {lat_a, lon_a}, {lat_b, lon_b});
-    LOG_S(INFO) << absl::StrFormat("Distance:           %.8f",
-                                   dist.distance_to_seg_cm);
+    LOG_S(INFO) << absl::StrFormat("Distance:           %.2fm",
+                                   dist.distance_to_seg.meters());
     LOG_S(INFO) << absl::StrFormat("T fraction_closest: %.8f",
                                    dist.fraction_closest);
-    CHECK_DOUBLE_EQ_S(dist.distance_to_seg_cm, expected, 0.01);
+    CHECK_DOUBLE_EQ_S(dist.distance_to_seg.cm(), expected, 0.01);
     CHECK_DOUBLE_EQ_S(dist.fraction_closest, 1.0, 0.01)
   }
 }
@@ -80,12 +80,12 @@ void TestCalculateDistance() {
   LonE6 lon_paris(2.3522);
   LatE6 lat_berlin(52.5200);
   LonE6 lon_berlin(13.4050);
-  const uint32_t dist_cm =
+  const DistanceType dist =
       calculate_distance(lat_paris, lon_paris, lat_berlin, lon_berlin);
-  CHECK_DOUBLE_EQ_S(dist_cm, 878 * 1000 * 100, 0.001);
-  const uint32_t dist_rev_cm =
+  CHECK_DOUBLE_EQ_S(dist.cm(), 878 * 1000 * 100, 0.001);
+  const DistanceType dist_rev =
       calculate_distance(lat_berlin, lon_berlin, lat_paris, lon_paris);
-  CHECK_DOUBLE_EQ_S(dist_cm, dist_rev_cm, 0.00001);
+  CHECK_DOUBLE_EQ_S(dist.cm(), dist_rev.cm(), 0.00001);
 }
 
 #if 0
@@ -356,8 +356,8 @@ uint32_t ComputeBearing(double lat1, double lon1, double lat2, double lon2) {
   const LonE6 lon1n(lon1);
   const LatE6 lat2n(lat2);
   const LonE6 lon2n(lon2);
-  const uint32_t length_cm = calculate_distance(lat1n, lon1n, lat2n, lon2n);
-  return true_north_bearing({lat1n, lon1n}, {lat2n, lon2n}, length_cm);
+  const DistanceType length = calculate_distance(lat1n, lon1n, lat2n, lon2n);
+  return true_north_bearing({lat1n, lon1n}, {lat2n, lon2n}, length);
 }
 
 int32_t CheckBearing(double lat1, double lon1, double lat2, double lon2,
@@ -407,8 +407,8 @@ void TestEdgeBearings() {
     const LonE6 lon1(0.0);
     const LatE6 lat2(static_cast<double>(i + 1));
     const LonE6 lon2(1.0);
-    uint32_t length_cm = calculate_distance(lat1, lon1, lat2, lon2);
-    int32_t angle = true_north_bearing({lat1, lon1}, {lat2, lon2}, length_cm);
+    DistanceType length = calculate_distance(lat1, lon1, lat2, lon2);
+    int32_t angle = true_north_bearing({lat1, lon1}, {lat2, lon2}, length);
     LOG_S(INFO) << absl::StrFormat("angle of (%u,%u)->(%u,%u) is %u", i, 0,
                                    i + 1, 1, angle);
     CHECK_LE_S(angle, prev_angle);
@@ -463,6 +463,16 @@ void TestBearingBetweenEdges() {
   CHECK_EQ_S(angle_between_edges(90, 271), -179);
 }
 
+void  TestDistanceType() {
+  FUNC_TIMER();
+  DistanceType dt0;
+  DistanceType dt1(123u * 100u);
+  CHECK_S(dt0 != dt1);
+  CHECK_S(dt0 == DistanceType(0u));
+  CHECK_EQ_S(dt1.cm(), 123 * 100);
+  CHECK_DOUBLE_EQ_S(dt1.meters(), 123.0, 0001);
+}
+
 int main(int argc, char* argv[]) {
   InitLogging(argc, argv);
   if (argc != 1) {
@@ -483,6 +493,7 @@ int main(int argc, char* argv[]) {
   TestEdgeBearings();
   TestSomeRealBearings();
   TestBearingBetweenEdges();
+  TestDistanceType();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

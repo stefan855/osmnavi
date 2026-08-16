@@ -4,11 +4,12 @@
 
 #include "base/constants.h"
 #include "base/deg_coord.h"
+#include "base/distance_type.h"
 
 // Compute distance between two points on the surface of the earth, using the
 // haversine formula.
 // Returned distance is in centimeters.
-inline int64_t calculate_distance(LatLon p1, LatLon p2) {
+inline DistanceType calculate_distance(LatLon p1, LatLon p2) {
   double lat1_rad = p1.lat.AsDouble() * (std::numbers::pi / 180.0);
   double lon1_rad = p1.lon.AsDouble() * (std::numbers::pi / 180.0);
   double lat2_rad = p2.lat.AsDouble() * (std::numbers::pi / 180.0);
@@ -17,12 +18,14 @@ inline int64_t calculate_distance(LatLon p1, LatLon p2) {
   double f_dlon = std::sin((lon2_rad - lon1_rad) / 2.0);
   double a = f_dlat * f_dlat +
              std::cos(lat1_rad) * std::cos(lat2_rad) * f_dlon * f_dlon;
-  return std::llround(2.0 * kEarthRadiusCm *
-                      std::atan2(std::sqrt(a), std::sqrt(1.0 - a)));
+  int64_t d = std::llround(2.0 * kEarthRadiusCm *
+                           std::atan2(std::sqrt(a), std::sqrt(1.0 - a)));
+  CHECK_GE_S(d, 0);
+  return DistanceType(static_cast<uint64_t>(d));
 }
 
-inline int64_t calculate_distance(LatE6 lat1, LonE6 lon1, LatE6 lat2,
-                                  LonE6 lon2) {
+inline DistanceType calculate_distance(LatE6 lat1, LonE6 lon1, LatE6 lat2,
+                                       LonE6 lon2) {
   return calculate_distance({lat1, lon1}, {lat2, lon2});
 }
 
@@ -120,8 +123,8 @@ inline int32_t angle_to_east_degrees(LatLon pt1, LatLon pt2,
 //
 // For background see https://en.wikipedia.org/wiki/Bearing_(navigation)
 inline uint16_t true_north_bearing(LatLon pt1, LatLon pt2,
-                                  uint32_t edge_length_cm) {
-  if (edge_length_cm == 0) {
+                                   DistanceType edge_length) {
+  if (edge_length == DistanceType(0u)) {
     return 0;
   }
 
@@ -132,9 +135,9 @@ inline uint16_t true_north_bearing(LatLon pt1, LatLon pt2,
   // acos is only defined for [-1..1]. Here all numbers are positive, so
   // make sure h/l < 1 and assume 0 deg for h/l >= 1, which might occur due to
   // rounding errors.
-  if (height_cm < edge_length_cm) {
+  if (height_cm < edge_length.cm()) {
     angle = std::llround(
-        180.0 * (std::acos(height_cm / edge_length_cm) / std::numbers::pi));
+        180.0 * (std::acos(height_cm / edge_length.cm()) / std::numbers::pi));
   }
 
   // length and height are positive, so angle should be positive too.
@@ -160,6 +163,15 @@ inline uint16_t true_north_bearing(LatLon pt1, LatLon pt2,
 
 inline uint16_t true_north_bearing(LatLon pt1, LatLon pt2) {
   return true_north_bearing(pt1, pt2, calculate_distance(pt1, pt2));
+}
+
+inline std::string_view bearing_to_text(uint16_t bearing) {
+  static const char* directions[] = {"north", "northeast", "east", "southeast",
+                                     "south", "southwest", "west", "northwest"};
+  CHECK_LT_S(bearing, 360);
+  int index = static_cast<int>(std::round(bearing / 45.0)) % 8;
+  CHECK_LT_S(index, 8);
+  return directions[index];
 }
 
 inline uint16_t invert_bearing(uint16_t bearing) {

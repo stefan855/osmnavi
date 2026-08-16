@@ -151,12 +151,12 @@ inline BestHighwayAtNode GetBestHighwayAtNode(const Graph& g, VEHICLE vt,
 // Starting at 'start', find the first connected edge leading to a crossing
 // within 'max_distance_cm'. If nothing is found, an invalid edge is
 // returned.
-inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
-                                     const FullEdge start,
-                                     uint32_t max_distance_cm = 20 * 100) {
+inline FullEdge FollowEdgeToCrossing(
+    const Graph& g, VEHICLE vt, const FullEdge start,
+    DistanceType max_distance = DistanceType(20.0)) {
   uint32_t dist_cm = 0;
   FullEdge curr = start;
-  while (dist_cm <= max_distance_cm) {
+  while (dist_cm <= max_distance.cm()) {
     uint32_t target_idx = curr.target_idx(g);
     const GNode& target = g.nodes.at(target_idx);
 
@@ -196,7 +196,7 @@ inline FullEdge FollowEdgeToCrossing(const Graph& g, VEHICLE vt,
     if (unique_forward.size() == 1 && num_unique == 2) {
       // We can continue on the way, it has no branches.
       curr = unique_forward.front();
-      dist_cm += curr.gedge(g).distance_cm;
+      dist_cm += curr.gedge(g).distance.cm();
       continue;
     }
 

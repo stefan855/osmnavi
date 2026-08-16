@@ -6,12 +6,6 @@
 
 #include "base/util.h"
 
-namespace {
-template <typename T>
-concept TAllowedIntDegE6 =
-    std::is_same_v<T, int32_t> || std::is_same_v<T, int64_t>;
-};
-
 // Encapsulate a degree coordinate (typically lat or lon) in a class.
 //
 // The template is used to create two identical types that can't be mixed and
@@ -35,16 +29,12 @@ class DegE6Base {
   constexpr explicit DegE6Base(int64_t c) : DegE6Base(static_cast<int32_t>(c)) {
     assert(c >= std::numeric_limits<int32_t>::min());
     assert(c <= std::numeric_limits<int32_t>::max());
-    // CHECK_GE_S(c, std::numeric_limits<int32_t>::min());
-    // CHECK_LE_S(c, std::numeric_limits<int32_t>::max());
   }
   constexpr explicit DegE6Base(float c) : DegE6Base(static_cast<double>(c)) {}
   constexpr explicit DegE6Base(double c) {
     auto val = std::llround(c * MUL_FACTOR);
     assert(val >= std::numeric_limits<int32_t>::min());
     assert(val <= std::numeric_limits<int32_t>::max());
-    // CHECK_GE_S(val, std::numeric_limits<int32_t>::min());
-    // CHECK_LE_S(val, std::numeric_limits<int32_t>::max());
     coordinate_ = static_cast<int32_t>(val);
   }
   // Unsigned integers are probably an error, so forbid it here.
@@ -56,14 +46,6 @@ class DegE6Base {
   // Create from OSM coordinate, which is deg * 10^7.
   constexpr static DegE6Base<deg_type> FromOSM(int64_t deg_e7) {
     return DegE6Base((deg_e7 + 5) / 10);
-  }
-
-  // Assignment.
-  template <TAllowedIntDegE6 T>
-  constexpr inline DegE6Base<deg_type>& operator=(T v) {
-    DegE6Base<deg_type> c(v);
-    coordinate_ = c.v();
-    return *this;
   }
 
   // Coordinate value as integer.

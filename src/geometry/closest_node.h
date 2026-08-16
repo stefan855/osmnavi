@@ -13,7 +13,7 @@
 
 struct ClosestNodeResult {
   uint32_t node_pos;
-  int64_t dist;
+  DistanceType dist;
 };
 
 // Computes distance to each node in the graph and chooses the node with the
@@ -21,10 +21,10 @@ struct ClosestNodeResult {
 inline ClosestNodeResult FindClosestNodeSlow(const Graph& g, LatE6 lat,
                                              LonE6 lon) {
   uint32_t found_pos = INFU32;
-  int64_t min_dist = INF64;
+  DistanceType min_dist(MAXU32);
   for (uint32_t i = 0; i < g.nodes.size(); ++i) {
     const GNode& n = g.nodes.at(i);
-    int64_t dist = calculate_distance({lat, lon}, n.ll);
+    DistanceType dist = calculate_distance({lat, lon}, n.ll);
     if (dist < min_dist) {
       min_dist = dist;
       found_pos = i;
@@ -60,8 +60,8 @@ inline int64_t LowerBoundBinSearch(const Graph& g,
 struct FastSearchData {
   const LatLon ll;
   // Distance of one degree in lon direction at 'lat'.
-  const double dist_one_deg_lon;
-  int64_t min_dist;
+  const double dist_one_deg_lon_cm;
+  DistanceType min_dist;
   // Given min_dist above, estimated maximal search range in lon direction.
   int64_t max_dlon;
   uint32_t found_pos;
@@ -84,14 +84,15 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
     return true;
   }
 #endif
-  int64_t dist = calculate_distance(fsdata->ll, n.ll);
+  DistanceType dist = calculate_distance(fsdata->ll, n.ll);
   if (dist < fsdata->min_dist) {
     fsdata->min_dist = dist;
     fsdata->found_pos = pos;
     fsdata->max_dlon =
         // Add 1% to max_dlon to correct for boundary errors.
         // Divide by 2 because the point can be at the pole.
-        std::llround(1.01 * TEN_POW_7_DBL * (dist / fsdata->dist_one_deg_lon));
+        std::llround(1.01 * TEN_POW_7_DBL *
+                     (dist.cm() / fsdata->dist_one_deg_lon_cm));
   }
   return true;
 }
@@ -110,7 +111,7 @@ inline bool UpdateMin(const Graph& g, int64_t pos, FastSearchData* fsdata) {
 // longitude could be very close to the pole.
 double ComputeOneDegreeHeuristic(LatE6 lat) {
   return static_cast<double>(
-             calculate_distance({lat, LonE6(0.0)}, {lat, LonE6(180.0)})) /
+             calculate_distance({lat, LonE6(0.0)}, {lat, LonE6(180.0)}).cm()) /
          (180.0 * 2.0);
 }
 
@@ -140,11 +141,12 @@ inline ClosestNodeResult FindClosestNodeFast(const Graph& g,
   int64_t posf = LowerBoundBinSearch(g, idx, lon);  // first element >= 'lon'.
   // Search both forward (posf)and backward (posb) from the found position.
   int64_t posb = posf - 1;
-  FastSearchData fsdata = {.ll = {lat, lon},
-                           .dist_one_deg_lon = ComputeOneDegreeHeuristic(lat),
-                           .min_dist = INF64,
-                           .max_dlon = INF64,
-                           .found_pos = INFU32};
+  FastSearchData fsdata = {
+      .ll = {lat, lon},
+      .dist_one_deg_lon_cm = ComputeOneDegreeHeuristic(lat),
+      .min_dist = DistanceType(MAXU32),
+      .max_dlon = INF64,
+      .found_pos = INFU32};
   int count = 0;
   while (posf < (int64_t)idx.size() || posb >= 0) {
     count++;

@@ -181,7 +181,7 @@ JsonResult CreateOneStep(const Graph& g, const EdgeRouter3& router,
     if (ve.key.GetType() == EdgeRoutingLabel3::CLUSTER) {
       dist = 11111;
     } else {
-      dist = ve.key.GetEdge(g, ctr_list).distance_cm / 100.0;
+      dist = ve.key.GetEdge(g, ctr_list).distance.meters();
     }
   }
 
@@ -224,8 +224,8 @@ JsonResult CreateSteps(const Graph& g, const EdgeRouter3& router,
   return result;
 }
 
-nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
-                           const EdgeRouter3& router,
+nlohmann::json RouteToJson(const Graph& g, DistanceType dist_p1,
+                           DistanceType dist_p2, const EdgeRouter3& router,
                            const RoutingResult& res) {
   if (res.route_v_idx.empty()) {
     return {{"code", "NoRoute"}};
@@ -237,16 +237,17 @@ nlohmann::json RouteToJson(const Graph& g, int64_t dist_p1, int64_t dist_p2,
     const EdgeRouter3::VisitedEdge& ve =
         router.GetVEdge(res.route_v_idx.front());
     const GNode& n = ve.key.FromNode(g, ctr_list);
-    waypoints.push_back({{"distance", std::roundf(dist_p1 / 10.0) / 10.0},
-                         {"name", GetEdgeName(g, ctr_list, ve)},
-                         {"location", {n.ll.lon.AsDouble(), n.ll.lat.AsDouble()}}});
+    waypoints.push_back(
+        {{"distance", std::roundf(dist_p1.cm() / 10.0) / 10.0},
+         {"name", GetEdgeName(g, ctr_list, ve)},
+         {"location", {n.ll.lon.AsDouble(), n.ll.lat.AsDouble()}}});
   }
   {
     const EdgeRouter3::VisitedEdge& ve =
         router.GetVEdge(res.route_v_idx.back());
     const GNode& n = ve.key.ToNode(g, ctr_list);
     waypoints.push_back(
-        {{"distance", std::roundf(dist_p2 / 10.0) / 10.0},
+        {{"distance", std::roundf(dist_p2.cm() / 10.0) / 10.0},
          {"name", GetEdgeName(g, ctr_list, ve)},
          {"location", {n.ll.lon.AsDouble(), n.ll.lat.AsDouble()}}});
   }

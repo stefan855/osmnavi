@@ -112,7 +112,7 @@ inline void EncodeGEdge(const GEdge& e, WriteBuff* buff) {
   */
   EncodeUInt(e.target_idx, buff);
   EncodeUInt(e.way_idx, buff);
-  EncodeUInt(e.distance_cm, buff);
+  EncodeUInt(e.distance.cm(), buff);
   EncodeUInt(e.turn_cost_idx, buff);
 
   /*
@@ -158,7 +158,9 @@ inline uint32_t DecodeGEdge(const std::uint8_t* ptr, GEdge* e) {
 
   DECODE_UINT(cnt, ptr, e->target_idx);
   DECODE_UINT(cnt, ptr, e->way_idx);
-  DECODE_UINT(cnt, ptr, e->distance_cm);
+  uint32_t distance_cm;
+  DECODE_UINT(cnt, ptr, distance_cm);
+  e->distance = DistanceType(distance_cm);
   DECODE_UINT(cnt, ptr, e->turn_cost_idx);
   {
     uint64_t bitset;

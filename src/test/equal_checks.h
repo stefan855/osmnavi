@@ -21,7 +21,7 @@
 #define CHECK_EDGES_EQUAL(e1, e2)                           \
   CHECK_EQ_S(e1.target_idx, e2.target_idx);                 \
   CHECK_EQ_S(e1.way_idx, e2.way_idx);                       \
-  CHECK_EQ_S(e1.distance_cm, e2.distance_cm);               \
+  CHECK_EQ_S(e1.distance.cm(), e2.distance.cm());           \
   CHECK_EQ_S(e1.turn_cost_idx, e2.turn_cost_idx);           \
   CHECK_EQ_S(e1.unique_target, e2.unique_target);           \
   CHECK_EQ_S(e1.to_bridge, e2.to_bridge);                   \

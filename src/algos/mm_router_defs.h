@@ -9,7 +9,7 @@
 // which is measured from the beginning of the edge. The value is in the range
 // [0..1].
 struct EdgePoint {
-  uint32_t distance_to_seg_cm = 0;
+  DistanceType distance_to_seg = DistanceType(0u);
   // 'to_fraction' [0...1] gives the distance *to* the point on the edge.
   // 0.0 means that the point is at the beginning of the edge, i.e. at
   // fe.from_node_idx. 1.0 means that the start is at the end of the edge. All
@@ -27,11 +27,10 @@ struct EdgePoint {
 
   std::string DebugString(const MMCluster& mc) const {
     CHECK_EQ_S(mc.cluster_id, fe.cluster_id);
-    return absl::StrFormat("dist:%.2fm cl:%u n0:%lli n1:%lli tfrac:%.2f",
-                           distance_to_seg_cm / 100.0, fe.cluster_id,
-                           mc.get_node_id(fe.from_node_idx),
-                           mc.get_node_id(fe.edge(mc).target_idx()),
-                           to_fraction);
+    return absl::StrFormat(
+        "dist:%.2fm cl:%u n0:%lli n1:%lli tfrac:%.2f", distance_to_seg.meters(),
+        fe.cluster_id, mc.get_node_id(fe.from_node_idx),
+        mc.get_node_id(fe.edge(mc).target_idx()), to_fraction);
   }
 
   std::string DebugString(const MMGraph& mg) const {
@@ -44,9 +43,8 @@ struct EdgePoint {
     return absl::StrFormat(
         "Closest Edge to (%.7f, %.7f) dist:%.2fm cl:%u n0:%lli n1:%lli "
         "tfrac:%.2f",
-        origin_lat.AsDouble(), origin_lon.AsDouble(),
-        distance_to_seg_cm / 100.0, fe.cluster_id,
-        mc.get_node_id(fe.from_node_idx),
+        origin_lat.AsDouble(), origin_lon.AsDouble(), distance_to_seg.meters(),
+        fe.cluster_id, mc.get_node_id(fe.from_node_idx),
         mc.get_node_id(fe.edge(mc).target_idx()), to_fraction);
   }
 
@@ -239,10 +237,10 @@ struct MMRoutingResult {
            (fe_pos > 0 ? min_metrics.at(fe_pos - 1) : 0);
   }
 
-  uint32_t distance_cm(const MMGraph& mg, uint32_t fe_pos) const {
+  DistanceType distance(const MMGraph& mg, uint32_t fe_pos) const {
     const MMFullEdge& fe = full_edges.at(fe_pos);
     const MMCluster& mc = fe.mc(mg);
-    uint32_t dist = mc.edge_to_distance.at(fe.edge_idx(mc));
+    DistanceType dist = mc.edge_to_distance.distance(fe.edge_idx(mc));
     if (fe_pos > 0 && fe_pos + 1 < full_edges.size()) {
       // Not first and/or last edge.
       return dist;
@@ -252,6 +250,9 @@ struct MMRoutingResult {
     double del_frac_start = (fe_pos == 0 ? start.to_fraction : 0.0);
     double del_frac_target =
         (fe_pos == full_edges.size() - 1 ? 1.0 - target.to_fraction : 0.0);
-    return std::lround(dist * (1.0 - del_frac_start - del_frac_target));
+    return DistanceType(
+        // Initialise with a double that uses meters as unit.
+        dist.meters() *
+        std::min(1.0, std::max(0.0, (1.0 - del_frac_start - del_frac_target))));
   }
 };

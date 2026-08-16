@@ -146,9 +146,9 @@ class NodeBuilder {
       cnt_ += DecodeUInt(b_->buff + cnt_, &udelta);
       n_.id += udelta;
       cnt_ += DecodeInt(b_->buff + cnt_, &idelta);
-      n_.ll.lat = n_.ll.lat.v64() + idelta;
+      n_.ll.lat = LatE6(n_.ll.lat.v64() + idelta);
       cnt_ += DecodeInt(b_->buff + cnt_, &idelta);
-      n_.ll.lon = n_.ll.lon.v64() + idelta;
+      n_.ll.lon = LonE6(n_.ll.lon.v64() + idelta);
       ++pos_;
       return true;
     }

@@ -50,11 +50,11 @@ void MatchPOIsToRoads(const Graph& g, int n_threads, bool check_slow,
             const GNode& fast = g.nodes.at(res.node_pos);
             const GNode& slow = g.nodes.at(res2.node_pos);
             LOG_S(INFO) << absl::StrFormat(
-                "%d DIFF for POI %c %d lat:%.6f lon:%.6f fast id:%d dist:%d "
-                "slow "
-                "id:%d dist:%d",
+                "%d DIFF for POI %c %d lat:%.6f lon:%.6f fast id:%d dist:%.2fm "
+                "slow id:%d dist:%.2fm",
                 i, poi.obj_type, poi.id, poi.lat.AsDouble(), poi.lon.AsDouble(),
-                fast.node_id, res.dist, slow.node_id, res2.dist);
+                fast.node_id, res.dist.meters(), slow.node_id,
+                res2.dist.meters());
           }
         }
       }
@@ -278,7 +278,7 @@ std::vector<int64_t> RunCompactGraphRandomTraffic(
   uint32_t count = 0;
   for (size_t i = 0; i < pois.size(); ++i) {
     const pois::POI& p = pois.at(i);
-    if (p.routing_node_dist < 10000) {  // < 100m.
+    if (p.routing_node_dist.meters() < 100) {
       const auto iter = gd.graph_to_compact_nodemap.find(p.routing_node_idx);
       if (iter == gd.graph_to_compact_nodemap.end()) continue;
       count++;

@@ -706,7 +706,7 @@ class MMHybridRouter final {
       CHECK_GE_S(res.edge_metric(i), tc);
       LOG_S(INFO) << absl::StrFormat(
           "%5i. tc:%.2fs m:%.2fs d:%.2fm tot:%.2fs fe:<%s>", i + 1, tc / 1000.0,
-          (res.edge_metric(i) - tc) / 1000.0, res.distance_cm(mg, i) / 100.0,
+          (res.edge_metric(i) - tc) / 1000.0, res.distance(mg, i).meters(),
           res.min_metrics.at(i) / 1000.0, res.full_edges.at(i).DebugString(mg));
     }
     LOG_S(INFO) << "*************************************";

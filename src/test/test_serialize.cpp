@@ -46,7 +46,7 @@ GEdge RandomGEdge(uint64_t seed) {
 
   e.target_idx = (uint32_t)(dist(myrand) % (1llu << 32));
   e.way_idx = (uint32_t)(dist(myrand) % (1llu << 32));
-  e.distance_cm = (uint32_t)(dist(myrand) % (1llu << 32));
+  e.distance = DistanceType((uint32_t)(dist(myrand) % (1llu << 32)));
   e.turn_cost_idx = dist(myrand) % (1llu << MAX_TURN_COST_IDX_BITS);
   e.unique_target = dist(myrand) % 2;
   e.to_bridge = dist(myrand) % 2;

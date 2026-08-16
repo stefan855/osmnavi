@@ -7,6 +7,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "base/constants.h"
 #include "base/deg_coord.h"
+#include "base/distance_type.h"
 #include "base/huge_bitset.h"
 #include "base/simple_mem_pool.h"
 #include "base/util.h"
@@ -128,7 +129,7 @@ CHECK_IS_MM_OK(WaySharedAttrs);
 
 inline bool operator==(const WaySharedAttrs& a, const WaySharedAttrs& b) {
   return a.highway_label_ == b.highway_label_ &&
-         memcmp(&a, &b, sizeof(WaySharedAttrs)) == 0;
+             memcmp(&a.ra, &b.ra, sizeof(a.ra)) == 0;
 }
 
 namespace std {
@@ -137,11 +138,12 @@ struct hash<WaySharedAttrs> {
   size_t operator()(const WaySharedAttrs& wsa) const {
     // Use already defined std::string_view hashes.
     return std::hash<std::string_view>{}(
-        std::string_view((char*)&wsa, sizeof(wsa)));
+               std::string_view((char*)&wsa.ra, sizeof(wsa.ra))) +
+           wsa.highway_label_ + (((size_t)wsa.highway_label_) << 37);
   }
 };
 }  // namespace std
-
+   //
 constexpr std::uint32_t GWAY_ID_BITS = 40;
 // constexpr std::uint32_t NUM_HIGHWAY_LABEL_BITS = 5;
 struct GWay {
@@ -271,7 +273,7 @@ struct GEdge {
   std::uint32_t target_idx;
   std::uint32_t way_idx;
   // Distance between start and end point of the edge, in centimeters.
-  std::uint32_t distance_cm;
+  DistanceType distance;
   std::uint32_t turn_cost_idx : MAX_TURN_COST_IDX_BITS;
 
   // True iff this is the first time 'target_idx' has this value in the list
@@ -726,7 +728,7 @@ inline std::string debug_str(const Graph& g, const GEdge& e) {
       "Edge to %lld w:%lld di:%u ut:%u tb:%u cw:%u cc:%u iv:%u bd:%u cl:%u "
       "ctrt:%u ss:%u ts:%u rp:%u br:%u cbe:%u de:%u",
       GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx),
-      e.distance_cm, e.unique_target, e.to_bridge, e.contra_way,
+      e.distance.cm(), e.unique_target, e.to_bridge, e.contra_way,
       e.cross_country, e.inverted, e.both_directions, e.car_label,
       e.complex_turn_restriction_trigger, e.stop_sign, e.traffic_signal,
       e.road_priority, e.bridge, e.cross_cluster_edge, e.dead_end);

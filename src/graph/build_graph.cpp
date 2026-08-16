@@ -834,12 +834,12 @@ namespace {
 void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const bool inverted, const bool contra_way, const bool has_shapes,
              const bool has_reverse_shapes, const bool both_directions,
-             const size_t way_idx, const std::uint64_t distance_cm,
+             const size_t way_idx, const DistanceType distance,
              uint16_t start_bearing, uint16_t target_bearing,
              bool car_restricted) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
-  CHECK_LE_S(distance_cm, MAX_EDGE_DISTANCE_CM)
+  CHECK_LE_S(distance.cm(), MAX_EDGE_DISTANCE_CM)
       << absl::StrFormat("Node %lld->%lld way %lld", n.node_id, other.node_id,
                          GetGWayIdSafe(g, way_idx));
   const int64_t edge_start = n.edges_start_pos;
@@ -861,7 +861,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   GEdge& e = g.edges.at(ep);
   e.target_idx = other_idx;
   e.way_idx = way_idx;
-  e.distance_cm = distance_cm;
+  e.distance = distance;
   e.turn_cost_idx = INVALID_TURN_COST_IDX;
   e.unique_target = 0;
   e.to_bridge = 0;
@@ -1158,9 +1158,9 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
         }
         // Sum up distance so far.
         if (prev_node.id != 0) {
-          uint32_t distance_cm = calculate_distance(prev_node.ll, node.ll);
-          sum += distance_cm;
-          bearing = true_north_bearing(prev_node.ll, node.ll, distance_cm);
+          DistanceType distance = calculate_distance(prev_node.ll, node.ll);
+          sum += distance.cm();
+          bearing = true_north_bearing(prev_node.ll, node.ll, distance);
         }
         prev_node = node;
       } else {
@@ -1210,7 +1210,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
             // Emit edge.
             const std::size_t idx1 = node_idx.at(prev_pos);
             const std::size_t idx2 = node_idx.at(pos);
-            uint64_t distance_cm = dist_sums.at(pos) - dist_sums.at(prev_pos);
+            DistanceType distance(dist_sums.at(pos) - dist_sums.at(prev_pos));
             /// The bearings may be different if pos > prev_pos+1, because of
             /// shape coordinates.
             const uint16_t start_bearing = bearings.at(prev_pos + 1);
@@ -1228,19 +1228,19 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false, has_shapes,
                       /*has_reverse_shapes=*/false,
-                      /*both_directions=*/true, way_idx, distance_cm,
+                      /*both_directions=*/true, way_idx, distance,
                       start_bearing, target_bearing, restr_car_f);
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
                       /*contra_way=*/true, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/has_shapes,
-                      /*both_directions=*/true, way_idx, distance_cm,
+                      /*both_directions=*/true, way_idx, distance,
                       invert_bearing(target_bearing),
                       invert_bearing(start_bearing), restr_car_b);
             } else if (vt_forward) {
               AddEdge(graph, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false, has_shapes,
                       /*has_reverse_shapes=*/false,
-                      /*both_directions=*/false, way_idx, distance_cm,
+                      /*both_directions=*/false, way_idx, distance,
                       start_bearing, target_bearing, restr_car_f);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
@@ -1249,7 +1249,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               AddEdge(graph, idx2, idx1, /*inverted=*/true,
                       /*contra_way=*/false, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/false,
-                      /*both_directions=*/false, way_idx, distance_cm,
+                      /*both_directions=*/false, way_idx, distance,
                       invert_bearing(target_bearing),
                       invert_bearing(start_bearing), restr_car_f);
             } else {
@@ -1257,7 +1257,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               AddEdge(graph, idx2, idx1, /*inverted=*/false,
                       /*contra_way=*/true, has_shapes,
                       /*has_reverse_shapes=*/false,
-                      /*both_directions=*/false, way_idx, distance_cm,
+                      /*both_directions=*/false, way_idx, distance,
                       invert_bearing(target_bearing),
                       invert_bearing(start_bearing), restr_car_b);
               // Inverted edges should have the same contra way as the
@@ -1268,7 +1268,7 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
               AddEdge(graph, idx1, idx2, /*inverted=*/true,
                       /*contra_way=*/true, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/false,
-                      /*both_directions=*/false, way_idx, distance_cm,
+                      /*both_directions=*/false, way_idx, distance,
                       start_bearing, target_bearing, restr_car_b);
             }
           }
@@ -1558,15 +1558,13 @@ void FillStats(const OsmPbfReader& reader, GraphMetaData* meta,
           (!e.inverted && (e.road_priority == GEdge::PRIO_HIGH));
 
       if (!e.inverted && e.target_idx != node_idx) {
-        stats->sum_edge_length_cm += e.distance_cm;
-        if (e.distance_cm == 0) {
+        stats->sum_edge_length_cm += e.distance.cm();
+        if (e.distance.cm() == 0) {
           LOG_S(INFO) << "Edge with length 0 from " << n.node_id << " to "
                       << target.node_id;
         }
-        stats->min_edge_length_cm =
-            std::min(stats->min_edge_length_cm, (int64_t)e.distance_cm);
-        stats->max_edge_length_cm =
-            std::max(stats->max_edge_length_cm, (int64_t)e.distance_cm);
+        stats->min_edge_length = std::min(stats->min_edge_length, e.distance);
+        stats->max_edge_length = std::max(stats->max_edge_length, e.distance);
         stats->num_edges_forward_car_restr_unset +=
             (e.car_label == GEdge::LABEL_UNSET);
         stats->num_edges_forward_car_restr_free +=
@@ -1803,9 +1801,9 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.num_edges_cluster_skeleton);
 
   LOG_S(INFO) << absl::StrFormat("  Min edge length:  %12lld",
-                                 stats.min_edge_length_cm);
+                                 stats.min_edge_length.cm());
   LOG_S(INFO) << absl::StrFormat("  Max edge length:  %12lld",
-                                 stats.max_edge_length_cm);
+                                 stats.max_edge_length.cm());
   LOG_S(INFO) << absl::StrFormat(
       "  Avg edge length   %12.0f",
       (double)stats.sum_edge_length_cm / stats.num_edges_forward);

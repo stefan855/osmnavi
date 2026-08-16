@@ -151,6 +151,14 @@ struct MMBoundingRect {
   }
 };
 
+class MMCompressedUIntVecDistanceType : public MMCompressedUIntVec {
+  public:
+    DistanceType distance(uint64_t pos) const  {
+      return DistanceType(at(pos));
+    }
+};
+CHECK_IS_MM_OK(MMCompressedUIntVecDistanceType);
+
 // This is the memory mapped data structure that represents one cluster in the
 // file.
 struct MMCluster {
@@ -184,7 +192,7 @@ struct MMCluster {
   // MMVec64<MMEdge> edges;
   MMCompressedUIntVec nodes;  // Cast to MMNode to write or read.
   MMCompressedUIntVec edges;  // Cast to MMEdge to write or read.
-  MMCompressedUIntVec edge_to_distance;
+  MMCompressedUIntVecDistanceType edge_to_distance;
   MMCompressedUIntVec edge_to_way;
   MMCompressedUIntVec edge_to_turn_costs_pos;
   MMCompressedUIntVec way_to_wsa;
@@ -754,7 +762,7 @@ struct MMFullEdge {
                            mc.get_node_id(target_idx(mc)),
                            mc.get_edge_to_way_id(edge_idx(mc)),
                            HighwayLabelToString(get_wsa(mc).highway_label_),
-                           mc.edge_to_distance.at(edge_idx(mc)) / 100.0,
+                           mc.edge_to_distance.distance(edge_idx(mc)).meters(),
                            cluster_id_from, cluster_id_to);
   }
 
@@ -838,8 +846,8 @@ struct MMClusterWrapper {
       const WaySharedAttrs& wsa = mc.get_wsa(mc.edge_to_way.at(edge_idx));
       const DIRECTION direction =
           ((DIRECTION)MM_EDGE(mc.edges.at(edge_idx)).contra_way());
-      const uint32_t distance_cm = mc.edge_to_distance.at(edge_idx);
-      edge_weights.push_back(metric.Compute(wsa, vt, direction, distance_cm));
+      const DistanceType distance(mc.edge_to_distance.at(edge_idx));
+      edge_weights.push_back(metric.Compute(wsa, vt, direction, distance));
     }
   }
 

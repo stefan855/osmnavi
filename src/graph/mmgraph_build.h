@@ -218,7 +218,7 @@ void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
         tci->mm_edges.push_back(eb.data__);
 
         edge_start_idx++;
-        tci->mm_edge_to_distance.push_back(e.distance_cm);
+        tci->mm_edge_to_distance.push_back(e.distance.cm());
         tci->cedge_to_gedge_offset.push_back(gnode_edge_offset(g, gn_idx, e));
         tci->cedge_to_gway_idx.push_back(e.way_idx);
 
@@ -546,16 +546,16 @@ void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
           "len1:%5.2fm len2:%5.2f angle:%d",
           M.ll.lat.v() - A.ll.lat.v(), M.ll.lon.v() - A.ll.lon.v(),
           B.ll.lat.v() - M.ll.lat.v(), B.ll.lon.v() - M.ll.lon.v(),
-          dts.distance_to_seg_cm / 100.0,
-          calculate_distance(A.ll, M.ll) / 100.0,
-          calculate_distance(M.ll, B.ll) / 100.0, angle_at_m);
+          dts.distance_to_seg.meters(),
+          calculate_distance(A.ll, M.ll).meters(),
+          calculate_distance(M.ll, B.ll).meters(), angle_at_m);
       LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", A.id, M.id,
                                      B.id);
     }
 
-    if ((dts.distance_to_seg_cm <= 15 && angle_at_m <= 3) ||
-        (dts.distance_to_seg_cm <= 19 && angle_at_m <= 1) ||
-        (dts.distance_to_seg_cm <= 5 && angle_at_m <= 5)) {
+    if ((dts.distance_to_seg.cm() <= 15 && angle_at_m <= 3) ||
+        (dts.distance_to_seg.cm() <= 19 && angle_at_m <= 1) ||
+        (dts.distance_to_seg.cm() <= 5 && angle_at_m <= 5)) {
       if (debug) {
         LOG_S(INFO) << "  Remove shape coord " << coords->size() << " -> "
                     << coords->size() - 1;
@@ -779,7 +779,7 @@ void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mc,
   CHECK_EQ_S(cstreet_name, gstreet_name);
 
   auto dist = mc.edge_to_distance.at(cedge_idx);
-  CHECK_EQ_S(dist, fe.gedge(g).distance_cm);
+  CHECK_EQ_S(dist, fe.gedge(g).distance.cm());
 }
 
 FullEdge find_full_gedge(const Graph& g, const TmpClusterInfo& tci,

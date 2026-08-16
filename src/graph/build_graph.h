@@ -149,8 +149,8 @@ struct BuildGraphStats {
   int64_t max_edges = 0;
   int64_t max_edges_out = 0;
   int64_t max_edges_inverted = 0;
-  int64_t min_edge_length_cm = INF64;
-  int64_t max_edge_length_cm = 0;
+  DistanceType min_edge_length = DistanceType(MAXU32);
+  DistanceType max_edge_length = DistanceType(0u);
   int64_t sum_edge_length_cm = 0;
 
   // Tarjan algorithm
@@ -246,11 +246,10 @@ struct BuildGraphStats {
     num_edges_cluster_skeleton += other.num_edges_cluster_skeleton;
     max_edges = std::max(max_edges, other.max_edges);
     max_edges_out = std::max(max_edges_out, other.max_edges_out);
-    max_edges_inverted +=
+    max_edges_inverted =
         std::max(max_edges_inverted, other.max_edges_inverted);
-    min_edge_length_cm = std::min(min_edge_length_cm, other.min_edge_length_cm);
-    max_edge_length_cm +=
-        std::max(max_edge_length_cm, other.max_edge_length_cm);
+    min_edge_length = std::min(min_edge_length, other.min_edge_length);
+    max_edge_length = std::max(max_edge_length, other.max_edge_length);
     sum_edge_length_cm += other.sum_edge_length_cm;
 
     num_dead_end_nodes += other.num_dead_end_nodes;

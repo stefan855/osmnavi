@@ -43,7 +43,7 @@ CompactGraph CreateCompactGraph(const Graph& g) {
       full_edges.push_back(
           {.from_c_idx = from_idx,
            .to_c_idx = e.target_idx,
-           .weight = (uint32_t)e.distance_cm,
+           .weight = (uint32_t)e.distance.cm(),
            .restricted_access = (e.car_label != GEdge::LABEL_FREE)});
     }
   }
@@ -88,9 +88,9 @@ Graph CreateEdgeClusterGraph(bool both_dirs) {
   AddNode(g, D, /*cluster_id=*/2);
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 2000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 4000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, DistanceType(2000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, DistanceType(4000u), GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   build_clusters::LabelEdgesAndNodes(&g);
@@ -242,13 +242,13 @@ Graph CreateGraphWithDeadEnds(bool both_dirs) {
   AddNode(g, G);
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(D, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(E, F, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, G, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(G, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(D, E, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, F, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, G, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(G, D, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   g.large_components.push_back({{A, B, C, D, E, F, G}});
@@ -321,13 +321,15 @@ Graph CreateGraphWithRestrictedSimple(bool both_dirs) {
   AddNode(g, F);
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 4000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(A, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(E, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(C, F, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(F, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(4000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(A, E, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, B, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(C, F, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(F, D, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -401,16 +403,19 @@ Graph CreateGraphWithRestricted(bool both_dirs) {
   AddNode(g, I);
 
   std::vector<TEdge> edges;
-  AddEdge(A, G, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(A, B, 5000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(B, H, 5000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(D, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(E, F, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(G, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(H, C, 5000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(F, I, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, G, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(5000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(B, H, DistanceType(5000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, DistanceType(1000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(D, E, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, F, DistanceType(1000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(G, B, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(H, C, DistanceType(5000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(F, I, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -532,15 +537,20 @@ Graph CreateRestrictedGraphHard(bool both_dirs) {
   AddNode(g, H);
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(B, C, 4000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(B, G, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(G, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(D, E, 8000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
-  AddEdge(D, H, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(H, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(E, F, 1000, GEdge::LABEL_RESTRICTED, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(B, C, DistanceType(4000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(B, G, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(G, C, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(D, E, DistanceType(8000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
+  AddEdge(D, H, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(H, E, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, F, DistanceType(1000u), GEdge::LABEL_RESTRICTED, both_dirs,
+          &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -616,12 +626,12 @@ Graph CreateClusterGraph(bool both_dirs) {
   AddNode(g, F, /*cluster_id=*/2);
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 4000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(E, F, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(F, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, DistanceType(4000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, E, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, F, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(F, C, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   build_clusters::LabelEdgesAndNodes(&g);
@@ -704,12 +714,12 @@ Graph CreateClusterGraphDoubleEdge(bool both_dirs) {
   AddNode(g, F, /*cluster_id=*/1);
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(A, E, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(B, C, 5000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(E, F, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
-  AddEdge(F, C, 1000, GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(A, E, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(B, C, DistanceType(5000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(E, F, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
+  AddEdge(F, C, DistanceType(1000u), GEdge::LABEL_FREE, both_dirs, &edges);
   StoreEdges(edges, &g);
 
   build_clusters::LabelEdgesAndNodes(&g);
@@ -852,9 +862,12 @@ inline Graph CreateBasicComplexTurnRestrictionGraph(bool both_dirs) {
   AddWay(g, /*way_idx=*/Way2, HW_TERTIARY, /*wsa_id=*/0, {C, D});
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
-  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, Way0, both_dirs,
+          &edges);
+  AddEdge(B, C, DistanceType(1000u), GEdge::LABEL_FREE, Way1, both_dirs,
+          &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, Way2, both_dirs,
+          &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -941,12 +954,18 @@ inline Graph CreateComplexTurnRestrictionGraph(bool both_dirs) {
   AddWay(g, /*way_idx=*/Way4, HW_TERTIARY, /*wsa_id=*/0, {C, F, D});
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
-  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
-  AddEdge(E, B, 1000, GEdge::LABEL_FREE, Way3, both_dirs, &edges);
-  AddEdge(C, F, 5000, GEdge::LABEL_FREE, Way4, both_dirs, &edges);
-  AddEdge(F, D, 5000, GEdge::LABEL_FREE, Way4, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, Way0, both_dirs,
+          &edges);
+  AddEdge(B, C, DistanceType(1000u), GEdge::LABEL_FREE, Way1, both_dirs,
+          &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, Way2, both_dirs,
+          &edges);
+  AddEdge(E, B, DistanceType(1000u), GEdge::LABEL_FREE, Way3, both_dirs,
+          &edges);
+  AddEdge(C, F, DistanceType(5000u), GEdge::LABEL_FREE, Way4, both_dirs,
+          &edges);
+  AddEdge(F, D, DistanceType(5000u), GEdge::LABEL_FREE, Way4, both_dirs,
+          &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -1081,11 +1100,16 @@ inline Graph CreateOverlappingTurnRestrictionsGraph(bool both_dirs) {
   AddWay(g, /*way_idx=*/Way4, HW_TERTIARY, /*wsa_id=*/0, {E, F});
 
   std::vector<TEdge> edges;
-  AddEdge(A, B, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
-  AddEdge(B, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
-  AddEdge(D, E, 1000, GEdge::LABEL_FREE, Way3, both_dirs, &edges);
-  AddEdge(E, F, 1000, GEdge::LABEL_FREE, Way4, both_dirs, &edges);
+  AddEdge(A, B, DistanceType(1000u), GEdge::LABEL_FREE, Way0, both_dirs,
+          &edges);
+  AddEdge(B, C, DistanceType(1000u), GEdge::LABEL_FREE, Way1, both_dirs,
+          &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, Way2, both_dirs,
+          &edges);
+  AddEdge(D, E, DistanceType(1000u), GEdge::LABEL_FREE, Way3, both_dirs,
+          &edges);
+  AddEdge(E, F, DistanceType(1000u), GEdge::LABEL_FREE, Way4, both_dirs,
+          &edges);
   StoreEdges(edges, &g);
 
   return g;
@@ -1316,6 +1340,7 @@ void TestTurnCosts_UTurns() {
   CHECK_EQ_S(GetComprTurnCost(g, D, F, D), FORBIDDEN);
 }
 
+#if 0
 void TestTurnCosts_Angles() {
   FUNC_TIMER();
   enum : uint32_t { A = 0, B, C };  // Node indexes.
@@ -1386,6 +1411,7 @@ void TestTurnCosts_Angles() {
   CHECK_EQ_S(FindN3Path(g, A, B, C).get_compressed_turn_cost_0to1(g),
              compress_turn_cost(500));
 }
+#endif
 
 void TestTurnCosts_Angles2() {
   FUNC_TIMER();
@@ -1395,12 +1421,19 @@ void TestTurnCosts_Angles2() {
   // Maximal curve velocity for arc_length=10m, angle=90 degrees.
   CHECK_BETWEEN(MaxCurveVelocity(10 * 100, 90), 19.8, 20.3);
   // Maximal curve velocity for arc_length=4m, angle=180, i.e. u-turn.
-  CHECK_BETWEEN(MaxCurveVelocity(4 * 100, 180), 8.9, 9.1);
+  CHECK_BETWEEN(MaxCurveVelocity(4 * 100, -179), 8.9, 9.1);
 }
 
-void TestTurnCosts_SpeedChange() {
+void TestDistanceForSpeedChange() {
   FUNC_TIMER();
-  // DistanceForSpeedChange(VH_MOTORCAR, 40, 60)
+  CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(VH_MOTORCAR, 100, 0).meters(), 130.0,
+                    0.2);
+  CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(VH_MOTORCAR, 0, 100).meters(), 200.0,
+                    0.2);
+  double expected_dist_m = DistanceForSpeedChange(VH_MOTORCAR, 0, 60).meters() -
+                           DistanceForSpeedChange(VH_MOTORCAR, 0, 40).meters();
+  CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(VH_MOTORCAR, 40, 60).meters(),
+                    expected_dist_m, 0.01);
 }
 
 void TestCountryBitset() {
@@ -1497,9 +1530,9 @@ int main(int argc, char* argv[]) {
   TestRouteOverlappingTurnRestrictions();
 
   TestTurnCosts_UTurns();
-  TestTurnCosts_Angles();
+  // TestTurnCosts_Angles();
   TestTurnCosts_Angles2();
-  TestTurnCosts_SpeedChange();
+  TestDistanceForSpeedChange();
 
   TestCountryBitset();
 

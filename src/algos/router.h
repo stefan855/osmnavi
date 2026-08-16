@@ -211,9 +211,7 @@ class Router {
 
     return ctx.metric.Compute(
         g_wsa, ctx.opt.vt, DIR_FORWARD,
-        static_cast<uint32_t>(
-            1.00 *
-            calculate_distance(node.ll, {ctx.target_lat, ctx.target_lon})));
+        calculate_distance(node.ll, {ctx.target_lat, ctx.target_lon}));
   }
 
   // Expand the forward edges.
@@ -241,7 +239,7 @@ class Router {
 
       std::uint32_t new_metric =
           vnode.min_metric +
-          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge.distance_cm);
+          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(edge), edge.distance);
       if (verbosity_ >= 3) {
         LOG_S(INFO) << absl::StrFormat(
             "NORMAL        Examine from:%u(m:%d) to:%u done:%d new-metric:%d "
@@ -356,7 +354,7 @@ class Router {
                                                 edge.inverted
                                                     ? EDGE_DIR(edge)
                                                     : EDGE_INVERSE_DIR(edge),
-                                                edge.distance_cm);
+                                                edge.distance);
       if (new_metric < vother.min_metric) {
         vother.min_metric = new_metric;
         vother.from_v_idx = qnode.visited_node_idx;

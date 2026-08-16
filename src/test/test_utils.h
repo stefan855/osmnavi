@@ -129,7 +129,7 @@ void RecomputeDistancesForTesting(Graph* g) {
     const GNode& n1 = g->nodes.at(node_idx);
     for (GEdge& e : gnode_all_edges(*g, node_idx)) {
       const GNode& n2 = g->nodes.at(e.target_idx);
-      e.distance_cm = calculate_distance(n1.ll, n2.ll);
+      e.distance = calculate_distance(n1.ll, n2.ll);
     }
   }
 }
@@ -139,23 +139,23 @@ void RecomputeDistancesForTesting(Graph* g) {
   CHECK_LE_S(val, higher);
 
 // Contains (from, to, dist, restriction-label, way_idx, contra_way).
-using TEdge = std::tuple<uint32_t, uint32_t, uint32_t, GEdge::RESTRICTION,
+using TEdge = std::tuple<uint32_t, uint32_t, DistanceType, GEdge::RESTRICTION,
                          uint32_t, bool>;
 
-inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist_cm,
+inline void AddEdge(uint32_t from, uint32_t to, DistanceType dist,
                     GEdge::RESTRICTION label, uint32_t way_idx, bool both_dirs,
                     std::vector<TEdge>* edges) {
-  edges->push_back({from, to, dist_cm, label, way_idx, false});
+  edges->push_back({from, to, dist, label, way_idx, false});
   if (both_dirs) {
-    edges->push_back({to, from, dist_cm, label, way_idx, true});
+    edges->push_back({to, from, dist, label, way_idx, true});
   }
 }
 
 // Same as above, but omitting way_idx.
-inline void AddEdge(uint32_t from, uint32_t to, uint32_t dist_cm,
+inline void AddEdge(uint32_t from, uint32_t to, DistanceType dist,
                     GEdge::RESTRICTION label, bool both_dirs,
                     std::vector<TEdge>* edges) {
-  AddEdge(from, to, dist_cm, label, /*way_idx=0*/ 0, both_dirs, edges);
+  AddEdge(from, to, dist, label, /*way_idx=0*/ 0, both_dirs, edges);
 }
 
 // Adds turn costs to the graph g. Turn costs depend on node attributes such as
@@ -194,7 +194,7 @@ inline void StoreEdges(std::vector<TEdge> edges, Graph* g) {
     // TODO: edge initialisation does not set all attributes.
     g->edges.push_back({.target_idx = to_idx,
                         .way_idx = std::get<4>(e),
-                        .distance_cm = std::get<2>(e),
+                        .distance = std::get<2>(e),
                         .turn_cost_idx = 0,
                         .unique_target = 1,
                         // .bridge = 0, // TODO: remove
@@ -304,13 +304,20 @@ inline Graph CreateStandardTurnRestrictionGraph(bool both_dirs) {
   AddWay(g, /*way_idx=*/Way3, HW_TERTIARY, /*wsa_id=*/0, {D, F, E});
 
   std::vector<TEdge> edges;
-  AddEdge(B, A, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
-  AddEdge(B, D, 1000, GEdge::LABEL_FREE, Way0, both_dirs, &edges);
-  AddEdge(A, C, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
-  AddEdge(C, D, 1000, GEdge::LABEL_FREE, Way1, both_dirs, &edges);
-  AddEdge(D, E, 1000, GEdge::LABEL_FREE, Way2, both_dirs, &edges);
-  AddEdge(D, F, 5000, GEdge::LABEL_FREE, Way3, both_dirs, &edges);
-  AddEdge(F, E, 5000, GEdge::LABEL_FREE, Way3, both_dirs, &edges);
+  AddEdge(B, A, DistanceType(1000u), GEdge::LABEL_FREE, Way1, both_dirs,
+          &edges);
+  AddEdge(B, D, DistanceType(1000u), GEdge::LABEL_FREE, Way0, both_dirs,
+          &edges);
+  AddEdge(A, C, DistanceType(1000u), GEdge::LABEL_FREE, Way1, both_dirs,
+          &edges);
+  AddEdge(C, D, DistanceType(1000u), GEdge::LABEL_FREE, Way1, both_dirs,
+          &edges);
+  AddEdge(D, E, DistanceType(1000u), GEdge::LABEL_FREE, Way2, both_dirs,
+          &edges);
+  AddEdge(D, F, DistanceType(5000u), GEdge::LABEL_FREE, Way3, both_dirs,
+          &edges);
+  AddEdge(F, E, DistanceType(5000u), GEdge::LABEL_FREE, Way3, both_dirs,
+          &edges);
   StoreEdges(edges, &g);
 
   return g;

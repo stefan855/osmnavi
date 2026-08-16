@@ -31,7 +31,7 @@ struct POI {
 
   // Node in the road graph that is closest to the POI by lat/lon.
   std::uint32_t routing_node_idx = INFU32;
-  std::int64_t routing_node_dist = INF64;
+  DistanceType routing_node_dist = DistanceType(MAXU32);
 };
 
 struct CollectedData {

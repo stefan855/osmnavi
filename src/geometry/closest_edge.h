@@ -2,10 +2,10 @@
 
 #include "absl/strings/str_format.h"
 #include "algos/mm_router_defs.h"
+#include "base/mmap_base.h"
 #include "base/top_n.h"
 #include "base/util.h"
 #include "geometry/distance_to_segment.h"
-#include "base/mmap_base.h"
 #include "graph/mmgraph_def.h"
 
 namespace {
@@ -33,31 +33,34 @@ struct ClosestEdge {
 
 struct ClusterInfo {
   uint32_t cluster_id;
-  uint32_t point_to_border_cm;
-  uint32_t point_to_center_cm;
+  DistanceType point_to_border;
+  DistanceType point_to_center;
 };
 
 // Return the minimal distance for (lat, lon) to any of the four border lines of
 // 'br'. Returns 0 if (lat, lon) is inside the bounding rect.
-uint32_t DistanceToBoundingRect(LatLon pt, MMBoundingRect br) {
+DistanceType DistanceToBoundingRect(LatLon pt, MMBoundingRect br) {
   if (pt.lat >= br.min.lat && pt.lat <= br.max.lat && pt.lon >= br.min.lon &&
       pt.lon <= br.max.lon) {
-    return 0;
+    return DistanceType(0u);
   }
-  const double dist1 = FastPointToSegmentDistance(pt, {br.min.lat, br.min.lon},
-                                                  {br.min.lat, br.max.lon})
-                           .distance_to_seg_cm;
-  const double dist2 = FastPointToSegmentDistance(pt, {br.min.lat, br.max.lon},
-                                                  {br.max.lat, br.max.lon})
-                           .distance_to_seg_cm;
-  const double dist3 = FastPointToSegmentDistance(pt, {br.max.lat, br.max.lon},
-                                                  {br.max.lat, br.min.lon})
-                           .distance_to_seg_cm;
-  const double dist4 = FastPointToSegmentDistance(pt, {br.max.lat, br.min.lon},
-                                                  {br.min.lat, br.min.lon})
-                           .distance_to_seg_cm;
-  uint32_t min_dist =
-      static_cast<uint32_t>(std::min({dist1, dist2, dist3, dist4}));
+  const DistanceType dist1 =
+      FastPointToSegmentDistance(pt, {br.min.lat, br.min.lon},
+                                 {br.min.lat, br.max.lon})
+          .distance_to_seg;
+  const DistanceType dist2 =
+      FastPointToSegmentDistance(pt, {br.min.lat, br.max.lon},
+                                 {br.max.lat, br.max.lon})
+          .distance_to_seg;
+  const DistanceType dist3 =
+      FastPointToSegmentDistance(pt, {br.max.lat, br.max.lon},
+                                 {br.max.lat, br.min.lon})
+          .distance_to_seg;
+  const DistanceType dist4 =
+      FastPointToSegmentDistance(pt, {br.max.lat, br.min.lon},
+                                 {br.min.lat, br.min.lon})
+          .distance_to_seg;
+  DistanceType min_dist = std::min({dist1, dist2, dist3, dist4});
   return min_dist;
 }
 
@@ -66,9 +69,10 @@ LonE6 Get10kmLongitudeAtLatitude(LatE6 lat) {
   // Compute an estimate of how long one kilometer of longitude is (in 10^-7
   // degrees) at a specific latitude.
   // Compute length for one degree longitude at 'lat'.
-  const double distance_cm_for_one_degree =
+  const DistanceType distance_cm_for_one_degree =
       calculate_distance({lat, LonE6(0.0)}, {lat, LonE6(1.0)});
-  return LonE6(1.0 / (distance_cm_for_one_degree / (100.0 * 1000.0 * 10.0)));
+  return LonE6(1.0 /
+               (distance_cm_for_one_degree.cm() / (100.0 * 1000.0 * 10.0)));
 }
 
 // Find clusters that are within a 10km range of the point (lat, lon).
@@ -98,29 +102,29 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, LatLon pt) {
     }
 
     ClusterInfo ci = {.cluster_id = cl_br.cluster_id};
-    ci.point_to_border_cm = DistanceToBoundingRect(pt, br);
-    ci.point_to_center_cm = calculate_distance(
+    ci.point_to_border = DistanceToBoundingRect(pt, br);
+    ci.point_to_center = calculate_distance(
         pt.lat, pt.lon,
         LatE6((br.min.lat.AsDouble() + br.max.lat.AsDouble()) / 2.0),
         LonE6((br.min.lon.AsDouble() + br.max.lon.AsDouble()) / 2.0));
 
-    if (ci.point_to_border_cm < 10 * 1000 * 100) {  // 10 km
+    if (ci.point_to_border.cm() < 10 * 1000 * 100) {  // 10 km
       // LOG_S(INFO) << absl::StrFormat(
       //     "Accept cluster %u border dist:%u center dist:%u", ci.cluster_id,
-      //     ci.point_to_border_cm, ci.point_to_center_cm);
+      //     ci.point_to_border.cm(), ci.point_to_center.cm());
       result.push_back(ci);
     } else {
-      // LOG_S(INFO) << "Reject border distance " << ci.point_to_border_cm;
+      // LOG_S(INFO) << "Reject border distance " << ci.point_to_border.cm();
     }
   }
   // LOG_S(INFO) << "FindGoodClusters #clusters=" << result.size();
 
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-    if (a.point_to_border_cm != b.point_to_border_cm) {
-      return a.point_to_border_cm < b.point_to_border_cm;
+    if (a.point_to_border != b.point_to_border) {
+      return a.point_to_border < b.point_to_border;
     }
-    if (a.point_to_center_cm != b.point_to_center_cm) {
-      return a.point_to_center_cm < b.point_to_center_cm;
+    if (a.point_to_center != b.point_to_center) {
+      return a.point_to_center < b.point_to_center;
     }
     return a.cluster_id < b.cluster_id;
   });
@@ -153,10 +157,10 @@ inline double ComputeGlobalEdgeFraction(const MMGraph& mg,
   //     coords.size() - 1, ce.shape_coords_pos, ce.shape_dts.fraction_closest,
   //     total_dist);
   for (int pos = 0; pos <= ce.shape_coords_pos; ++pos) {
-    uint32_t dist = calculate_distance(coords.at(pos), coords.at(pos + 1));
+    DistanceType dist = calculate_distance(coords.at(pos), coords.at(pos + 1));
     sum_dist += (pos != ce.shape_coords_pos)
-                    ? dist
-                    : std::lround(dist * ce.shape_dts.fraction_closest);
+                    ? dist.cm()
+                    : std::lround(dist.cm() * ce.shape_dts.fraction_closest);
     // LOG_S(INFO) << absl::StrFormat("AA2 segment %d dist:%u sum%lu", pos,
     // dist, sum_dist);
   }
@@ -174,8 +178,7 @@ GeoAnchor ConvertClosestEdgesToAnchor(
   GeoAnchor a(pt);
   for (const ClosestEdge& ce : topn.span()) {
     if (ce.fe.from_node_idx != INFU32) {  // Valid entry?
-      a.AddEdge({.distance_to_seg_cm =
-                     static_cast<uint32_t>(ce.shape_dts.distance_to_seg_cm),
+      a.AddEdge({.distance_to_seg = ce.shape_dts.distance_to_seg,
                  .to_fraction = ComputeGlobalEdgeFraction(mg, ce),
                  .coord_at_fraction = ce.shape_dts.coord_closest,
                  .fe = ce.fe});
@@ -190,7 +193,7 @@ GeoAnchor ConvertClosestEdgesToAnchor(
     uint32_t backward_idx = mc.find_edge_idx(
         ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
     if (backward_idx != INFU32) {
-      a.AddEdge({.distance_to_seg_cm = ep.distance_to_seg_cm,
+      a.AddEdge({.distance_to_seg = ep.distance_to_seg,
                  .to_fraction = 1.0f - ep.to_fraction,
                  .coord_at_fraction = ep.coord_at_fraction,
                  .fe = MMFullEdge::CreateWithEdgeIdx(mc, ep.fe.target_idx(mc),
@@ -211,12 +214,12 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, LatLon pt) {
 
   TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;
   topn.Add({.fe = {.from_node_idx = INFU32},
-            .shape_dts = {.distance_to_seg_cm = INFU31},
+            .shape_dts = {.distance_to_seg = DistanceType(MAXU32)},
             .shape_coords_pos = -1});
 
   uint32_t count_scanned = 0;
   for (const ClusterInfo& ci : good_clusters) {
-    if (topn.top().shape_dts.distance_to_seg_cm < ci.point_to_border_cm) {
+    if (topn.top().shape_dts.distance_to_seg < ci.point_to_border) {
       /*
       LOG_S(INFO) << absl::StrFormat(
           "Ignore cluster %u bc border distance %u > found distance %.f",
@@ -253,8 +256,7 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, LatLon pt) {
             // LOG_S(INFO) << absl::StrFormat("  distance %.2fm",
             //                                d.distance_to_seg_cm / 100.0);
             if (!topn.filled() ||
-                d.distance_to_seg_cm <
-                    topn.bottom().shape_dts.distance_to_seg_cm) {
+                d.distance_to_seg < topn.bottom().shape_dts.distance_to_seg) {
               // LOG_S(INFO) << absl::StrFormat(
               //     "New closest shape edge %ld %ld %.2fm",
               //     mc.get_node_id(n0_idx), mc.get_node_id(n1_idx),
@@ -277,8 +279,7 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, LatLon pt) {
           const DistanceToSegment d =
               FastPointToSegmentDistance(pt, n0_coord, n1_coord);
           if (!topn.filled() ||
-              d.distance_to_seg_cm <
-                  topn.bottom().shape_dts.distance_to_seg_cm) {
+              d.distance_to_seg < topn.bottom().shape_dts.distance_to_seg) {
             // LOG_S(INFO) << absl::StrFormat(
             //     "New closest non-shape edge %ld %ld %.2fm",
             //     mc.get_node_id(n0_idx), mc.get_node_id(n1_idx),
