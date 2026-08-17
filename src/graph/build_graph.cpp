@@ -8,6 +8,7 @@
 #include "absl/strings/str_split.h"
 #include "algos/restricted_access_edges.h"
 #include "base/huge_bitset.h"
+#include "base/index_type.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"
 #include "graph/build_clusters.h"
@@ -1057,8 +1058,9 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
                              GraphMetaData* meta, std::mutex& mut) {
   Graph& graph = meta->graph;
 
-  for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
-    const GWay& way = graph.ways.at(way_idx);
+  //for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
+  for (GWayIdxT way_idx(start_pos); way_idx < stop_pos; ++way_idx) {
+    const GWay& way = graph.ways.at(way_idx.v());
     const WaySharedAttrs& wsa = GetWSA(graph, way);
 
     std::vector<uint32_t> node_idx =

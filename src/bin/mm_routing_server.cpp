@@ -183,7 +183,7 @@ struct JsonData {
 
 std::string GetStreetName(const MMGraph& mg, const MMFullEdge& fe) {
   const MMCluster& mc = fe.mc(mg);
-  uint32_t way_idx = fe.way_idx(mc);
+  MWayIdxT way_idx = fe.way_idx(mc);
   return absl::StrFormat(
       "%s (%s)", mc.get_streetname(way_idx),
       HighwayLabelToString(mc.get_wsa(way_idx).highway_label_));
@@ -191,7 +191,7 @@ std::string GetStreetName(const MMGraph& mg, const MMFullEdge& fe) {
 
 std::string GetEdgeName(const MMGraph& mg, const MMFullEdge& fe) {
   const MMCluster& mc = fe.mc(mg);
-  uint32_t way_idx = fe.way_idx(mc);
+  MWayIdxT way_idx = fe.way_idx(mc);
   std::string_view streetname = mc.get_streetname(way_idx);
   int64_t way_id = mc.grouped_way_to_osm_id.at(way_idx);
   int64_t n0_id = mc.grouped_node_to_osm_id.at(fe.from_node_idx);
@@ -211,7 +211,7 @@ std::vector<LatLon> ComputeStartShapeCoords(const MMCluster& mc,
       mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
   // We start traveling on the edge at this distance.
   const uint32_t fraction_dist =
-      mc.edge_to_distance.at(fe.edge_idx(mc)) * ep.to_fraction;
+      mc.edge_to_distance.at(fe.edge_idx(mc)).cm() * ep.to_fraction;
   uint64_t sum_dist = 0;
   std::vector<LatLon> res = {ep.coord_at_fraction};
   for (uint32_t pos = 0; pos + 1 < shapes.size(); ++pos) {
@@ -240,8 +240,9 @@ void TerminateTargetShapeCoords(const MMCluster& mc, const EdgePoint& ep,
                                 std::vector<LatLon>* shapes) {
   CHECK_GE_S(ep.to_fraction, at_fraction) << "Target has to be after start";
   // How much distance do we have to travel until we cut the vector?
-  const uint32_t fraction_dist = mc.edge_to_distance.at(ep.fe.edge_idx(mc)) *
-                                 (ep.to_fraction - at_fraction);
+  const uint32_t fraction_dist =
+      mc.edge_to_distance.at(ep.fe.edge_idx(mc)).cm() *
+      (ep.to_fraction - at_fraction);
   uint64_t sum_dist = 0;
   for (uint32_t pos = 0; pos + 1 < shapes->size(); ++pos) {
     sum_dist += calculate_distance(shapes->at(pos), shapes->at(pos + 1)).cm();

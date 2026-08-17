@@ -258,7 +258,8 @@ class MMHybridRouter final {
           const float diff_fraction =
               ta.edge_points().at(pos).GetFromFraction();
           const uint32_t diff_metric =
-              diff_fraction * d.mcw[TARGET]->edge_weights.at(in_edge.edge_idx);
+              diff_fraction *
+              d.mcw[TARGET]->edge_weights.at(in_edge.edge_idx.v());
           CHECK_LE_S(diff_metric, cross_metric);
           LOG_S(INFO) << "AA2 cross_metric:" << cross_metric << " -> "
                       << cross_metric - diff_metric;
@@ -539,12 +540,12 @@ class MMHybridRouter final {
 
         if (out_edge.from_cluster_id == d.mcw[START]->mc.cluster_id) {
           // out_edge belongs to the START cluster.
-          if (AddExpandedSegment(d, START, out_edge.edge_idx, &segments)) {
+          if (AddExpandedSegment(d, START, out_edge.edge_idx.v(), &segments)) {
             break;
           }
         } else if (out_edge.from_cluster_id == d.mcw[TARGET]->mc.cluster_id) {
           // out_edge belongs to the TARGET cluster.
-          if (AddExpandedSegment(d, TARGET, out_edge.edge_idx, &segments)) {
+          if (AddExpandedSegment(d, TARGET, out_edge.edge_idx.v(), &segments)) {
             break;
           }
         } else {

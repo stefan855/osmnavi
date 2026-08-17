@@ -71,18 +71,18 @@ class GeoAnchor {
     AddEdge(fe.mc(mg), to_fraction, fe);
   }
 
-  void AddEdge(const MMCluster& mc, double to_fraction, uint32_t from_node_idx,
+  void AddEdge(const MMCluster& mc, double to_fraction, MNodeIdxT from_node_idx,
                uint32_t offset) {
     AddEdge(mc, to_fraction, {from_node_idx, mc.cluster_id, offset});
   }
 
-  void AddStartNode(const MMCluster& mc, uint32_t node_idx) {
+  void AddStartNode(const MMCluster& mc, MNodeIdxT node_idx) {
     for (uint32_t off : mc.edge_offsets(node_idx)) {
       AddEdge(mc, /*to_fraction=*/0.0, node_idx, off);
     }
   }
 
-  void AddTargetNode(const MMCluster& mc, uint32_t node_idx) {
+  void AddTargetNode(const MMCluster& mc, MNodeIdxT node_idx) {
     for (const MMFullEdge& fe : mm_get_incoming_edges_slow(mc, node_idx)) {
       AddEdge(mc, /*to_fraction=*/1.0, fe);
     }
@@ -90,7 +90,7 @@ class GeoAnchor {
 
   // Find the position of an edge_idx in 'edge_points'. Returns INFU32 if
   // edge_idx doesn't exist in 'edge_points'.
-  uint32_t FindPosByEdgeIdx(const MMCluster& mc, uint32_t edge_idx) const {
+  uint32_t FindPosByEdgeIdx(const MMCluster& mc, MEdgeIdxT edge_idx) const {
     for (uint32_t pos = 0; pos < edge_points_.size(); ++pos) {
       if (edge_points_.at(pos).fe.edge_idx(mc) == edge_idx) {
         return pos;
@@ -140,10 +140,10 @@ class GeoAnchor {
         const EdgePoint& prev = edge_points_.at(i - 1);
         CHECK_EQ_S(ep.fe.cluster_id, prev.fe.cluster_id);
         // We're in the same cluster, so compare from/to node indices.
-        const uint32_t ep_from = ep.fe.from_node_idx;
-        const uint32_t ep_to = ep.fe.target_idx(mc);
-        const uint32_t prev_from = prev.fe.from_node_idx;
-        const uint32_t prev_to = prev.fe.target_idx(mc);
+        const MNodeIdxT ep_from = ep.fe.from_node_idx;
+        const MNodeIdxT ep_to = ep.fe.target_idx(mc);
+        const MNodeIdxT prev_from = prev.fe.from_node_idx;
+        const MNodeIdxT prev_to = prev.fe.target_idx(mc);
         const bool match = (ep_from == prev_from && ep_to == prev_to) ||
                            (ep_from == prev_to && ep_to == prev_from);
         if (!match) {
@@ -240,7 +240,7 @@ struct MMRoutingResult {
   DistanceType distance(const MMGraph& mg, uint32_t fe_pos) const {
     const MMFullEdge& fe = full_edges.at(fe_pos);
     const MMCluster& mc = fe.mc(mg);
-    DistanceType dist = mc.edge_to_distance.distance(fe.edge_idx(mc));
+    DistanceType dist = mc.edge_to_distance.at(fe.edge_idx(mc));
     if (fe_pos > 0 && fe_pos + 1 < full_edges.size()) {
       // Not first and/or last edge.
       return dist;

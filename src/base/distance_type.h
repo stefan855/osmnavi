@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <compare>
+#include <iostream>
 #include <limits>
 
 #include "base/util.h"
@@ -18,7 +19,7 @@
 class DistanceType {
  public:
   constexpr DistanceType() : DistanceType(0u) {}
-   // Centimeters.
+  // Centimeters.
   constexpr explicit DistanceType(uint32_t c) : centimeters_(c) {}
   constexpr explicit DistanceType(uint64_t c)
       : DistanceType(static_cast<uint32_t>(c)) {
@@ -64,6 +65,24 @@ class DistanceType {
                                              const DistanceType& b) {
     return a >= b ? DistanceType(a.cm() - b.cm())
                   : DistanceType(b.cm() - a.cm());
+  }
+
+  // Compare with normal uint64_t.
+  friend auto operator<=>(const DistanceType lhs, uint64_t rhs) {
+    return lhs.centimeters_ <=> rhs;
+  }
+  friend auto operator<=>(uint64_t lhs, const DistanceType rhs) {
+    return lhs <=> rhs.centimeters_;
+  }
+  // Needed when comparing different types.
+  constexpr bool operator==(uint64_t other) const {
+    return centimeters_ == other;
+  }
+
+  // Output to <<, needed for CHECK_* macros.
+  friend std::ostream& operator<<(std::ostream& os, const DistanceType& d) {
+    os << d.cm();
+    return os;
   }
 
  private:

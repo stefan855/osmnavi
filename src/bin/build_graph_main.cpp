@@ -540,11 +540,11 @@ bool FindMMNode(const MMGraph& mmheader, int64_t id, MMFullNode* fn) {
     const MMCluster& mmc = mmheader.clusters.at(fn->cluster_id);
     CHECK_EQ_S(id, mmc.grouped_node_to_osm_id.at(fn->node_idx));
     LOG_S(INFO) << absl::StrFormat("Found node %lld in cluster %u at pos %u",
-                                   id, fn->cluster_id, fn->node_idx);
+                                   id, fn->cluster_id, fn->node_idx.v());
     for (uint32_t edge_idx : mmc.edge_indices(fn->node_idx)) {
-      const MMEdge e(mmc.edges.at(edge_idx));
+      const MMEdge e(mmc.edges.at(MEdgeIdxT(edge_idx)));
       LOG_S(INFO) << absl::StrFormat("  connected to node idx:%u id:%lld",
-                                     e.target_idx(),
+                                     e.target_idx().v(),
                                      mmc.get_node_id(e.target_idx()));
     }
     return true;
@@ -849,11 +849,11 @@ int main(int argc, char* argv[]) {
       // Select arbitrary nodes from two different clusters.
       const MMCluster& mc10 = mmg.clusters.at(10);
       GeoAnchor start_anchor;
-      start_anchor.AddStartNode(mc10, mc10.nodes.size() / 2);
+      start_anchor.AddStartNode(mc10, MNodeIdxT(mc10.nodes.size() / 2));
 
       const MMCluster& mc15 = mmg.clusters.at(15);
       GeoAnchor target_anchor;
-      target_anchor.AddTargetNode(mc15, mc15.nodes.size() / 2);
+      target_anchor.AddTargetNode(mc15, MNodeIdxT(mc15.nodes.size() / 2));
 
       MMHybridRouter router;
       router.Route(mmg, start_anchor, target_anchor);

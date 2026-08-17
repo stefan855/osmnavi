@@ -38,46 +38,46 @@ void TestMMNode() {
   FUNC_TIMER();
 
   uint64_t u = 0;
-  MM_NODE_RW(u).set_edge_start_idx(123);
-  CHECK_EQ_S(MM_NODE(u).edge_start_idx(), 123);
+  MM_NODE_RW(u).set_edge_start_idx(MEdgeIdxT(123u));
+  CHECK_EQ_S(MM_NODE(u).edge_start_idx(), MEdgeIdxT(123u));
 
   MMNode x{0};
   CHECK_S(!x.border_node());
   CHECK_S(!x.dead_end());
   CHECK_S(!x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_idx(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), MEdgeIdxT(0u));
 
   x.set_border_node(true);
   CHECK_S(x.border_node());
   CHECK_S(!x.dead_end());
   CHECK_S(!x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_idx(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), MEdgeIdxT(0u));
 
   x.set_dead_end(true);
   CHECK_S(x.border_node());
   CHECK_S(x.dead_end());
   CHECK_S(!x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_idx(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), MEdgeIdxT(0u));
 
   x.set_off_cluster_node(true);
   CHECK_S(x.border_node());
   CHECK_S(x.dead_end());
   CHECK_S(x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_idx(), 0);
+  CHECK_EQ_S(x.edge_start_idx(), MEdgeIdxT(0u));
 
-  x.set_edge_start_idx(1234567);
+  x.set_edge_start_idx(MEdgeIdxT(1234567u));
   CHECK_S(x.border_node());
   CHECK_S(x.dead_end());
   CHECK_S(x.off_cluster_node());
-  CHECK_EQ_S(x.edge_start_idx(), 1234567);
+  CHECK_EQ_S(x.edge_start_idx(), MEdgeIdxT(1234567u));
 }
 
 void TestMMEdge() {
   FUNC_TIMER();
 
   uint64_t u = 0;
-  MM_EDGE_RW(u).set_target_idx(123);
-  CHECK_EQ_S(MM_EDGE(u).target_idx(), 123);
+  MM_EDGE_RW(u).set_target_idx(MNodeIdxT(123u));
+  CHECK_EQ_S(MM_EDGE(u).target_idx(), MNodeIdxT(123u));
 
   MMEdge x{0};
 
@@ -143,14 +143,14 @@ void TestMMEdge() {
   CHECK_S(x.complex_turn_restriction_trigger());
   CHECK_EQ_S(x.target_idx(), 0);
 
-  x.set_target_idx(12345678);
+  x.set_target_idx(MNodeIdxT(12345678u));
   CHECK_S(x.dead_end());
   CHECK_S(x.bridge());
   CHECK_S(x.restricted());
   CHECK_S(x.contra_way());
   CHECK_S(x.cross_cluster_edge());
   CHECK_S(x.complex_turn_restriction_trigger());
-  CHECK_EQ_S(x.target_idx(), 12345678);
+  CHECK_EQ_S(x.target_idx(), MNodeIdxT(12345678u));
 }
 
 void TestMMVec64() {
@@ -231,7 +231,7 @@ void TestMMBitset() {
 void TestMMCompressedUIntVec() {
   FUNC_TIMER();
   struct MM {
-    MMCompressedUIntVec cv;
+    MMCompressedUIntVecStd cv;
   };
   std::vector<uint32_t> inp;
   for (size_t i = 0; i < 1000; ++i) {
@@ -246,7 +246,7 @@ void TestMMCompressedUIntVec() {
     mm.cv.WriteDataBlob("compressed vector", offsetof(MM, cv), fd, inp);
     CHECK_EQ_S(inp.size(), mm.cv.size());
     CHECK_EQ_S(7, mm.cv.bit_width());
-    CHECK_EQ_S(mm.cv.relative_blob_offset__, sizeof(MMCompressedUIntVec));
+    CHECK_EQ_S(mm.cv.relative_blob_offset__, sizeof(MMCompressedUIntVecStd));
     WriteDataTo(fd, 0, (const uint8_t*)&mm, sizeof(mm));
   }
 
@@ -341,7 +341,7 @@ void TestMMStringsTable() {
 void TestMMGroupedOSMIds() {
   FUNC_TIMER();
   struct MM {
-    MMGroupedOSMIds gi;
+    MMGroupedOSMIds<uint32_t> gi;
   };
   std::vector<int64_t> ids;
   // A few special cases with large deltas.
@@ -426,14 +426,14 @@ void TestMMShapeCoords() {
     for (size_t i = 0; i < length.size(); ++i) {
       if (length.at(i) == 0) {
         MMShapeCoords::Result res;
-        mm->sc.get({LatE6(0), LonE6(0)}, i, &res);
+        mm->sc.get({LatE6(0), LonE6(0)}, MEdgeIdxT(i), &res);
         CHECK_EQ_S(res.latlon.size(), 0) << i;
         CHECK_EQ_S(use_reverse_edge.at(i), res.use_reverse_edge) << i;
       } else {
         LatLon base = latlon.at(latlon_pos);
         MMShapeCoords::Result res;
 
-        mm->sc.get(base, i, &res);
+        mm->sc.get(base, MEdgeIdxT(i), &res);
 
         CHECK_EQ_S(res.latlon.size(), length.at(i) - 2);
         for (size_t off = 0; off + 2 < length.at(i); ++off) {

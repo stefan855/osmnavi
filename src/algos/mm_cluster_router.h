@@ -64,9 +64,10 @@ class MMClusterRouter final {
       : mc_(mcw.mc),
         mcw_(mcw),
         opt_(opt),
-        outgoing_edge_idx_stop_(mc_.num_border_nodes < mc_.nodes.size()
-                                    ? mc_.edge_start_idx(mc_.num_border_nodes)
-                                    : mc_.edges.size()) {}
+        outgoing_edge_idx_stop_(
+            mc_.num_border_nodes < mc_.nodes.size()
+                ? mc_.edge_start_idx(MNodeIdxT(mc_.start_off_cluster_nodes()))
+                : MEdgeIdxT(mc_.edges.size())) {}
 
   const std::vector<VisitedEdge>& GetVisitedEdges() const { return vis_; }
 
@@ -76,13 +77,13 @@ class MMClusterRouter final {
  private:
   void LabelTargetEdges() {
     for (const EdgePoint& ep : target_anchor_.edge_points()) {
-      vis_.at(ep.fe.edge_idx(mc_)).is_target_edge = 1;
+      vis_.at(ep.fe.edge_idx(mc_).v()).is_target_edge = 1;
     }
   }
 
   void PushStartEdges(uint32_t start_metric_offset) {
     for (const EdgePoint& ep : start_anchor_.edge_points()) {
-      const uint32_t edge_idx = ep.fe.edge_idx(mc_);
+      const MEdgeIdxT edge_idx = ep.fe.edge_idx(mc_);
       const MMEdge edge(mc_.edges.at(edge_idx));
 
       if (!opt_.include_dead_end && (edge.bridge() || edge.dead_end())) {
@@ -92,7 +93,7 @@ class MMClusterRouter final {
       // Do the first edges trigger complex turn restrictions?
       ActiveCtrs active_ctrs;
       if (edge.complex_turn_restriction_trigger()) {
-        AddTriggeringCTRs(mc_, edge_idx, &active_ctrs);
+        AddTriggeringCTRs(mc_, edge_idx.v(), &active_ctrs);
       }
 #if DEBUG_PRINT_MCR
       LOG_S(INFO) << absl::StrFormat("Push start edge %s #ctrs:%llu",
@@ -107,7 +108,7 @@ class MMClusterRouter final {
       // We're just starting, so we should be at base index i.
       CHECK_EQ_S(edge_idx, v_idx);
 
-      VisitedEdge& vis = vis_.at(edge_idx);
+      VisitedEdge& vis = vis_.at(v_idx);
 
       // The fraction of the edge that we have to travel.
       float use_fraction = ep.GetFromFraction();
@@ -126,10 +127,10 @@ class MMClusterRouter final {
           use_fraction = std::max(0.0, target_fraction - ep.to_fraction);
         }
       }
-      vis.min_metric =
-          start_metric_offset +
-          static_cast<uint32_t>(use_fraction * mcw_.edge_weights.at(edge_idx));
-      pq_.emplace(vis.min_metric, edge_idx);
+      vis.min_metric = start_metric_offset +
+                       static_cast<uint32_t>(
+                           use_fraction * mcw_.edge_weights.at(edge_idx.v()));
+      pq_.emplace(vis.min_metric, edge_idx.v());
     }
   }
 
@@ -195,7 +196,7 @@ class MMClusterRouter final {
     CHECK_EQ_S(vis.active_ctr_id, NO_ACTIVE_CTR_ID);
     CHECK_EQ_S(vis.in_target_restricted_access_area, 0);
     // This should go top in the queue.
-    pq_.emplace(vis.min_metric, in_edge.edge_idx);
+    pq_.emplace(vis.min_metric, in_edge.edge_idx.v());
   }
 
   // Route one step and return the status of the router, i.e if we need to
@@ -210,7 +211,7 @@ class MMClusterRouter final {
     // Make a copy, because the vector might see reallocations below, which
     // invalidates references.
     const VisitedEdge prev_v = vis_.at(qedge.ve_idx);
-    const uint32_t prev_v_base_idx = GetBaseIdx(qedge.ve_idx);
+    const MEdgeIdxT prev_v_base_idx = GetBaseIdx(qedge.ve_idx);
     const MMEdge prev_edge(mc_.edges.at(prev_v_base_idx));
 
 #if DEBUG_PRINT_MCR
@@ -242,9 +243,9 @@ class MMClusterRouter final {
       return {.finished = true, .found = true, .last_v_idx = qedge.ve_idx};
     }
 
-    const uint32_t edge_start_idx = mc_.edge_start_idx(prev_edge.target_idx());
+    const MEdgeIdxT edge_start_idx = mc_.edge_start_idx(prev_edge.target_idx());
     const uint32_t num_edges =
-        mc_.edge_stop_idx(prev_edge.target_idx()) - edge_start_idx;
+        mc_.edge_stop_idx(prev_edge.target_idx()).v() - edge_start_idx.v();
 
     const std::span<const uint8_t> turn_costs =
         mc_.get_turn_costs(prev_v_base_idx);
@@ -252,7 +253,7 @@ class MMClusterRouter final {
     // const TurnCostData& tcd = turn_costs.at(prev_edge.turn_cost_idx);
 
     for (uint32_t off = 0; off < num_edges; ++off) {
-      const uint32_t edge_idx = edge_start_idx + off;
+      const MEdgeIdxT edge_idx = edge_start_idx + off;
       const MMEdge e(mc_.edges.at(edge_idx));
 
       if (!opt_.include_dead_end && (e.bridge() || e.dead_end())) {
@@ -292,16 +293,16 @@ class MMClusterRouter final {
       }
 
       uint32_t new_metric;
-      if (vis_.at(edge_idx).is_target_edge) {
+      if (vis_.at(edge_idx.v()).is_target_edge) {
         const uint32_t pos = target_anchor_.FindPosByEdgeIdx(mc_, edge_idx);
         CHECK_NE_S(pos, INFU32);
         const auto fraction = target_anchor_.edge_points().at(pos).to_fraction;
         new_metric = prev_v.min_metric + decompress_turn_cost(turn_costs[off]) +
                      static_cast<uint32_t>(
-                         mcw_.edge_weights.at(edge_idx) * fraction + 0.5);
+                         mcw_.edge_weights.at(edge_idx.v()) * fraction + 0.5);
       } else {
         new_metric = prev_v.min_metric + decompress_turn_cost(turn_costs[off]) +
-                     mcw_.edge_weights.at(edge_idx);
+                     mcw_.edge_weights.at(edge_idx.v());
       }
 
       const bool in_target_raa = opt_.handle_restricted_access &&
@@ -348,14 +349,15 @@ class MMClusterRouter final {
     MMRoutingResult res;
 
     // Array of v_idx from start to end.
-    const std::vector<uint32_t> v_arr = GetForwardPath(last_v_idx);
+    const std::vector<MEdgeIdxT> v_arr = GetForwardPath(last_v_idx);
     CHECK_S(!v_arr.empty());
 
     // Fill start edge.
     {
       // The first edge must be either a start edge or an incoming edge (or
       // both).
-      const uint32_t graph_edge_idx = GetGraphEdgeIdx(v_arr.at(0));
+      const MEdgeIdxT graph_edge_idx = v_arr.at(0);
+      // const MEdgeIdxT graph_edge_idx = GetGraphEdgeIdx(v_arr.at(0));
       const uint32_t start_edge_pos =
           start_anchor_.FindPosByEdgeIdx(mc_, graph_edge_idx);
       res.start_is_anchor = (start_edge_pos != INFU32);
@@ -384,16 +386,18 @@ class MMClusterRouter final {
     {
       // uint32_t prev_metric = 0;  // TODO: wrong when starting on in_edge.
       for (uint32_t pos = 0; pos < v_arr.size(); ++pos) {
-        const uint32_t v_idx = v_arr.at(pos);
+        const MEdgeIdxT v_idx = v_arr.at(pos);
         if (pos == 0) {
           res.full_edges.push_back(res.start.fe);
-          CHECK_EQ_S(res.start.fe.edge_idx(mc_), GetGraphEdgeIdx(v_idx));
+          CHECK_EQ_S(res.start.fe.edge_idx(mc_), v_idx);
         } else {
-          uint32_t from_node_idx = res.full_edges.back().target_idx(mc_);
-          res.full_edges.push_back(MMFullEdge::CreateWithEdgeIdx(
-              mc_, from_node_idx, GetGraphEdgeIdx(v_idx)));
+          MNodeIdxT from_node_idx = res.full_edges.back().target_idx(mc_);
+          res.full_edges.push_back(
+              MMFullEdge::CreateWithEdgeIdx(mc_, from_node_idx, v_idx));
         }
-        const MMClusterRouter::VisitedEdge& ve = GetVEdge(v_idx);
+        // TODO: v_idx is actually an normalized edge index, so this is wrong,
+        // it will get wrong metric information.
+        const MMClusterRouter::VisitedEdge& ve = GetVEdge(v_idx.v());
         res.min_metrics.push_back(ve.min_metric);
         // res.edge_metric.push_back(ve.min_metric - prev_metric);
         // prev_metric = ve.min_metric;
@@ -407,7 +411,7 @@ class MMClusterRouter final {
 
     // Fill target edge.
     {
-      const uint32_t graph_edge_idx = GetGraphEdgeIdx(v_arr.back());
+      const MEdgeIdxT graph_edge_idx = GetGraphEdgeIdx(v_arr.back().v());
       const uint32_t target_edge_pos =
           target_anchor_.FindPosByEdgeIdx(mc_, graph_edge_idx);
       res.target_is_anchor = (target_edge_pos != INFU32);
@@ -433,12 +437,12 @@ class MMClusterRouter final {
   // Get the path finishing at edge 'v_edge_idx' after routing has run.
   // Returns an empty vector if no path exists, or a vector of edge indexes,
   // from in_edge to out_edge.
-  std::vector<uint32_t> GetForwardPath(uint32_t v_edge_idx) const {
+  std::vector<MEdgeIdxT> GetForwardPath(uint32_t v_edge_idx) const {
     if (vis_.at(v_edge_idx).min_metric == INFU32) {
       return {};  // No path.
     }
 
-    std::vector<uint32_t> v;
+    std::vector<MEdgeIdxT> v;
     for (uint32_t idx = v_edge_idx; idx != INFU32;) {
       v.push_back(GetGraphEdgeIdx(idx));
       idx = vis_.at(idx).from_v_idx;
@@ -448,7 +452,7 @@ class MMClusterRouter final {
     return v;
   }
 
-  inline uint32_t GetGraphEdgeIdx(uint32_t v_idx) const {
+  inline MEdgeIdxT GetGraphEdgeIdx(uint32_t v_idx) const {
     return GetBaseIdx(v_idx);
   }
 
@@ -456,12 +460,12 @@ class MMClusterRouter final {
     return mc_.get_edge(GetGraphEdgeIdx(v_idx));
   }
 
-  inline uint32_t GetBaseIdx(uint32_t v_idx) const {
-    if (v_idx < num_base_edges_) return v_idx;
+  inline MEdgeIdxT GetBaseIdx(uint32_t v_idx) const {
+    if (v_idx < num_base_edges_) return MEdgeIdxT(v_idx);
     while (vis_.at(v_idx).next >= num_base_edges_) {
       v_idx = vis_.at(v_idx).next;
     }
-    return vis_.at(v_idx).next;
+    return MEdgeIdxT(vis_.at(v_idx).next);
   }
 
   // Return true if the edge at 'v_idx' was used as start edge.
@@ -474,7 +478,7 @@ class MMClusterRouter final {
   const VisitedEdge& GetVEdge(uint32_t v_idx) const { return vis_.at(v_idx); }
 
   inline bool IsOutgoingEdge(uint32_t v_idx) {
-    uint32_t base_idx = GetBaseIdx(v_idx);
+    MEdgeIdxT base_idx = GetBaseIdx(v_idx);
     return base_idx < outgoing_edge_idx_stop_ &&
            mc_.get_node(mc_.get_edge(base_idx).target_idx()).off_cluster_node();
   }
@@ -514,10 +518,10 @@ class MMClusterRouter final {
   // graph, but with different labels. If edge+label is not found, then a new
   // edge is allocated at the end of the vector and added to the list of edges
   // at this specific base index.
-  inline uint32_t FindOrAllocEdge(uint32_t v_base_idx,
+  inline uint32_t FindOrAllocEdge(const MEdgeIdxT v_base_idx,
                                   bool in_target_restricted_access_area,
                                   const ActiveCtrs& ctrs) {
-    VisitedEdge& v_base = vis_.at(v_base_idx);
+    VisitedEdge& v_base = vis_.at(v_base_idx.v());
     // Slot unused?
     if (v_base.next == INFU32) {
       v_base.in_target_restricted_access_area =
@@ -528,12 +532,12 @@ class MMClusterRouter final {
         v_base.active_ctr_id = active_ctrs_vec_.size();
         active_ctrs_vec_.push_back(ctrs);
       }
-      v_base.next = v_base_idx;  // loops back to itself.
-      return v_base_idx;
+      v_base.next = v_base_idx.v();  // loops back to itself.
+      return v_base_idx.v();
     }
 
     // Find matching element in list.
-    uint32_t v_curr_idx = v_base_idx;
+    uint32_t v_curr_idx = v_base_idx.v();
     do {
       const VisitedEdge& v_curr = vis_.at(v_curr_idx);
       if (v_curr.ignore_target_edge) {
@@ -564,14 +568,14 @@ class MMClusterRouter final {
         {.min_metric = INFU32,
          .from_v_idx = INFU32,
          .active_ctr_id = active_ctr_id,
-         .is_target_edge = vis_.at(v_base_idx).is_target_edge,
+         .is_target_edge = vis_.at(v_base_idx.v()).is_target_edge,
          .ignore_target_edge = 0,
          .in_target_restricted_access_area = in_target_restricted_access_area,
          .done = 0,
          .next = v_base_next_val});
     // Do not use v_base, pushing to vector above  might have invalidated the
     // reference.
-    vis_.at(v_base_idx).next = v_curr_idx;
+    vis_.at(v_base_idx.v()).next = v_curr_idx;
     return v_curr_idx;
   }
 
@@ -580,7 +584,7 @@ class MMClusterRouter final {
                                        ActiveCtrs* active_ctrs) {
     // Find new triggering turn restrictions.
     uint32_t first_ctr_idx =
-        mc.find_complex_turn_restriction_idx(next_edge_idx);
+        mc.find_complex_turn_restriction_idx(MEdgeIdxT(next_edge_idx));
     for (uint32_t idx = first_ctr_idx;
          idx < mc.complex_turn_restrictions.size(); ++idx) {
       if (mc.complex_turn_restrictions.at(idx).trigger_edge_idx !=
@@ -598,7 +602,7 @@ class MMClusterRouter final {
   // new value in 'active_ctrs'.
   // Note that 'active_ctrs' has to be empty when calling this function.
   inline bool UpdateActiveCtrs(const MMCluster& mc, const VisitedEdge& prev_v,
-                               const uint32_t next_edge_idx,
+                               const MEdgeIdxT next_edge_idx,
                                bool next_complex_trigger,
                                ActiveCtrs* active_ctrs) {
     if (prev_v.active_ctr_id == 0 && !next_complex_trigger) {
@@ -611,13 +615,13 @@ class MMClusterRouter final {
       // We have active turn restrictions. Check if they forbid the next edge.
       // *active_ctrs = active_ctrs_vec_.at(prev_v.active_ctr_id);
       *active_ctrs = VECTOR_AT(active_ctrs_vec_, prev_v.active_ctr_id);
-      if (!ActiveCtrsAddNextEdge(mc, next_edge_idx, active_ctrs)) {
+      if (!ActiveCtrsAddNextEdge(mc, next_edge_idx.v(), active_ctrs)) {
         return false;
       }
     }
 
     if (next_complex_trigger) {
-      AddTriggeringCTRs(mc, next_edge_idx, active_ctrs);
+      AddTriggeringCTRs(mc, next_edge_idx.v(), active_ctrs);
     }
     return true;
   }
@@ -634,7 +638,7 @@ class MMClusterRouter final {
   GeoAnchor target_anchor_;
   // First edge index *not* belonging to an outgoing edge.
   // Outgoing edges are at [0..outgoing_edge_idx_stop).
-  const uint32_t outgoing_edge_idx_stop_;
+  const MEdgeIdxT outgoing_edge_idx_stop_;
 
   std::priority_queue<QueuedEdge, std::vector<QueuedEdge>, MetricCmpEdge> pq_;
   std::vector<VisitedEdge> vis_;
@@ -646,10 +650,10 @@ struct MMClusterShortestPaths {
   std::vector<std::vector<std::uint32_t>> metrics;
 };
 
-uint32_t GetBestTurnCostFollowEdge(const MMCluster& mc, uint32_t edge_idx) {
+MEdgeIdxT GetBestTurnCostFollowEdge(const MMCluster& mc, MEdgeIdxT edge_idx) {
   std::span<const uint8_t> tc = mc.get_turn_costs(edge_idx);
   if (tc.size() == 0) {
-    return INFU32;
+    return MEdgeIdxT(INFU32);
   }
   uint32_t minpos = 0;
   for (uint32_t pos = 1; pos < tc.size(); ++pos) {
@@ -660,20 +664,21 @@ uint32_t GetBestTurnCostFollowEdge(const MMCluster& mc, uint32_t edge_idx) {
 
 // Given the edge 'prev_edge_idx', return edge_idx of the default following
 // edge. Returns INFU32 if no edge available.
-uint32_t GetBestWayIdxFollowEdge(const MMCluster& mc, uint32_t prev_edge_idx) {
+MEdgeIdxT GetBestWayIdxFollowEdge(const MMCluster& mc,
+                                  MEdgeIdxT prev_edge_idx) {
   // Use turn cost as proxy for "best continuation".
   std::span<const uint8_t> tc = mc.get_turn_costs(prev_edge_idx);
   if (tc.size() == 0) {
-    return INFU32;
+    return MEdgeIdxT(INFU32);
   }
 
-  const uint32_t prev_way_idx = mc.edge_to_way.at(prev_edge_idx);
-  uint32_t node_idx = mc.get_edge(prev_edge_idx).target_idx();
-  uint32_t start_edge_idx = mc.edge_start_idx(node_idx);
+  const MWayIdxT prev_way_idx = mc.edge_to_way.at(prev_edge_idx);
+  MNodeIdxT node_idx = mc.get_edge(prev_edge_idx).target_idx();
+  MEdgeIdxT start_edge_idx = mc.edge_start_idx(node_idx);
   uint32_t found_off = INFU32;
 
   for (uint32_t offset : mc.edge_offsets(node_idx)) {
-    uint32_t edge_idx = start_edge_idx + offset;
+    MEdgeIdxT edge_idx = start_edge_idx + offset;
     if (mc.edge_to_way.at(edge_idx) == prev_way_idx) {
       CHECK_LT_S(offset, tc.size());
       // uturns often stay on the same way, so don't allow these..
@@ -684,33 +689,33 @@ uint32_t GetBestWayIdxFollowEdge(const MMCluster& mc, uint32_t prev_edge_idx) {
     }
   }
   if (found_off == INFU32) {
-    return INFU32;
+    return MEdgeIdxT(INFU32);
   }
   return start_edge_idx + found_off;
 }
 
 // Given the edge 'prev_edge_idx', return edge_idx of the default following
 // edge. Returns INFU32 if no edge available.
-uint32_t GetBestStreetnameFollowEdge(const MMCluster& mc,
-                                     uint32_t prev_edge_idx) {
+MEdgeIdxT GetBestStreetnameFollowEdge(const MMCluster& mc,
+                                      MEdgeIdxT prev_edge_idx) {
   // Use turn cost as proxy for "best continuation".
   std::span<const uint8_t> tc = mc.get_turn_costs(prev_edge_idx);
   if (tc.size() == 0) {
-    return INFU32;
+    return MEdgeIdxT(INFU32);
   }
 
-  const uint32_t prev_way_idx = mc.edge_to_way.at(prev_edge_idx);
+  const MWayIdxT prev_way_idx = mc.edge_to_way.at(prev_edge_idx);
   std::string_view prev_streetname = mc.get_streetname(prev_way_idx);
   if (prev_streetname.empty()) {
-    return INFU32;
+    return MEdgeIdxT(INFU32);
   }
-  uint32_t node_idx = mc.get_edge(prev_edge_idx).target_idx();
-  uint32_t start_edge_idx = mc.edge_start_idx(node_idx);
+  MNodeIdxT node_idx = mc.get_edge(prev_edge_idx).target_idx();
+  MEdgeIdxT start_edge_idx = mc.edge_start_idx(node_idx);
   uint32_t found_off = INFU32;
 
   for (uint32_t offset : mc.edge_offsets(node_idx)) {
-    uint32_t edge_idx = start_edge_idx + offset;
-    uint32_t way_idx = mc.edge_to_way.at(edge_idx);
+    MEdgeIdxT edge_idx = start_edge_idx + offset;
+    MWayIdxT way_idx = mc.edge_to_way.at(edge_idx);
     if (prev_streetname == mc.get_streetname(way_idx)) {
       CHECK_LT_S(offset, tc.size());
       // uturns often stay on the same way, so don't allow these..
@@ -721,22 +726,22 @@ uint32_t GetBestStreetnameFollowEdge(const MMCluster& mc,
     }
   }
   if (found_off == INFU32) {
-    return INFU32;
+    return MEdgeIdxT(INFU32);
   }
   return start_edge_idx + found_off;
 }
 
 // Check how well edge prediction would work.
-void AnalyzePath(const MMCluster& mc, const std::vector<uint32_t>& path) {
+void AnalyzePath(const MMCluster& mc, const std::vector<MEdgeIdxT>& path) {
   // Wrong, but will display non-lowest-cost, which is correct.
-  uint32_t prev_edge_idx = path.at(0);
+  MEdgeIdxT prev_edge_idx = path.at(0);
   uint32_t num_special = 0;
 
   for (uint32_t i = 1; i < path.size(); ++i) {
     // uint32_t expand_node_idx = mc.get_edge(prev_edge_idx).target_idx();
     // Based on the previous edge, compute the default next edge.
     // uint32_t p = 0;
-    uint32_t predicted_edge = GetBestStreetnameFollowEdge(mc, prev_edge_idx);
+    MEdgeIdxT predicted_edge = GetBestStreetnameFollowEdge(mc, prev_edge_idx);
     if (predicted_edge == INFU32) {
       // p = 1;
       predicted_edge = GetBestWayIdxFollowEdge(mc, prev_edge_idx);
@@ -747,7 +752,7 @@ void AnalyzePath(const MMCluster& mc, const std::vector<uint32_t>& path) {
     }
     // LOG_S(INFO) << "predicted edge:" << predicted_edge << " p:" << p;
 
-    uint32_t edge_idx = path.at(i);
+    MEdgeIdxT edge_idx = path.at(i);
     // uint32_t way_idx = mc.edge_to_way.at(edge_idx);
     bool predicted_selected = (edge_idx == predicted_edge);
     num_special += !predicted_selected;
@@ -781,8 +786,8 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
     res.metrics.emplace_back();
     MMClusterRouter router(
         mcw, {.handle_restricted_access = true, .include_dead_end = false});
-    int16_t off =
-        (int16_t)(in_edge.edge_idx - mc.edge_start_idx(in_edge.from_node_idx));
+    int16_t off = (int16_t)(in_edge.edge_idx.v() -
+                            mc.edge_start_idx(in_edge.from_node_idx).v());
 
     GeoAnchor ga;
     // Start and incoming edge at the end of it, i.e. don't count the metric on
@@ -794,13 +799,13 @@ inline MMClusterShortestPaths ComputeShortestMMClusterPaths(
         router.GetVisitedEdges();
     for (const MMOutgoingEdge& out_edge : mc.out_edges.span()) {
       // Check that the out edge has only one label.
-      if (vis.at(out_edge.edge_idx).next != INFU32) {
-        CHECK_EQ_S(vis.at(out_edge.edge_idx).next, out_edge.edge_idx);
+      if (vis.at(out_edge.edge_idx.v()).next != INFU32) {
+        CHECK_EQ_S(vis.at(out_edge.edge_idx.v()).next, out_edge.edge_idx.v());
       }
-      res.metrics.back().push_back(vis.at(out_edge.edge_idx).min_metric);
+      res.metrics.back().push_back(vis.at(out_edge.edge_idx.v()).min_metric);
 
-      const std::vector<uint32_t> path =
-          router.GetForwardPath(out_edge.edge_idx);
+      const std::vector<MEdgeIdxT> path =
+          router.GetForwardPath(out_edge.edge_idx.v());
       // LOG_S(INFO) << "shortest cluster path len: " << path.size();
       if (path.size() > 0) {
         AnalyzePath(mc, path);
@@ -851,7 +856,7 @@ inline MMRoutingResult RouteOnMMCluster(const MMClusterWrapper& mcw,
 }
 
 inline MMRoutingResult RouteOnMMClusterFromNodes(
-    const MMClusterWrapper& mcw, uint32_t start_idx, uint32_t target_idx,
+    const MMClusterWrapper& mcw, MNodeIdxT start_idx, MNodeIdxT target_idx,
     Verbosity verb = Verbosity::Brief) {
   GeoAnchor start_anchor;
   start_anchor.AddStartNode(mcw.mc, start_idx);

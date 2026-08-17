@@ -8,11 +8,13 @@
 #include <algorithm>
 #include <bit>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "base/deg_coord.h"
 #include "base/encode_coords.h"
+#include "base/index_type.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/graph_def.h"
@@ -203,10 +205,19 @@ uint8_t DetermineBitWidth(const std::vector<uint_type>& data) {
 
 // Implements a fixed size, memory mapped vector of unsigned integers of a
 // fixed bit width.
-class MMCompressedUIntVec {
+template <typename TRet = uint64_t, typename TPos = uint64_t>
+class MMCompressedUIntVecTmpl {
  public:
   // Get the value at position 'pos'.
-  uint64_t at(uint64_t pos) const {
+  TRet at(TPos pos_typed) const {
+    uint64_t pos;
+    if constexpr (std::is_unsigned_v<TPos>) {
+      pos = pos_typed;
+    } else {
+      // Works for IndexType defined in index_type.h
+      pos = pos_typed.v();
+    }
+
     CHECK_LT_S(pos, num__);
     const uint64_t* data =
         (uint64_t*)ABS_BLOB_PTR(this, relative_blob_offset__);
@@ -221,16 +232,16 @@ class MMCompressedUIntVec {
       const uint8_t bits0 = 64 - bit_pos_mod;
       if (bits0 >= bit_width__) {
         // We have all bits.
-        return retval;
+        return TRet(retval);
       }
       // We need to get the remaining bits from start of next element.
       // Note that retval contains only needed bits, everything else is 0.
       uint8_t bits1 = bit_width__ - bits0;
-      return retval + ((arr[1] & low_mask(bits1)) << bits0);
+      return TRet(retval + ((arr[1] & low_mask(bits1)) << bits0));
     } else {
       // Handle 64 bits here because the formulas won't work for it, for
       // instance "1ull << bit_width__".
-      return (data)[pos];
+      return TRet((data)[pos]);
     }
   }
 
@@ -286,10 +297,11 @@ class MMCompressedUIntVec {
     }
   }
 
-  DISALLOW_COPY_ASSIGN_MOVE(MMCompressedUIntVec);
+  DISALLOW_COPY_ASSIGN_MOVE(MMCompressedUIntVecTmpl);
 
  public:
-  MMCompressedUIntVec() : num__(0), bit_width__(0), relative_blob_offset__(0){};
+  MMCompressedUIntVecTmpl()
+      : num__(0), bit_width__(0), relative_blob_offset__(0){};
 
   // Write a data blob to the end of the file 'fd'.
   //
@@ -317,7 +329,8 @@ class MMCompressedUIntVec {
     free(buff);
   }
 };
-CHECK_IS_MM_OK(MMCompressedUIntVec);
+using MMCompressedUIntVecStd = MMCompressedUIntVecTmpl<>;
+CHECK_IS_MM_OK(MMCompressedUIntVecStd);
 
 // Each entry in the turn cost table is an array of turn costs, one for each
 // outgoing edge of the node referencing the entry. The complete turn cost table
@@ -434,9 +447,17 @@ CHECK_IS_MM_OK(MMStringsTable);
 // The delta encoded ids are stored in a contiguous area of memory (see
 // id_blob_start()) after the end of the regular vector.
 constexpr size_t kOSMIdsGroupSize = 64;
+template <typename TPos = uint32_t>
 struct MMGroupedOSMIds {
  public:
-  int64_t at(uint32_t pos) const {
+  int64_t at(TPos pos_typed) const {
+    uint64_t pos;
+    if constexpr (std::is_unsigned_v<TPos>) {
+      pos = pos_typed;
+    } else {
+      // Works for IndexType defined in index_type.h
+      pos = pos_typed.v();
+    }
     CHECK_LT_S(pos, num__);
     size_t gidx = pos / kOSMIdsGroupSize;
     const IdGroup& group = mmgroups__.at(gidx);
@@ -555,7 +576,7 @@ struct MMGroupedOSMIds {
         groups);
   }
 };
-CHECK_IS_MM_OK(MMGroupedOSMIds);
+CHECK_IS_MM_OK(MMGroupedOSMIds<uint32_t>);
 
 // constexpr size_t kShapeCoordsGroupSize = 64;
 struct MMShapeCoords {
@@ -566,7 +587,7 @@ struct MMShapeCoords {
   };
 
   struct SequentialAccessCache {
-    uint32_t edge_idx = INFU32;
+    MEdgeIdxT edge_idx = MEdgeIdxT(INFU32);
     // Byte offset into the blob after reading item 'edge_idx'.
     uint32_t cnt = 0;
   };
@@ -599,12 +620,13 @@ struct MMShapeCoords {
   //
   // Note: Use MMCluster::get_shape_coords() instead of the functions defined
   // here, it has a much simpler API.
-  void get(const LatLon base, uint32_t edge_idx, Result* res,
+  void get(const LatLon base, MEdgeIdxT edge_idx, Result* res,
            SequentialAccessCache* seq_cache = nullptr) const {
     const CoordGroup& group = GetGroup(edge_idx);
     res->latlon.clear();
     {
-      const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+      const uint8_t hval =
+          group.GetHeaderVal(edge_idx.v() % kShapeCoordsGroupSize);
       res->use_reverse_edge = (hval == CoordGroup::STORED_AT_REVERSE_EDGE);
       if (res->use_reverse_edge || hval == 0) {
         return;
@@ -616,16 +638,16 @@ struct MMShapeCoords {
     uint32_t cnt;
 
     if (seq_cache != nullptr &&
-        edge_idx / kShapeCoordsGroupSize ==
-            seq_cache->edge_idx / kShapeCoordsGroupSize &&
+        edge_idx.v() / kShapeCoordsGroupSize ==
+            seq_cache->edge_idx.v() / kShapeCoordsGroupSize &&
         edge_idx > seq_cache->edge_idx) {
       cnt = seq_cache->cnt;
-      for (uint32_t off = seq_cache->edge_idx % kShapeCoordsGroupSize + 1;
-           off < edge_idx % kShapeCoordsGroupSize; ++off) {
+      for (uint32_t off = seq_cache->edge_idx.v() % kShapeCoordsGroupSize + 1;
+           off < edge_idx.v() % kShapeCoordsGroupSize; ++off) {
         cnt += SkipItem(ptr + cnt, group.GetHeaderVal(off));
       }
     } else {
-      const uint32_t skip = edge_idx % kShapeCoordsGroupSize;
+      const uint32_t skip = edge_idx.v() % kShapeCoordsGroupSize;
       cnt = 0;
       for (uint32_t off = 0; off < skip; ++off) {
         cnt += SkipItem(ptr + cnt, group.GetHeaderVal(off));
@@ -633,7 +655,8 @@ struct MMShapeCoords {
     }
 
     // Now read the data.
-    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    const uint8_t hval =
+        group.GetHeaderVal(edge_idx.v() % kShapeCoordsGroupSize);
     CHECK_S(hval != 0 && hval != CoordGroup::STORED_AT_REVERSE_EDGE) << hval;
     uint32_t num_coords = hval;
     if (hval == CoordGroup::LENGTH_GREATER_EQUAL_14) {
@@ -653,16 +676,18 @@ struct MMShapeCoords {
   //
   // Note: Use MMCluster::get_shape_coords() instead of the functions defined
   // here, it has a much simpler API.
-  bool is_empty(uint32_t edge_idx, bool* use_reverse_edge) const {
+  bool is_empty(MEdgeIdxT edge_idx, bool* use_reverse_edge) const {
     const CoordGroup& group = GetGroup(edge_idx);
-    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    const uint8_t hval =
+        group.GetHeaderVal(edge_idx.v() % kShapeCoordsGroupSize);
     *use_reverse_edge = (hval == CoordGroup::STORED_AT_REVERSE_EDGE);
     return (hval == 0 || hval == CoordGroup::STORED_AT_REVERSE_EDGE);
   }
 
-  bool has_coords(uint32_t edge_idx) const {
+  bool has_coords(MEdgeIdxT edge_idx) const {
     const CoordGroup& group = GetGroup(edge_idx);
-    const uint8_t hval = group.GetHeaderVal(edge_idx % kShapeCoordsGroupSize);
+    const uint8_t hval =
+        group.GetHeaderVal(edge_idx.v() % kShapeCoordsGroupSize);
     return hval != 0;
   }
 
@@ -714,9 +739,9 @@ struct MMShapeCoords {
     }
   };
 
-  const CoordGroup& GetGroup(uint32_t edge_idx) const {
-    CHECK_LT_S(edge_idx, num__);
-    size_t gidx = edge_idx / kShapeCoordsGroupSize;
+  const CoordGroup& GetGroup(MEdgeIdxT edge_idx) const {
+    CHECK_LT_S(edge_idx.v(), num__);
+    size_t gidx = edge_idx.v64() / kShapeCoordsGroupSize;
     return mmgroups__.at(gidx);
   }
 
