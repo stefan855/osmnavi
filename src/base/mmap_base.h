@@ -587,7 +587,7 @@ struct MMShapeCoords {
   };
 
   struct SequentialAccessCache {
-    MEdgeIdxT edge_idx = MEdgeIdxT(INFU32);
+    MEdgeIdx edge_idx = MEdgeIdx(INFU32);
     // Byte offset into the blob after reading item 'edge_idx'.
     uint32_t cnt = 0;
   };
@@ -620,7 +620,7 @@ struct MMShapeCoords {
   //
   // Note: Use MMCluster::get_shape_coords() instead of the functions defined
   // here, it has a much simpler API.
-  void get(const LatLon base, MEdgeIdxT edge_idx, Result* res,
+  void get(const LatLon base, MEdgeIdx edge_idx, Result* res,
            SequentialAccessCache* seq_cache = nullptr) const {
     const CoordGroup& group = GetGroup(edge_idx);
     res->latlon.clear();
@@ -676,7 +676,7 @@ struct MMShapeCoords {
   //
   // Note: Use MMCluster::get_shape_coords() instead of the functions defined
   // here, it has a much simpler API.
-  bool is_empty(MEdgeIdxT edge_idx, bool* use_reverse_edge) const {
+  bool is_empty(MEdgeIdx edge_idx, bool* use_reverse_edge) const {
     const CoordGroup& group = GetGroup(edge_idx);
     const uint8_t hval =
         group.GetHeaderVal(edge_idx.v() % kShapeCoordsGroupSize);
@@ -684,7 +684,7 @@ struct MMShapeCoords {
     return (hval == 0 || hval == CoordGroup::STORED_AT_REVERSE_EDGE);
   }
 
-  bool has_coords(MEdgeIdxT edge_idx) const {
+  bool has_coords(MEdgeIdx edge_idx) const {
     const CoordGroup& group = GetGroup(edge_idx);
     const uint8_t hval =
         group.GetHeaderVal(edge_idx.v() % kShapeCoordsGroupSize);
@@ -739,7 +739,7 @@ struct MMShapeCoords {
     }
   };
 
-  const CoordGroup& GetGroup(MEdgeIdxT edge_idx) const {
+  const CoordGroup& GetGroup(MEdgeIdx edge_idx) const {
     CHECK_LT_S(edge_idx.v(), num__);
     size_t gidx = edge_idx.v64() / kShapeCoordsGroupSize;
     return mmgroups__.at(gidx);

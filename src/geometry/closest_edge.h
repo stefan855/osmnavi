@@ -190,7 +190,7 @@ GeoAnchor ConvertClosestEdgesToAnchor(
     // Find backward edge
     const EdgePoint& ep = a.edge_points().front();
     const MMCluster& mc = ep.fe.mc(mg);
-    MEdgeIdxT backward_idx = mc.find_edge_idx(
+    MEdgeIdx backward_idx = mc.find_edge_idx(
         ep.fe.target_idx(mc), ep.fe.from_node_idx, ep.fe.way_idx(mc));
     if (backward_idx != INFU32) {
       a.AddEdge({.distance_to_seg = ep.distance_to_seg,
@@ -213,7 +213,7 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, LatLon pt) {
   const std::vector<ClusterInfo> good_clusters = FindGoodClusters(mg, pt);
 
   TopN<ClosestEdge, 1, /*keep_greater=*/false> topn;
-  topn.Add({.fe = {.from_node_idx = MNodeIdxT(INFU32)},
+  topn.Add({.fe = {.from_node_idx = MNodeIdx(INFU32)},
             .shape_dts = {.distance_to_seg = DistanceType(MAXU32)},
             .shape_coords_pos = -1});
 
@@ -232,14 +232,14 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, LatLon pt) {
     const MMCluster& mc = mg.clusters.at(ci.cluster_id);
     MMShapeCoords::SequentialAccessCache seq_cache;
 
-    for (MNodeIdxT n0_idx(0u); n0_idx < mc.nodes.size(); ++n0_idx) {
+    for (MNodeIdx n0_idx(0u); n0_idx < mc.nodes.size(); ++n0_idx) {
       const LatLon& n0_coord = mc.node_to_latlon(n0_idx);
       for (uint32_t idx : mc.edge_indices(n0_idx)) {
-        const MEdgeIdxT e_idx(idx);
+        const MEdgeIdx e_idx(idx);
         if (mc.edge_shape_coords.has_coords(e_idx)) {
           // ======== Shape Coords.
           //
-          MNodeIdxT n1_idx = mc.get_edge(e_idx).target_idx();
+          MNodeIdx n1_idx = mc.get_edge(e_idx).target_idx();
           // LOG_S(INFO) << absl::StrFormat("Check closest edge %ld %ld %.2fm",
           //                                mc.get_node_id(n0_idx),
           //                                mc.get_node_id(n1_idx), 0.0);
@@ -275,7 +275,7 @@ inline GeoAnchor FindClosestEdges(const MMGraph& mg, LatLon pt) {
           }
         } else {
           // ======== Straight line (no shape coords).
-          MNodeIdxT n1_idx = mc.get_edge(e_idx).target_idx();
+          MNodeIdx n1_idx = mc.get_edge(e_idx).target_idx();
           const LatLon& n1_coord = mc.node_to_latlon(n1_idx);
           const DistanceToSegment d =
               FastPointToSegmentDistance(pt, n0_coord, n1_coord);

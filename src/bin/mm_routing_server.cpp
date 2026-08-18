@@ -183,7 +183,7 @@ struct JsonData {
 
 std::string GetStreetName(const MMGraph& mg, const MMFullEdge& fe) {
   const MMCluster& mc = fe.mc(mg);
-  MWayIdxT way_idx = fe.way_idx(mc);
+  MWayIdx way_idx = fe.way_idx(mc);
   return absl::StrFormat(
       "%s (%s)", mc.get_streetname(way_idx),
       HighwayLabelToString(mc.get_wsa(way_idx).highway_label_));
@@ -191,7 +191,7 @@ std::string GetStreetName(const MMGraph& mg, const MMFullEdge& fe) {
 
 std::string GetEdgeName(const MMGraph& mg, const MMFullEdge& fe) {
   const MMCluster& mc = fe.mc(mg);
-  MWayIdxT way_idx = fe.way_idx(mc);
+  MWayIdx way_idx = fe.way_idx(mc);
   std::string_view streetname = mc.get_streetname(way_idx);
   int64_t way_id = mc.grouped_way_to_osm_id.at(way_idx);
   int64_t n0_id = mc.grouped_node_to_osm_id.at(fe.from_node_idx);

@@ -14,7 +14,8 @@ enum class IndexTypeName {
   GWayIdx,
   MNodeIdx,
   MEdgeIdx,
-  MWayIdx
+  MWayIdx,
+  RVisIdx  // Used in routing code.
 };
 
 template <IndexTypeName type_name>
@@ -56,12 +57,16 @@ class IndexType {
     return *this;
   }
 
+#if 0
+  This would be useful for iterating backwards, but it fails with a runtime
+  error when going to -1.
   // Prefix operator --idx.
   constexpr IndexType<type_name>& operator--() {
     CHECK_GT_S(idx_, 0);
     --idx_;
     return *this;
   }
+#endif
 
 #if 0
   // Postfix increment operator required for iota_view.
@@ -103,18 +108,12 @@ class IndexType {
   uint32_t idx_;
 };
 
-using GWayIdxT = IndexType<IndexTypeName::GWayIdx>;
-static_assert(sizeof(GWayIdxT) == 4);
-CHECK_IS_MM_OK(GWayIdxT);
+using GWayIdx = IndexType<IndexTypeName::GWayIdx>;
+static_assert(sizeof(GWayIdx) == 4);
+CHECK_IS_MM_OK(GWayIdx);
 
-using MWayIdxT = IndexType<IndexTypeName::MWayIdx>;
-static_assert(sizeof(MWayIdxT) == 4);
-CHECK_IS_MM_OK(MWayIdxT);
+using MWayIdx = IndexType<IndexTypeName::MWayIdx>;
+using MNodeIdx = IndexType<IndexTypeName::MNodeIdx>;
+using MEdgeIdx = IndexType<IndexTypeName::MEdgeIdx>;
+using RVisIdx = IndexType<IndexTypeName::RVisIdx>;
 
-using MNodeIdxT = IndexType<IndexTypeName::MNodeIdx>;
-static_assert(sizeof(MNodeIdxT) == 4);
-CHECK_IS_MM_OK(MNodeIdxT);
-
-using MEdgeIdxT = IndexType<IndexTypeName::MEdgeIdx>;
-static_assert(sizeof(MEdgeIdxT) == 4);
-CHECK_IS_MM_OK(MEdgeIdxT);

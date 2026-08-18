@@ -190,13 +190,13 @@ struct PNGContext {
 };
 
 using EdgeColorFunc =
-    std::function<int(const MMCluster& mc, MEdgeIdxT edge_idx)>;
+    std::function<int(const MMCluster& mc, MEdgeIdx edge_idx)>;
 
 using EdgeSelectFunc = std::function<bool(
-    const MMCluster& mc, MNodeIdxT from_idx, MEdgeIdxT edge_idx)>;
+    const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx)>;
 
-bool edge_select_all(const MMCluster& mc, MNodeIdxT from_idx,
-                     MEdgeIdxT edge_idx) {
+bool edge_select_all(const MMCluster& mc, MNodeIdx from_idx,
+                     MEdgeIdx edge_idx) {
   return true;
 }
 
@@ -220,12 +220,15 @@ std::string CreatePNGInternal(
       const MMCluster& mc = d.mg.clusters.at(cluster_id);
       // Iterate backwards because the more important edges are at the
       // beginning and should be overwriting less important edge from the end.
-      for (MNodeIdxT node_idx(mc.nodes.size() - 1); node_idx >= 0; --node_idx) {
+      // Use a signed loop variable because on the last test it will be -1.
+      for (int64_t signed_node_idx = mc.nodes.size() - 1; signed_node_idx >= 0;
+           --signed_node_idx) {
+        MNodeIdx node_idx(static_cast<uint64_t>(signed_node_idx));
         const LatLon latlon0 = mc.node_to_latlon(node_idx);
         const WorldPoint wp0 = LatLonToPixelMercator(latlon0.lat.AsDouble(),
                                                      latlon0.lon.AsDouble());
         for (uint32_t idx : mc.edge_indices(node_idx)) {
-          const MEdgeIdxT edge_idx(idx);
+          const MEdgeIdx edge_idx(idx);
           if (!edge_select_func(mc, node_idx, edge_idx)) {
             continue;
           }
@@ -280,32 +283,33 @@ std::string CreateMMGraphPNG(const MMGraphTileData& d, std::string what,
   LOG_S(INFO) << absl::StrFormat("<%s> zoom:%d tile_x/y:(%d,%d)", what, zoom,
                                  tile_x, tile_y);
   if (what == "graph_motorcar") {
-    return CreatePNGInternal(d, zoom, tile_x, tile_y,
-                             [](const MMCluster& mc, MEdgeIdxT edge_idx) -> int {
-                               int color = BLUE;
-                               if (mc.get_edge(edge_idx).bridge()) {
-                                 color = RED;
-                               } else if (mc.get_edge(edge_idx).dead_end()) {
-                                 color = GREEN;
-                               }
-                               return color;
-                             });
+    return CreatePNGInternal(
+        d, zoom, tile_x, tile_y,
+        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int {
+          int color = BLUE;
+          if (mc.get_edge(edge_idx).bridge()) {
+            color = RED;
+          } else if (mc.get_edge(edge_idx).dead_end()) {
+            color = GREEN;
+          }
+          return color;
+        });
   } else if (what == "clusters") {
-    return CreatePNGInternal(d, zoom, tile_x, tile_y,
-                             [](const MMCluster& mc, MEdgeIdxT edge_idx) -> int {
-                               if (mc.get_edge(edge_idx).cross_cluster_edge()) {
-                                 return MAGENTA;
-                               } else {
-                                 return mc.color_no % NUM_COLORS;
-                               }
-                             });
+    return CreatePNGInternal(
+        d, zoom, tile_x, tile_y,
+        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int {
+          if (mc.get_edge(edge_idx).cross_cluster_edge()) {
+            return MAGENTA;
+          } else {
+            return mc.color_no % NUM_COLORS;
+          }
+        });
   } else if (what == "restricted") {
     return CreatePNGInternal(
         d, zoom, tile_x, tile_y,
-        [](const MMCluster& mc, MEdgeIdxT edge_idx) -> int { return BROWN; },
-        [](const MMCluster& mc, MNodeIdxT from_idx, MEdgeIdxT edge_idx) -> bool {
-          return mc.get_edge(edge_idx).restricted();
-        });
+        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int { return BROWN; },
+        [](const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx)
+            -> bool { return mc.get_edge(edge_idx).restricted(); });
   } else {
     LOG_S(INFO) << "not supported: " << what;
     return "";
@@ -337,15 +341,15 @@ void DrawClusterRouter(PNGContext& pd, const MMHybridRouter::RouterData& rd,
   const std::vector<MMClusterRouter::VisitedEdge>& vec = r.GetVisitedEdges();
   const MMCluster& mc = r.mc();
   TileColor color = (TileColor)(mc.color_no % NUM_COLORS);
-  for (uint32_t v_idx = 0; v_idx < vec.size(); ++v_idx) {
-    const MMClusterRouter::VisitedEdge vis = vec.at(v_idx);
+  for (RVisIdx v_idx(0u); v_idx < vec.size(); ++v_idx) {
+    const MMClusterRouter::VisitedEdge vis = vec.at(v_idx.v());
     if (vis.min_metric == INFU32) {
       continue;
     }
-    const MEdgeIdxT edge_idx = r.GetGraphEdgeIdx(v_idx);
+    const MEdgeIdx edge_idx = r.GetGraphEdgeIdx(v_idx);
 
     // Find out at which node this edge starts.
-    MNodeIdxT from_node_idx(INFU32);
+    MNodeIdx from_node_idx(INFU32);
     if (vis.from_v_idx == INFU32) {
       // Check if it is a start edge. In this case we can find out the
       // starting node.
@@ -356,7 +360,7 @@ void DrawClusterRouter(PNGContext& pd, const MMHybridRouter::RouterData& rd,
             starta.edge_points().at(start_edge_pos).fe.from_node_idx;
       }
     } else {
-      MEdgeIdxT prev_edge_idx = r.GetGraphEdgeIdx(vis.from_v_idx);
+      MEdgeIdx prev_edge_idx = r.GetGraphEdgeIdx(vis.from_v_idx);
       from_node_idx = mc.get_edge(prev_edge_idx).target_idx();
     }
 
@@ -400,8 +404,8 @@ std::string CreatePNGForHybridRouting(const MMGraph& mg,
     } else {
       CHECK_S(hvis.prev_source == MMHybridRouter::START ||
               hvis.prev_source == MMHybridRouter::TARGET);
-      MEdgeIdxT edge_idx =
-          rd.router[hvis.prev_source]->GetGraphEdgeIdx(hvis.prev_key_or_v_idx);
+      MEdgeIdx edge_idx = rd.router[hvis.prev_source]->GetGraphEdgeIdx(
+          RVisIdx(hvis.prev_key_or_v_idx));
       const MMCluster& prev_mc = rd.mcw[hvis.prev_source]->mc;
       prev_latlon =
           prev_mc.node_to_latlon(prev_mc.get_edge(edge_idx).target_idx());

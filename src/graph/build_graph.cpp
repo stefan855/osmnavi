@@ -1059,7 +1059,7 @@ void ComputeEdgeCountsWorker(size_t start_pos, size_t stop_pos,
   Graph& graph = meta->graph;
 
   //for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
-  for (GWayIdxT way_idx(start_pos); way_idx < stop_pos; ++way_idx) {
+  for (GWayIdx way_idx(start_pos); way_idx < stop_pos; ++way_idx) {
     const GWay& way = graph.ways.at(way_idx.v());
     const WaySharedAttrs& wsa = GetWSA(graph, way);
 

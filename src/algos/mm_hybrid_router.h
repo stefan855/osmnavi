@@ -334,12 +334,12 @@ class MMHybridRouter final {
           min_metric[START] <= min_metric[TARGET] &&
           min_metric[START] <= min_metric[HYBRID]) {
         // Inspect the minimal element in the start cluster.
-        const uint32_t v_idx = d.router[START]->QueueMinVIdx();
+        const RVisIdx v_idx = d.router[START]->QueueMinVIdx();
         if (d.router[START]->IsOutgoingEdge(v_idx)) {
           const MMOutgoingEdge& out_edge = d.mcw[START]->mc.find_outgoing_edge(
               d.router[START]->GetGraphEdgeIdx(v_idx));
           HandleOutgoingEdgeTransition(mg, min_metric[START], out_edge, START,
-                                       /*source_key=*/v_idx, d);
+                                       /*source_key=*/v_idx.v(), d);
         }
         // Finalize the edge.
         MMClusterRouterStatus rs = d.router[START]->RouteOneStep();
@@ -357,12 +357,12 @@ class MMHybridRouter final {
                  min_metric[TARGET] <= min_metric[START] &&
                  min_metric[TARGET] <= min_metric[HYBRID]) {
         // Inspect the minimal element in the target cluster.
-        const uint32_t v_idx = d.router[TARGET]->QueueMinVIdx();
+        const RVisIdx v_idx = d.router[TARGET]->QueueMinVIdx();
         if (d.router[TARGET]->IsOutgoingEdge(v_idx)) {
           const MMOutgoingEdge& out_edge = d.mcw[TARGET]->mc.find_outgoing_edge(
               d.router[TARGET]->GetGraphEdgeIdx(v_idx));
           HandleOutgoingEdgeTransition(mg, min_metric[TARGET], out_edge, TARGET,
-                                       /*source_key=*/v_idx, d);
+                                       /*source_key=*/v_idx.v(), d);
         }
         // Finalize the edge.
         MMClusterRouterStatus rs = d.router[TARGET]->RouteOneStep();
@@ -449,7 +449,7 @@ class MMHybridRouter final {
   // Add a START/TARGET segment and return true iff the segment has the
   // start_anchor.
   static bool AddExpandedSegment(const RouterData& d, const RouterType source,
-                                 uint32_t v_idx,
+                                 RVisIdx v_idx,
                                  std::vector<Segment>* segments) {
     CHECK_S(source != HYBRID);
     MMRoutingResult res = d.router[source]->GetRoutingResult(v_idx);
@@ -524,8 +524,8 @@ class MMHybridRouter final {
       if (segment.source == HYBRID) {
         // Previous must be != HYBRID
         HybridEdge he = segment.hybrid_edges.front();
-        if (AddExpandedSegment(d, he.vis.prev_source, he.vis.prev_key_or_v_idx,
-                               &segments)) {
+        if (AddExpandedSegment(d, he.vis.prev_source,
+                               RVisIdx(he.vis.prev_key_or_v_idx), &segments)) {
           break;
         }
       } else {
@@ -540,12 +540,14 @@ class MMHybridRouter final {
 
         if (out_edge.from_cluster_id == d.mcw[START]->mc.cluster_id) {
           // out_edge belongs to the START cluster.
-          if (AddExpandedSegment(d, START, out_edge.edge_idx.v(), &segments)) {
+          if (AddExpandedSegment(d, START, RVisIdx(out_edge.edge_idx.v()),
+                                 &segments)) {
             break;
           }
         } else if (out_edge.from_cluster_id == d.mcw[TARGET]->mc.cluster_id) {
           // out_edge belongs to the TARGET cluster.
-          if (AddExpandedSegment(d, TARGET, out_edge.edge_idx.v(), &segments)) {
+          if (AddExpandedSegment(d, TARGET, RVisIdx(out_edge.edge_idx.v()),
+                                 &segments)) {
             break;
           }
         } else {

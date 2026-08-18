@@ -24,7 +24,7 @@ struct MMNode {
   bool border_node() const { return (data__ & 1ull) != 0; }
   bool dead_end() const { return (data__ & 2ull) != 0; }
   bool off_cluster_node() const { return (data__ & 4ull) != 0; }
-  MEdgeIdxT edge_start_idx() const { return MEdgeIdxT(data__ >> 3ull); }
+  MEdgeIdx edge_start_idx() const { return MEdgeIdx(data__ >> 3ull); }
 
   // Set individual values.
   void set_border_node(bool val) { data__ = (data__ & ~1ull) | val; }
@@ -32,7 +32,7 @@ struct MMNode {
   void set_off_cluster_node(bool val) {
     data__ = (data__ & ~4ull) | (val << 2ull);
   }
-  void set_edge_start_idx(MEdgeIdxT edge_idx) {
+  void set_edge_start_idx(MEdgeIdx edge_idx) {
     CHECK_LT_S(edge_idx.v(), 1ull << 61);
     data__ = (edge_idx.v64() << 3ull) | (data__ & 7ull);
   }
@@ -58,7 +58,7 @@ struct MMEdge {
   bool complex_turn_restriction_trigger() const {
     return (data__ & 32ull) != 0;
   }
-  MNodeIdxT target_idx() const { return MNodeIdxT(data__ >> 6ull); }
+  MNodeIdx target_idx() const { return MNodeIdx(data__ >> 6ull); }
 
   // Set individual values.
   void set_dead_end(bool val) { data__ = (data__ & ~1ull) | val; }
@@ -71,7 +71,7 @@ struct MMEdge {
   void set_complex_turn_restriction_trigger(bool val) {
     data__ = (data__ & ~32ull) | (val << 5ull);
   }
-  void set_target_idx(MNodeIdxT target_idx) {
+  void set_target_idx(MNodeIdx target_idx) {
     CHECK_LE_S(target_idx.v(), MAXU32);
     data__ = (target_idx.v64() << 6ull) | (data__ & 63ull);
   }
@@ -89,10 +89,10 @@ struct MMFullEdge;
 // An edge with start node in another cluster.
 struct MMIncomingEdge {
   uint32_t from_cluster_id;  // The cluster id of the other cluster.
-  MNodeIdxT from_node_idx;
+  MNodeIdx from_node_idx;
   uint32_t to_cluster_id;  // The "home" cluster.
-  MNodeIdxT to_node_idx;
-  MEdgeIdxT edge_idx;    // Index of this edge in the edge array.
+  MNodeIdx to_node_idx;
+  MEdgeIdx edge_idx;    // Index of this edge in the edge array.
   uint16_t in_edge_pos;  // Position of this entry in the containing vector.
   // OSM ids to help connecting clusters.
   int64_t from_node_id;
@@ -111,10 +111,10 @@ struct MMIncomingEdge {
 // An edge with target node in another cluster.
 struct MMOutgoingEdge {
   uint32_t from_cluster_id;  // The "home" cluster.
-  MNodeIdxT from_node_idx;
+  MNodeIdx from_node_idx;
   uint32_t to_cluster_id;  // The cluster id of the other cluster.
-  MNodeIdxT to_node_idx;
-  MEdgeIdxT edge_idx;     // Index of this edge in the edge array.
+  MNodeIdx to_node_idx;
+  MEdgeIdx edge_idx;     // Index of this edge in the edge array.
   uint16_t out_edge_pos;  // Position of this entry in the containing vector.
   // OSM ids to help connecting clusters.
   int64_t from_node_id;
@@ -132,7 +132,7 @@ struct MMOutgoingEdge {
 
 struct MMComplexTurnRestriction {
   uint32_t trigger_edge_idx;
-  MNodeIdxT first_node_idx;  // from-node of the first leg
+  MNodeIdx first_node_idx;  // from-node of the first leg
   uint32_t first_leg_pos;
   uint16_t num_legs;
   uint16_t forbidden : 1;
@@ -182,13 +182,13 @@ struct MMCluster {
 
   // *** Inside cluster routing.
   // Cast to MMNode to write or read.
-  MMCompressedUIntVecTmpl<uint64_t, MNodeIdxT> nodes;
+  MMCompressedUIntVecTmpl<uint64_t, MNodeIdx> nodes;
   // Cast to MMEdge to write or read.
-  MMCompressedUIntVecTmpl<uint64_t, MEdgeIdxT> edges;
-  MMCompressedUIntVecTmpl<DistanceType, MEdgeIdxT> edge_to_distance;
-  MMCompressedUIntVecTmpl<MWayIdxT, MEdgeIdxT> edge_to_way;
-  MMCompressedUIntVecTmpl<uint64_t, MEdgeIdxT> edge_to_turn_costs_pos;
-  MMCompressedUIntVecTmpl<uint64_t, MWayIdxT> way_to_wsa;
+  MMCompressedUIntVecTmpl<uint64_t, MEdgeIdx> edges;
+  MMCompressedUIntVecTmpl<DistanceType, MEdgeIdx> edge_to_distance;
+  MMCompressedUIntVecTmpl<MWayIdx, MEdgeIdx> edge_to_way;
+  MMCompressedUIntVecTmpl<uint64_t, MEdgeIdx> edge_to_turn_costs_pos;
+  MMCompressedUIntVecTmpl<uint64_t, MWayIdx> way_to_wsa;
 
   // Deduped shared attributes, referenced by index.
   MMVec64<WaySharedAttrs> way_shared_attrs;
@@ -201,16 +201,16 @@ struct MMCluster {
 
   // Store coordinates relative to bounding_rect.min
   // Use node_to_latlon()/node_to_lat()/node_to_lon() to query.
-  MMCompressedUIntVecTmpl<uint64_t, MNodeIdxT> node_to_rel_lat;
-  MMCompressedUIntVecTmpl<uint64_t, MNodeIdxT> node_to_rel_lon;
+  MMCompressedUIntVecTmpl<uint64_t, MNodeIdx> node_to_rel_lat;
+  MMCompressedUIntVecTmpl<uint64_t, MNodeIdx> node_to_rel_lon;
 
   // *** Way description generation.
-  MMCompressedUIntVecTmpl<uint64_t, MWayIdxT> way_to_streetname_pos;
+  MMCompressedUIntVecTmpl<uint64_t, MWayIdx> way_to_streetname_pos;
   MMStringsTable streetnames_table;
 
   // *** Debugging.
-  MMGroupedOSMIds<MNodeIdxT> grouped_node_to_osm_id;
-  MMGroupedOSMIds<MWayIdxT> grouped_way_to_osm_id;
+  MMGroupedOSMIds<MNodeIdx> grouped_node_to_osm_id;
+  MMGroupedOSMIds<MWayIdx> grouped_way_to_osm_id;
 
   MMShapeCoords edge_shape_coords;
 
@@ -229,21 +229,21 @@ struct MMCluster {
     return get_path_metric(in.in_edge_pos, out.out_edge_pos);
   }
 
-  MMNode get_node(MNodeIdxT node_idx) const {
+  MMNode get_node(MNodeIdx node_idx) const {
     return MM_NODE(nodes.at(node_idx));
   }
 
-  MMEdge get_edge(MEdgeIdxT edge_idx) const {
+  MMEdge get_edge(MEdgeIdx edge_idx) const {
     return MM_EDGE(edges.at(edge_idx));
   }
 
-  MEdgeIdxT edge_start_idx(MNodeIdxT node_idx) const {
+  MEdgeIdx edge_start_idx(MNodeIdx node_idx) const {
     return MM_NODE(nodes.at(node_idx)).edge_start_idx();
   }
-  MEdgeIdxT edge_stop_idx(MNodeIdxT node_idx) const {
+  MEdgeIdx edge_stop_idx(MNodeIdx node_idx) const {
     return node_idx < nodes.size() - 1
                ? MM_NODE(nodes.at(node_idx + 1)).edge_start_idx()
-               : MEdgeIdxT(edges.size());
+               : MEdgeIdx(edges.size());
   }
 
   // Find the from_node_idx given an edge_idx.
@@ -252,58 +252,58 @@ struct MMCluster {
   //
   // TODO: Could do interpolation search instead, since the positions should
   // be evenly distributed.
-  MNodeIdxT find_from_node_of_edge_slow(MEdgeIdxT edge_idx) const {
+  MNodeIdx find_from_node_of_edge_slow(MEdgeIdx edge_idx) const {
     if (edge_idx >= edges.size()) {
-      return MNodeIdxT(INFU32);
+      return MNodeIdx(INFU32);
     }
     uint32_t L = 0;
     uint32_t R = nodes.size();
     // Find the first entry strictly larger than the search key 'edge_idx';.
     while (L < R) {
       uint32_t M = L + (R - L) / 2;
-      if (get_node(MNodeIdxT(M)).edge_start_idx() <= edge_idx) {
+      if (get_node(MNodeIdx(M)).edge_start_idx() <= edge_idx) {
         L = M + 1;
       } else {
         R = M;
       }
     }
-    return MNodeIdxT(L > 0 ? L - 1 : INFU32);
+    return MNodeIdx(L > 0 ? L - 1 : INFU32);
   }
 
   inline std::ranges::iota_view<uint32_t, uint32_t> edge_indices(
-      MNodeIdxT node_idx) const {
+      MNodeIdx node_idx) const {
     return std::views::iota(edge_start_idx(node_idx).v(),
                             edge_stop_idx(node_idx).v());
   }
 
   inline std::ranges::iota_view<uint32_t, uint32_t> edge_offsets(
-      MNodeIdxT node_idx) const {
+      MNodeIdx node_idx) const {
     return std::views::iota(0u, get_num_edges(node_idx));
   }
 
-  uint32_t get_num_edges(MNodeIdxT node_idx) const {
+  uint32_t get_num_edges(MNodeIdx node_idx) const {
     return edge_stop_idx(node_idx).v() - edge_start_idx(node_idx).v();
   }
 
-  int64_t get_node_id(MNodeIdxT node_idx) const {
+  int64_t get_node_id(MNodeIdx node_idx) const {
     return grouped_node_to_osm_id.at(node_idx);
   }
 
-  int64_t get_edge_to_way_id(MEdgeIdxT edge_idx) const {
+  int64_t get_edge_to_way_id(MEdgeIdx edge_idx) const {
     return grouped_way_to_osm_id.at(edge_to_way.at(edge_idx));
   }
-  int64_t get_way_to_way_id(MWayIdxT way_idx) const {
+  int64_t get_way_to_way_id(MWayIdx way_idx) const {
     return grouped_way_to_osm_id.at(way_idx);
   }
 
-  std::span<const uint8_t> get_turn_costs(MEdgeIdxT edge_idx) const {
+  std::span<const uint8_t> get_turn_costs(MEdgeIdx edge_idx) const {
     return turn_costs_table.at(edge_to_turn_costs_pos.at(edge_idx));
   }
 
   // Find the first index in complex_turn_restrictions that is triggered by
   // edge_idx. Note that one has to iterate from this index until until the
   // first leg doesn't match edge_idx anymore (or until the end).
-  uint32_t find_complex_turn_restriction_idx(MEdgeIdxT edge_idx) const {
+  uint32_t find_complex_turn_restriction_idx(MEdgeIdx edge_idx) const {
     for (uint32_t idx = 0; idx < complex_turn_restrictions.size(); ++idx) {
       /*
       LOG_S(INFO) << "AA0:"
@@ -332,25 +332,25 @@ struct MMCluster {
     return std::span<const uint32_t>(ptr, ctr.num_legs);
   }
 
-  const WaySharedAttrs& get_wsa(MWayIdxT way_idx) const {
+  const WaySharedAttrs& get_wsa(MWayIdx way_idx) const {
     return way_shared_attrs.at(way_to_wsa.at(way_idx));
   }
 
-  LatLon node_to_latlon(MNodeIdxT node_idx) const {
+  LatLon node_to_latlon(MNodeIdx node_idx) const {
     return {.lat = node_to_lat(node_idx), .lon = node_to_lon(node_idx)};
   }
 
-  LatE6 node_to_lat(MNodeIdxT node_idx) const {
+  LatE6 node_to_lat(MNodeIdx node_idx) const {
     return LatE6(bounding_rect.min.lat.v64() +
                  static_cast<int64_t>(node_to_rel_lat.at(node_idx)));
   }
 
-  LonE6 node_to_lon(MNodeIdxT node_idx) const {
+  LonE6 node_to_lon(MNodeIdx node_idx) const {
     return LonE6(bounding_rect.min.lon.v64() +
                  static_cast<int64_t>(node_to_rel_lon.at(node_idx)));
   }
 
-  const std::string_view get_streetname(MWayIdxT way_idx) const {
+  const std::string_view get_streetname(MWayIdx way_idx) const {
     return streetnames_table.at(way_to_streetname_pos.at(way_idx));
   }
 
@@ -366,12 +366,12 @@ struct MMCluster {
   // that is labelled bridge() or dead_end().
   // Note that this is - by construction - the same as the number of
   // non-dead-end edges in the cluster.
-  MEdgeIdxT start_dead_end_edges() const {
+  MEdgeIdx start_dead_end_edges() const {
     uint32_t first_n_idx = start_dead_end_nodes();
     if (first_n_idx == 0) {
-      return MEdgeIdxT(0u);
+      return MEdgeIdx(0u);
     }
-    return edge_stop_idx(MNodeIdxT(first_n_idx) - 1);
+    return edge_stop_idx(MNodeIdx(first_n_idx) - 1);
   }
 
   // The number of non-dead-end edges. They are stored at the beginning of the
@@ -386,20 +386,20 @@ struct MMCluster {
     return grouped_node_to_osm_id.find_idx(id);
   }
 
-  MEdgeIdxT find_edge_idx(MNodeIdxT from_node_idx, MNodeIdxT target_idx,
-                         MWayIdxT way_idx) const {
+  MEdgeIdx find_edge_idx(MNodeIdx from_node_idx, MNodeIdx target_idx,
+                         MWayIdx way_idx) const {
     for (uint32_t i : edge_indices(from_node_idx)) {
-      if (get_edge(MEdgeIdxT(i)).target_idx() == target_idx &&
-          edge_to_way.at(MEdgeIdxT(i)) == way_idx) {
-        return MEdgeIdxT(i);
+      if (get_edge(MEdgeIdx(i)).target_idx() == target_idx &&
+          edge_to_way.at(MEdgeIdx(i)) == way_idx) {
+        return MEdgeIdx(i);
       }
     }
-    return MEdgeIdxT(INFU32);
+    return MEdgeIdx(INFU32);
   }
 
   // Find the position of an incoming edge in the array of incoming edges.
   // Returns the position or INFU32 if the edge wasn't found.
-  uint32_t find_incoming_edge_pos(MEdgeIdxT edge_idx) const {
+  uint32_t find_incoming_edge_pos(MEdgeIdx edge_idx) const {
     for (const MMIncomingEdge& in_edge : in_edges.span()) {
       if (in_edge.edge_idx == edge_idx) {
         return in_edge.in_edge_pos;
@@ -408,7 +408,7 @@ struct MMCluster {
     return INFU32;
   }
 
-  const MMIncomingEdge& find_incoming_edge(MEdgeIdxT edge_idx) const {
+  const MMIncomingEdge& find_incoming_edge(MEdgeIdx edge_idx) const {
     uint32_t pos = find_incoming_edge_pos(edge_idx);
     CHECK_NE_S(pos, INFU32);
     return in_edges.at(pos);
@@ -416,7 +416,7 @@ struct MMCluster {
 
   // Find the position of an outgoing edge in the array of outgoing edges.
   // Returns the position or INFU32 if the edge wasn't found.
-  uint32_t find_outgoing_edge_pos(MEdgeIdxT edge_idx) const {
+  uint32_t find_outgoing_edge_pos(MEdgeIdx edge_idx) const {
     for (const MMOutgoingEdge& out_edge : out_edges.span()) {
       if (out_edge.edge_idx == edge_idx) {
         return out_edge.out_edge_pos;
@@ -425,7 +425,7 @@ struct MMCluster {
     return INFU32;
   }
 
-  const MMOutgoingEdge& find_outgoing_edge(MEdgeIdxT edge_idx) const {
+  const MMOutgoingEdge& find_outgoing_edge(MEdgeIdx edge_idx) const {
     uint32_t pos = find_outgoing_edge_pos(edge_idx);
     CHECK_NE_S(pos, INFU32) << edge_idx << " " << out_edges.size();
     return out_edges.at(pos);
@@ -436,17 +436,17 @@ struct MMCluster {
   //
   // Start-/end coordinates are excluded by default, unless 'extend' is true.
   std::vector<LatLon> get_shape_coords(
-      MNodeIdxT from_node_idx, MEdgeIdxT edge_idx,
+      MNodeIdx from_node_idx, MEdgeIdx edge_idx,
       MMShapeCoords::SequentialAccessCache* seq_cache = nullptr) const {
     MMShapeCoords::Result res;
     if (edge_shape_coords.is_empty(edge_idx, &res.use_reverse_edge)) {
       if (res.use_reverse_edge) {
-        MEdgeIdxT rev_edge_idx =
+        MEdgeIdx rev_edge_idx =
             find_edge_idx(get_edge(edge_idx).target_idx(), from_node_idx,
                           edge_to_way.at(edge_idx));
         // The edge *must* exist.
         if (rev_edge_idx == INFU32) {
-          for (MNodeIdxT node_idx(0u); node_idx < 60; ++node_idx) {
+          for (MNodeIdx node_idx(0u); node_idx < 60; ++node_idx) {
             LOG_S(INFO) << node_idx << ". id=" << get_node_id(node_idx);
           }
         }
@@ -470,8 +470,8 @@ struct MMCluster {
     return res.latlon;
   }
 
-  std::vector<LatLon> get_shape_coords_extended(MNodeIdxT from_node_idx,
-                                                MEdgeIdxT edge_idx) const {
+  std::vector<LatLon> get_shape_coords_extended(MNodeIdx from_node_idx,
+                                                MEdgeIdx edge_idx) const {
     std::vector<LatLon> coords = get_shape_coords(from_node_idx, edge_idx);
     coords.insert(coords.begin(), node_to_latlon(from_node_idx));
     coords.push_back(node_to_latlon(get_edge(edge_idx).target_idx()));
@@ -479,16 +479,16 @@ struct MMCluster {
   }
 
   // Return the "FullEdge" debug string for this edge.
-  std::string DebugStringEdge(MNodeIdxT from_idx, MEdgeIdxT edge_idx) const;
+  std::string DebugStringEdge(MNodeIdx from_idx, MEdgeIdx edge_idx) const;
   // Return the "FullEdge" debug string for this edge. Uses
   // find_from_node_of_edge_slow() to find the from_nide_idx for the edge,
   // therefore it is labelled slow.
-  std::string DebugStringEdgeSlow(MEdgeIdxT edge_idx) const;
+  std::string DebugStringEdgeSlow(MEdgeIdx edge_idx) const;
 };
 CHECK_IS_MM_OK(MMCluster);
 
 struct MMFullNode {
-  MNodeIdxT node_idx;
+  MNodeIdx node_idx;
   uint32_t cluster_id;
 };
 
@@ -519,7 +519,7 @@ struct MMGraph {
       int64_t ret = mmc.find_node_idx_by_id(id);
       if (ret >= mmc.start_inner_nodes() ||
           (ret >= 0 && ret < mmc.start_off_cluster_nodes())) {
-        *fn = {.node_idx = MNodeIdxT(static_cast<uint32_t>(ret)),
+        *fn = {.node_idx = MNodeIdx(static_cast<uint32_t>(ret)),
                .cluster_id = mmc.cluster_id};
         return true;
       }
@@ -643,11 +643,11 @@ CHECK_IS_MM_OK(MMGraph);
 
 // An edge with enough data to find it in a mmgraph.
 struct MMFullEdge {
-  MNodeIdxT from_node_idx;
+  MNodeIdx from_node_idx;
   uint32_t cluster_id : 24;
   uint32_t edge_offset : 8;
 
-  MEdgeIdxT edge_idx(const MMCluster& mc) const {
+  MEdgeIdx edge_idx(const MMCluster& mc) const {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
     return mc.edge_start_idx(from_node_idx) + edge_offset;
   }
@@ -655,11 +655,11 @@ struct MMFullEdge {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
     return MM_EDGE(mc.edges.at(edge_idx(mc)));
   }
-  MNodeIdxT target_idx(const MMCluster& mc) const {
+  MNodeIdx target_idx(const MMCluster& mc) const {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
     return edge(mc).target_idx();
   }
-  MWayIdxT way_idx(const MMCluster& mc) const {
+  MWayIdx way_idx(const MMCluster& mc) const {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
     return mc.edge_to_way.at(edge_idx(mc));
   }
@@ -760,8 +760,8 @@ struct MMFullEdge {
   }
 
   static inline MMFullEdge CreateWithEdgeIdx(const MMCluster& mc,
-                                             MNodeIdxT from_node_idx,
-                                             MEdgeIdxT edge_idx) {
+                                             MNodeIdx from_node_idx,
+                                             MEdgeIdx edge_idx) {
     uint32_t offset = edge_idx.v() - mc.edge_start_idx(from_node_idx).v();
     CHECK_LT_S(offset, 256);
     return {.from_node_idx = from_node_idx,
@@ -773,13 +773,13 @@ struct MMFullEdge {
   auto operator<=>(const MMFullEdge& other) const = default;
 };
 
-inline std::string MMCluster::DebugStringEdge(MNodeIdxT from_idx,
-                                              MEdgeIdxT edge_idx) const {
+inline std::string MMCluster::DebugStringEdge(MNodeIdx from_idx,
+                                              MEdgeIdx edge_idx) const {
   return MMFullEdge::CreateWithEdgeIdx(*this, from_idx, edge_idx)
       .DebugString(*this);
 }
 
-inline std::string MMCluster::DebugStringEdgeSlow(MEdgeIdxT edge_idx) const {
+inline std::string MMCluster::DebugStringEdgeSlow(MEdgeIdx edge_idx) const {
   return DebugStringEdge(find_from_node_of_edge_slow(edge_idx), edge_idx);
 }
 
@@ -795,10 +795,10 @@ inline MMFullEdge MMIncomingEdge::ToFullEdge(const MMGraph& mg) const {
 
 // Returns the edges incoming at 'target_node_idx'.
 inline std::vector<MMFullEdge> mm_get_incoming_edges_slow(
-    const MMCluster& mc, MNodeIdxT target_node_idx) {
+    const MMCluster& mc, MNodeIdx target_node_idx) {
   std::vector<MMFullEdge> res;
-  MNodeIdxT node_idx(0u);
-  for (MEdgeIdxT edge_idx(0u); edge_idx < mc.edges.size(); ++edge_idx) {
+  MNodeIdx node_idx(0u);
+  for (MEdgeIdx edge_idx(0u); edge_idx < mc.edges.size(); ++edge_idx) {
     if (MM_EDGE(mc.edges.at(edge_idx)).target_idx() == target_node_idx) {
       // We found and edge, now fast forward the node array to find the node.
       while (node_idx + 1 < mc.nodes.size() &&
@@ -831,7 +831,7 @@ struct MMClusterWrapper {
         include_dead_ends ? mc.edges.size() : mc.num_non_dead_end_edges();
     edge_weights.clear();
     edge_weights.reserve(num);
-    for (MEdgeIdxT edge_idx(0u); edge_idx < num; ++edge_idx) {
+    for (MEdgeIdx edge_idx(0u); edge_idx < num; ++edge_idx) {
       const WaySharedAttrs& wsa = mc.get_wsa(mc.edge_to_way.at(edge_idx));
       const DIRECTION direction =
           ((DIRECTION)MM_EDGE(mc.edges.at(edge_idx)).contra_way());
