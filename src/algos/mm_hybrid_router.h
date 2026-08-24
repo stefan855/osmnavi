@@ -702,15 +702,17 @@ class MMHybridRouter final {
                     << " omitted)";
         i = res.full_edges.size() - num_legs / 2;
       }
-      uint32_t tc = 0;
+      DurationMS tc(0u);
       if (i > 0) {
         tc = res.full_edges.at(i - 1).GetTurnCost(mg, res.full_edges.at(i));
       }
       CHECK_GE_S(res.edge_metric(i), tc);
       LOG_S(INFO) << absl::StrFormat(
-          "%5i. tc:%.2fs m:%.2fs d:%.2fm tot:%.2fs fe:<%s>", i + 1, tc / 1000.0,
-          (res.edge_metric(i) - tc) / 1000.0, res.distance(mg, i).meters(),
-          res.min_metrics.at(i) / 1000.0, res.full_edges.at(i).DebugString(mg));
+          "%5i. tc:%.2fs m:%.2fs d:%.2fm tot:%.2fs fe:<%s>", i + 1,
+          tc.seconds(),
+          ((int64_t)res.edge_metric(i) - (int64_t)tc.ms()) / 1000.0,
+          res.distance(mg, i).meters(), res.min_metrics.at(i) / 1000.0,
+          res.full_edges.at(i).DebugString(mg));
     }
     LOG_S(INFO) << "*************************************";
   }

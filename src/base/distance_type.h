@@ -29,8 +29,8 @@ class DistanceType {
   constexpr explicit DistanceType(double c) {
     assert(c >= 0.0);
     auto val = std::llround(c * MUL_FACTOR);
-    assert(val <= std::numeric_limits<int32_t>::max());
-    centimeters_ = static_cast<int32_t>(val);
+    assert(val <= std::numeric_limits<uint32_t>::max());
+    centimeters_ = static_cast<uint32_t>(val);
   }
   // Unsigned integers are probably an error, so forbid it here.
   explicit DistanceType(int8_t c) = delete;
@@ -77,6 +77,20 @@ class DistanceType {
   // Needed when comparing different types.
   constexpr bool operator==(uint64_t other) const {
     return centimeters_ == other;
+  }
+
+  constexpr DistanceType operator+(const DistanceType rhs) const {
+    assert(centimeters_ <= MAXU32 - rhs.centimeters_);
+    return DistanceType(centimeters_ + rhs.centimeters_);
+  }
+
+  constexpr DistanceType operator-(const DistanceType rhs) const {
+    assert(*this >= rhs);
+    return DistanceType(centimeters_ - rhs.centimeters_);
+  }
+
+  constexpr DistanceType operator/(uint64_t rhs) const {
+    return DistanceType(centimeters_ / rhs);
   }
 
   // Output to <<, needed for CHECK_* macros.

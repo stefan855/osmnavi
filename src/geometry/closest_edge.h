@@ -117,7 +117,6 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, LatLon pt) {
       // LOG_S(INFO) << "Reject border distance " << ci.point_to_border.cm();
     }
   }
-  // LOG_S(INFO) << "FindGoodClusters #clusters=" << result.size();
 
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
     if (a.point_to_border != b.point_to_border) {

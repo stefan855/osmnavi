@@ -1417,23 +1417,76 @@ void TestTurnCosts_Angles2() {
   FUNC_TIMER();
 
   // Maximal curve velocity for arc_length=100m, angle=90 degrees.
-  CHECK_BETWEEN(MaxCurveVelocity(100 * 100, 90), 63.5, 63.7);
+  CHECK_BETWEEN(MaxCurveVelocity(DistanceType(100.0), 90), 63.5, 63.7);
   // Maximal curve velocity for arc_length=10m, angle=90 degrees.
-  CHECK_BETWEEN(MaxCurveVelocity(10 * 100, 90), 19.8, 20.3);
+  CHECK_BETWEEN(MaxCurveVelocity(DistanceType(10.0), 90), 19.8, 20.3);
   // Maximal curve velocity for arc_length=4m, angle=180, i.e. u-turn.
-  CHECK_BETWEEN(MaxCurveVelocity(4 * 100, -179), 8.9, 9.1);
+  CHECK_BETWEEN(MaxCurveVelocity(DistanceType(4.0), -179), 8.9, 9.1);
 }
 
-void TestDistanceForSpeedChange() {
+void TestCurveCosts() {
   FUNC_TIMER();
-  CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(VH_MOTORCAR, 100, 0).meters(), 130.0,
-                    0.2);
-  CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(VH_MOTORCAR, 0, 100).meters(), 200.0,
-                    0.2);
-  double expected_dist_m = DistanceForSpeedChange(VH_MOTORCAR, 0, 60).meters() -
-                           DistanceForSpeedChange(VH_MOTORCAR, 0, 40).meters();
-  CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(VH_MOTORCAR, 40, 60).meters(),
-                    expected_dist_m, 0.01);
+  const double a_accel = 2.0;
+  const double a_decel = -3.0;
+
+  {
+    DurationMS t = TimeForDistance(DistanceType(1000.0), 120.0);
+    CHECK_EQ_S(t, DurationMS(30u * 1000u));
+  }
+
+  {
+    double avg = ComputeAverageSpeed(DistanceType(1000u), 100.0,
+                                     DistanceType(1000u), 120.0);
+    CHECK_DOUBLE_EQ_S(avg, 109.09090, 0.0001);
+  }
+
+  {
+    CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(100, 0, a_decel).meters(), 130.0,
+                      0.2);
+    CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(0, 100, a_accel).meters(), 200.0,
+                      0.2);
+    double expected_dist_m = DistanceForSpeedChange(0, 60, a_accel).meters() -
+                             DistanceForSpeedChange(0, 40, a_accel).meters();
+    CHECK_DOUBLE_EQ_S(DistanceForSpeedChange(40, 60, a_accel).meters(),
+                      expected_dist_m, 0.01);
+  }
+
+#if 0
+  {
+    const double a = 2.5;
+    const double speed0 = 10;
+    const DistanceType dist(10u * 100u);
+    const double expected =
+        3.6 * std::sqrt(speed0 / 3.6 * speed0 / 3.6 + 2.0 * a * dist.meters());
+    const double speed1 = SpeedAfterDistance(speed0, dist, a);
+    CHECK_DOUBLE_EQ_S(speed1, expected, 0.0001);
+
+    const DistanceType dist2(20u * 100u);
+    const double speed2 = SpeedAfterDistance(speed0, dist2, a);
+
+    double speed_res = SpeedAfterPartialDistance(dist2, speed0, speed2, dist);
+    CHECK_DOUBLE_EQ_S(speed_res, speed1, 0.0001);
+  }
+#endif
+
+  {
+    const DistanceType length0(25198u);
+    const DistanceType length1(3900u);
+    const int16_t turn_angle = 90;
+    const uint16_t maxspeed0 = 50;
+    const uint16_t maxspeed1 = 50;
+
+    auto res = ComputeCurveLoss(maxspeed0, maxspeed1, length0, length1,
+                                turn_angle, a_accel, a_decel);
+    LOG_S(INFO) << absl::StrFormat(
+        "CurveLoss Result: cusp:%.1f loss0:%ums loss1:%ums avgsp_in:%.1f "
+        "avgsp_out:%.1f",
+        res.curve_speed, res.time_loss_in.ms(), res.time_loss_out.ms(),
+        res.avg_speed_in, res.avg_speed_out);
+
+    CHECK_EQ_S(res.time_loss_in, DurationMS(1476U));
+    CHECK_EQ_S(res.time_loss_out, DurationMS(2194u));
+  }
 }
 
 void TestCountryBitset() {
@@ -1487,8 +1540,8 @@ void TestEdgeClusterRoute() {
   CHECK_EQ_S(cl1.border_in_edges.size(), 2);
   CHECK_EQ_S(cl1.border_out_edges.size(), 2);
 
-  // Now check the distance from B to C. For this, we need an incoming edge at B
-  // and an outgoing edge at C,
+  // Now check the distance from B to C. For this, we need an incoming edge at
+  // B and an outgoing edge at C,
   const GCluster::EdgeDescriptor* ed_in_ab =
       FindEdgeDesc(g, cl1.border_in_edges, A, B);
   const GCluster::EdgeDescriptor* ed_out_cd =
@@ -1500,10 +1553,10 @@ void TestEdgeClusterRoute() {
   auto dist = cl1.edge_distances.at(ed_in_ab->pos);
   CHECK_LT_S((size_t)ed_out_cd->pos, dist.size());
   uint32_t metric = dist.at(ed_out_cd->pos);
-  // The full way found through the cluster is A->B->C->D. A and D are not part
-  // of cluster 1, but the are needed for the edges A->B and C->D. The metric
-  // returned does not count the incoming edge, but it does count the outgoing
-  // edge.
+  // The full way found through the cluster is A->B->C->D. A and D are not
+  // part of cluster 1, but the are needed for the edges A->B and C->D. The
+  // metric returned does not count the incoming edge, but it does count the
+  // outgoing edge.
   CHECK_EQ_S(metric, 6000);
 }
 
@@ -1532,11 +1585,11 @@ int main(int argc, char* argv[]) {
   TestTurnCosts_UTurns();
   // TestTurnCosts_Angles();
   TestTurnCosts_Angles2();
-  TestDistanceForSpeedChange();
 
   TestCountryBitset();
 
   TestEdgeClusterRoute();
+  TestCurveCosts();
 
   LOG_S(INFO)
       << "\n\033[1;32m*****************************\nTesting successfully "

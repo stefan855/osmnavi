@@ -106,6 +106,77 @@ inline std::vector<HIGHWAY_LABEL> HighwayLabelsByPrefix(
   return hws;
 }
 
+enum TrafficFrequency : uint8_t {
+  TFREQ_VERY_LOW = 0,
+  TFREQ_LOW,
+  TFREQ_MEDIUM,
+  TFREQ_HIGH,
+  TFREQ_VERY_HIGH,
+  TFREQ_MAX
+};
+
+namespace {
+inline std::vector<TrafficFrequency> HighWayToTrafficFrequency() {
+  std::vector<TrafficFrequency> v((size_t)HW_MAX, TFREQ_MAX);
+  v[(size_t)HW_MOTORWAY] = TFREQ_VERY_HIGH;
+  v[(size_t)HW_MOTORWAY_JUNCTION] = TFREQ_VERY_HIGH;
+  v[(size_t)HW_MOTORWAY_LINK] = TFREQ_VERY_HIGH;
+  v[(size_t)HW_TRUNK] = TFREQ_HIGH;
+  v[(size_t)HW_TRUNK_LINK] = TFREQ_HIGH;
+  v[(size_t)HW_PRIMARY] = TFREQ_HIGH;
+  v[(size_t)HW_PRIMARY_LINK] = TFREQ_HIGH;
+  v[(size_t)HW_SECONDARY] = TFREQ_MEDIUM;
+  v[(size_t)HW_SECONDARY_LINK] = TFREQ_MEDIUM;
+  v[(size_t)HW_TERTIARY] = TFREQ_MEDIUM;
+  v[(size_t)HW_TERTIARY_LINK] = TFREQ_MEDIUM;
+  v[(size_t)HW_TURNING_CIRCLE] = TFREQ_MEDIUM;
+  v[(size_t)HW_RESIDENTIAL] = TFREQ_LOW;
+  v[(size_t)HW_UNCLASSIFIED] = TFREQ_LOW;
+  v[(size_t)HW_LIVING_STREET] = TFREQ_LOW;
+  v[(size_t)HW_SERVICE] = TFREQ_VERY_LOW;
+  v[(size_t)HW_BUSWAY] = TFREQ_LOW;
+  v[(size_t)HW_BUS_GUIDEWAY] = TFREQ_LOW;
+  v[(size_t)HW_CYCLEWAY] = TFREQ_MEDIUM;
+  v[(size_t)HW_FOOTWAY] = TFREQ_MEDIUM;
+  v[(size_t)HW_TRACK] = TFREQ_VERY_LOW;
+  v[(size_t)HW_PEDESTRIAN] = TFREQ_MEDIUM;
+  v[(size_t)HW_PATH] = TFREQ_VERY_LOW;
+  v[(size_t)HW_STEPS] = TFREQ_MEDIUM;
+  v[(size_t)HW_ESCAPE] = TFREQ_VERY_LOW;
+  v[(size_t)HW_ROAD] = TFREQ_MEDIUM;
+  v[(size_t)HW_BRIDLEWAY] = TFREQ_VERY_LOW;
+  return v;
+}
+}  // namespace
+
+inline TrafficFrequency HighwayLabelToTrafficFrequency(HIGHWAY_LABEL hw) {
+  static const std::vector<TrafficFrequency> v = HighWayToTrafficFrequency();
+  return VECTOR_AT(v, (size_t)hw);
+}
+
+// Compute a fraction of "how much traffic" a road has compared to roads with a
+// lot of traffic.
+inline double TrafficFrequencyToFraction(TrafficFrequency tf) {
+  switch (tf) {
+    case TFREQ_VERY_LOW:
+      return 0.05;
+    case TFREQ_LOW:
+      return 0.2;
+    case TFREQ_MEDIUM:
+      return 0.5;
+    case TFREQ_HIGH:
+      return 0.8;
+    case TFREQ_VERY_HIGH:
+      return 1.0;
+    default:
+      ABORT_S() << "Invalid TrafficFrequency:" << static_cast<int>(tf);
+  }
+}
+
+inline double HighwayToTrafficFraction(HIGHWAY_LABEL hw) {
+  return TrafficFrequencyToFraction(HighwayLabelToTrafficFrequency(hw));
+}
+
 // Direction of a way, deduced from the oneway and related tags.
 // DIR_FORWARD and DIR_BACKWARD are used as array indices in the code and should
 // be kept stable. The invalid direction attribute is indicated by DIR_MAX.

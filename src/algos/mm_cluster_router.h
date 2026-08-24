@@ -142,7 +142,9 @@ class MMClusterRouter final {
     return !pq_.empty() ? pq_.top().min_metric : INFU32;
   }
 
-  RVisIdx QueueMinVIdx() { return !pq_.empty() ? pq_.top().ve_idx : RVisIdx(INFU32); }
+  RVisIdx QueueMinVIdx() {
+    return !pq_.empty() ? pq_.top().ve_idx : RVisIdx(INFU32);
+  }
 
   uint32_t QueueSize() { return pq_.size(); }
 
@@ -298,11 +300,13 @@ class MMClusterRouter final {
         const uint32_t pos = target_anchor_.FindPosByEdgeIdx(mc_, edge_idx);
         CHECK_NE_S(pos, INFU32);
         const auto fraction = target_anchor_.edge_points().at(pos).to_fraction;
-        new_metric = prev_v.min_metric + decompress_turn_cost(turn_costs[off]) +
+        new_metric = prev_v.min_metric +
+                     decompress_turn_cost(turn_costs[off]).ms() +
                      static_cast<uint32_t>(
                          mcw_.edge_weights.at(edge_idx.v()) * fraction + 0.5);
       } else {
-        new_metric = prev_v.min_metric + decompress_turn_cost(turn_costs[off]) +
+        new_metric = prev_v.min_metric +
+                     decompress_turn_cost(turn_costs[off]).ms() +
                      mcw_.edge_weights.at(edge_idx.v());
       }
 
@@ -392,8 +396,8 @@ class MMClusterRouter final {
           CHECK_EQ_S(res.start.fe.edge_idx(mc_), GetGraphEdgeIdx(v_idx));
         } else {
           MNodeIdx from_node_idx = res.full_edges.back().target_idx(mc_);
-          res.full_edges.push_back(
-              MMFullEdge::CreateWithEdgeIdx(mc_, from_node_idx, GetGraphEdgeIdx(v_idx)));
+          res.full_edges.push_back(MMFullEdge::CreateWithEdgeIdx(
+              mc_, from_node_idx, GetGraphEdgeIdx(v_idx)));
         }
         const MMClusterRouter::VisitedEdge& ve = GetVEdge(v_idx);
         res.min_metrics.push_back(ve.min_metric);
@@ -473,7 +477,9 @@ class MMClusterRouter final {
 
   const GeoAnchor& GetStartAnchor() const { return start_anchor_; }
 
-  const VisitedEdge& GetVEdge(RVisIdx v_idx) const { return vis_.at(v_idx.v()); }
+  const VisitedEdge& GetVEdge(RVisIdx v_idx) const {
+    return vis_.at(v_idx.v());
+  }
 
   inline bool IsOutgoingEdge(RVisIdx v_idx) {
     MEdgeIdx base_idx = GetBaseIdx(v_idx);
@@ -517,8 +523,8 @@ class MMClusterRouter final {
   // edge is allocated at the end of the vector and added to the list of edges
   // at this specific base index.
   inline RVisIdx FindOrAllocEdge(const MEdgeIdx v_base_idx,
-                                  bool in_target_restricted_access_area,
-                                  const ActiveCtrs& ctrs) {
+                                 bool in_target_restricted_access_area,
+                                 const ActiveCtrs& ctrs) {
     VisitedEdge& v_base = vis_.at(v_base_idx.v());
     // Slot unused?
     if (v_base.next == RVisIdx(INFU32)) {

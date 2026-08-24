@@ -46,7 +46,7 @@ class SingleSourceEdgeDijkstra {
   // attribute "next".
   struct VisitedEdge {
     // The minimal weight seen so far. INFU32 if unused.
-    std::uint32_t min_weight; 
+    std::uint32_t min_weight;
     // Previous edge entry. INFU32 if prevous entry does not exist.
     std::uint32_t from_v_idx;
     std::uint32_t active_ctr_id : 30;
@@ -218,8 +218,8 @@ class SingleSourceEdgeDijkstra {
         }
 
         const uint32_t new_weight =
-            prev_v.min_weight + decompress_turn_cost(tcd.turn_costs.at(off)) +
-            e.weight;
+            prev_v.min_weight +
+            decompress_turn_cost(tcd.turn_costs.at(off)).ms() + e.weight;
         const bool in_target_raa =
             opt.handle_restricted_access &&
             (prev_v.in_target_restricted_access_area ||

@@ -10,8 +10,8 @@
 #include "base/deduper_with_ids.h"
 #include "base/deg_coord.h"
 #include "base/frequency_table.h"
-#include "base/index_type.h"
 #include "base/mmap_base.h"
+#include "base/uint_types.h"
 #include "geometry/geometry.h"
 #include "graph/graph_def.h"
 
@@ -92,7 +92,7 @@ struct MMIncomingEdge {
   MNodeIdx from_node_idx;
   uint32_t to_cluster_id;  // The "home" cluster.
   MNodeIdx to_node_idx;
-  MEdgeIdx edge_idx;    // Index of this edge in the edge array.
+  MEdgeIdx edge_idx;     // Index of this edge in the edge array.
   uint16_t in_edge_pos;  // Position of this entry in the containing vector.
   // OSM ids to help connecting clusters.
   int64_t from_node_id;
@@ -114,7 +114,7 @@ struct MMOutgoingEdge {
   MNodeIdx from_node_idx;
   uint32_t to_cluster_id;  // The cluster id of the other cluster.
   MNodeIdx to_node_idx;
-  MEdgeIdx edge_idx;     // Index of this edge in the edge array.
+  MEdgeIdx edge_idx;      // Index of this edge in the edge array.
   uint16_t out_edge_pos;  // Position of this entry in the containing vector.
   // OSM ids to help connecting clusters.
   int64_t from_node_id;
@@ -690,10 +690,10 @@ struct MMFullEdge {
     return ToOutgoingEdge(mc(mg));
   }
   // Get the turn costs between this edge and 'to_edge'.
-  uint32_t GetTurnCost(const MMCluster& mc, const MMFullEdge& to_edge) const {
+  DurationMS GetTurnCost(const MMCluster& mc, const MMFullEdge& to_edge) const {
     CHECK_EQ_S(cluster_id, mc.cluster_id);
     if (to_edge.cluster_id != cluster_id) {
-      return 0;  // TODO: fix cross cluster case.
+      return DurationMS(0u);  // TODO: fix cross cluster case.
     }
     // Check that to_edge is actually a connected edge.
     CHECK_EQ_S(target_idx(mc), to_edge.from_node_idx);
@@ -701,7 +701,7 @@ struct MMFullEdge {
     CHECK_LT_S(to_edge.edge_offset, turn_cost_arr.size());
     return decompress_turn_cost(turn_cost_arr[to_edge.edge_offset]);
   }
-  uint32_t GetTurnCost(const MMGraph& mg, const MMFullEdge& to_edge) const {
+  DurationMS GetTurnCost(const MMGraph& mg, const MMFullEdge& to_edge) const {
     return GetTurnCost(mc(mg), to_edge);
   }
 

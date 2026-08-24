@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "base/uint_types.h"
 #include "geometry/distance.h"
 #include "graph/graph_def.h"
 #include "graph/graph_def_utils.h"
@@ -29,7 +30,7 @@ class CrossingHelper {
 
     std::string DebugStr(const Graph& g) const {
       return absl::StrFormat(
-          "Connection node:%lu %s hw:%s prio:%u bearing:%u rank%u",
+          "Connection node:%lu %s hw:%s prio:%u bearing:%u rank:%u",
           GetGNodeIdSafe(g, node_idx), dir == Incoming ? "IN" : "OUT",
           hw == HW_MAX ? "HW_MAX" : HighwayLabelToString(hw), road_priority,
           bearing, rank);
@@ -328,33 +329,61 @@ class CrossingHelper {
   }
 };
 
-inline uint32_t CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p,
-                             bool debug) {
-  uint32_t cost = 0;
+inline DurationMS CrossingCost(const Graph& g, VEHICLE vt, const N3Path& n3p,
+                               bool debug) {
+  DurationMS cost(0u);
 
+  if (debug) {
+    LOG_S(INFO) << "Compute crossing cost for " << n3p.DebugStr(g);
+  }
   // crossing.
   if (gnode_num_unique_edges(g, n3p.node1_idx) <= 2) {
     // Most simple case: a street that just continues, i.e. no real crossing.
+    if (debug) {
+      LOG_S(INFO) << "Return cost " << cost;
+    }
     return cost;
   }
 
   const CrossingHelper hlp(g, n3p);
   std::vector<CrossingHelper::ConflictPath> conflicts;
   hlp.FindConflictPaths(&conflicts);
+  if (debug) {
+    LOG_S(INFO) << "Incoming: " << hlp.conn(0).DebugStr(g);
+    LOG_S(INFO) << "Outgoing: " << hlp.conn(1).DebugStr(g);
+  }
 
   for (const CrossingHelper::ConflictPath& confl : conflicts) {
+    if (debug) {
+      LOG_S(INFO) << "Conflict Incoming: "
+                  << hlp.conn(confl.in_conn_pos).DebugStr(g);
+      LOG_S(INFO) << "Conflict Outgoing: "
+                  << hlp.conn(confl.out_conn_pos).DebugStr(g);
+    }
+    uint32_t new_cost = 0;
     if (confl.higher_prio) {
-      cost += (confl.type == CrossingHelper::Merge) ? 3000 : 6000;
+      new_cost = (confl.type == CrossingHelper::Merge) ? 3000 : 6000;
     } else {
-      cost += 100;
+      new_cost = 100;
+    }
+    // Weight the penalty by traffic on both incoming and outgoing leg.
+    const double fraction =
+        (HighwayToTrafficFraction(hlp.conn(confl.in_conn_pos).hw) +
+         HighwayToTrafficFraction(hlp.conn(confl.out_conn_pos).hw)) /
+        2.0;
+    new_cost = new_cost * fraction;
+    cost += new_cost;
+
+    if (debug) {
+      LOG_S(INFO) << "Increase cost by " << new_cost << " to " << cost;
     }
   }
 
-  /*
-  LOG_S(INFO) << absl::StrFormat(
-      "Crossing connections:%lu conflicts:%lu cost:%u", hlp.conns().size(),
-      conflicts.size(), cost);
-  */
+  if (debug) {
+    LOG_S(INFO) << absl::StrFormat(
+        "Crossing connections:%lu conflicts:%lu cost:%u", hlp.conns().size(),
+        conflicts.size(), cost.ms());
+  }
 
   return cost;
 }

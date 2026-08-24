@@ -809,7 +809,6 @@ void TestGraph() {
   LOG_S(INFO) << "TestGraph() finished";
 }
 
-
 void TestUtil() {
   LOG_S(INFO) << "TestUtil() started";
   CHECK_EQ_S(WildCardToRegex("/aha/*.c?v"), R"(/aha/.*\.c.v)");
@@ -1192,38 +1191,48 @@ void TestClosestPoint() {
 
 void TestTurningCostCompression() {
   FUNC_TIMER();
-  CHECK_EQ_S(compress_turn_cost(0), 0);
-  CHECK_EQ_S(compress_turn_cost(100), 1);
-  CHECK_EQ_S(compress_turn_cost(200), 2);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(0u)), 0);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(100u)), 1);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(200u)), 2);
 
-  CHECK_EQ_S(compress_turn_cost(11600), 30);
-  CHECK_EQ_S(compress_turn_cost(12300), 30);
-  CHECK_EQ_S(compress_turn_cost(12400), 31);
-  CHECK_EQ_S(compress_turn_cost(13100), 31);
-  CHECK_EQ_S(compress_turn_cost(13200), 31);
-  CHECK_EQ_S(compress_turn_cost(13300), 31);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(11600u)), 30);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(12300u)), 30);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(12400u)), 31);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(13100u)), 31);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(13200u)), 31);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(13300u)), 31);
 
-  CHECK_EQ_S(compress_turn_cost(34694900 + (45103400 - 34694900) / 2 - 1), 61);
-  CHECK_EQ_S(compress_turn_cost(34694900 + (45103400 - 34694900) / 2 + 1), 62);
-  CHECK_EQ_S(compress_turn_cost(45103400), 62);
-  CHECK_EQ_S(compress_turn_cost(45103400 + 1), 63);
+  CHECK_EQ_S(
+      compress_turn_cost(DurationMS(34694900 + (45103400 - 34694900) / 2 - 1u)),
+      61);
+  CHECK_EQ_S(
+      compress_turn_cost(DurationMS(34694900 + (45103400 - 34694900) / 2 + 1u)),
+      62);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(45103400u)), 62);
+  CHECK_EQ_S(compress_turn_cost(DurationMS(45103400 + 1u)), 63);
 
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(0)), 0);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(100)), 100);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(200)), 200);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(0u))), 0);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(100u))), 100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(200u))), 200);
 
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(29000)), 29100);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(29100)), 29100);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(29200)), 29100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(29000u))),
+             29100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(29100u))),
+             29100);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(29200u))),
+             29100);
 
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103300)), 45103400);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103400)), 45103400);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(45103401)),
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(45103300u))),
+             45103400);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(45103400u))),
+             45103400);
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(45103401u))),
              TURN_COST_INFINITY);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(100'000'000)),
+  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(DurationMS(100'000'000u))),
              TURN_COST_INFINITY);
-  CHECK_EQ_S(decompress_turn_cost(compress_turn_cost(4'000'000'000u)),
-             TURN_COST_INFINITY);
+  CHECK_EQ_S(
+      decompress_turn_cost(compress_turn_cost(DurationMS(4'000'000'000u))),
+      TURN_COST_INFINITY);
 }
 
 void TestSmallVector() {

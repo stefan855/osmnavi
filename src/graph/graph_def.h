@@ -241,7 +241,7 @@ constexpr std::uint32_t MAX_EDGE_DISTANCE_CM_BITS = 32;
 // roughly 1342 km.
 constexpr std::uint32_t MAX_EDGE_DISTANCE_CM =
     (1ull << MAX_EDGE_DISTANCE_CM_BITS) - 1;
-constexpr uint32_t MAX_TURN_COST_IDX_BITS = 17;
+constexpr uint32_t MAX_TURN_COST_IDX_BITS = 19;
 constexpr uint32_t MAX_TURN_COST_IDX = (1ull << MAX_TURN_COST_IDX_BITS) - 1;
 constexpr uint32_t INVALID_TURN_COST_IDX = MAX_TURN_COST_IDX;
 
