@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "base/uint_types.h"
+#include "base/index_type.h"
 #include "geometry/distance.h"
 #include "graph/graph_def.h"
 #include "graph/graph_def_utils.h"

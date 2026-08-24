@@ -8,7 +8,7 @@
 #include "absl/strings/str_split.h"
 #include "algos/restricted_access_edges.h"
 #include "base/huge_bitset.h"
-#include "base/uint_types.h"
+#include "base/index_type.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"
 #include "graph/build_clusters.h"

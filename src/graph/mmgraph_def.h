@@ -11,7 +11,7 @@
 #include "base/deg_coord.h"
 #include "base/frequency_table.h"
 #include "base/mmap_base.h"
-#include "base/uint_types.h"
+#include "base/index_type.h"
 #include "geometry/geometry.h"
 #include "graph/graph_def.h"
 

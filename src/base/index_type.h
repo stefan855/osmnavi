@@ -10,7 +10,7 @@
 
 // This is only needed to create separate template instances that can not be
 // mixed but have the same behavior.
-enum class UIntTypeName {
+enum class IndexTypeName {
   GNodeIdx,  // Currently unused.
   GEdgeIdx,  // Currently unused.
   GWayIdx,
@@ -20,34 +20,34 @@ enum class UIntTypeName {
   RVisIdx,     // Used in routing code.
 };
 
-template <typename T, UIntTypeName type_name>
-class UIntType {
+template <typename T, IndexTypeName type_name>
+class IndexType {
  private:
   static_assert(std::is_unsigned_v<T>);
-  using SelfType = UIntType<T, type_name>;
+  using SelfType = IndexType<T, type_name>;
 
  public:
-  constexpr UIntType() : UIntType(0u) {}
-  constexpr explicit UIntType(uint16_t c) : v_(static_cast<T>(c)) {
+  constexpr IndexType() : IndexType(0u) {}
+  constexpr explicit IndexType(uint16_t c) : v_(static_cast<T>(c)) {
     if constexpr (sizeof(T) < sizeof(uint16_t)) {
       assert(c <= std::numeric_limits<T>::max());
     }
   }
-  constexpr explicit UIntType(uint32_t c) : v_(static_cast<T>(c)) {
+  constexpr explicit IndexType(uint32_t c) : v_(static_cast<T>(c)) {
     if constexpr (sizeof(T) < sizeof(uint32_t)) {
       assert(c <= std::numeric_limits<T>::max());
     }
   }
-  constexpr explicit UIntType(uint64_t c) : UIntType(static_cast<T>(c)) {
+  constexpr explicit IndexType(uint64_t c) : IndexType(static_cast<T>(c)) {
     if constexpr (sizeof(T) < sizeof(uint64_t)) {
       assert(c <= std::numeric_limits<T>::max());
     }
   }
   // Unsigned integers are probably an error, so forbid them here.
-  explicit UIntType(int8_t c) = delete;
-  explicit UIntType(int16_t c) = delete;
-  explicit UIntType(int32_t c) = delete;
-  explicit UIntType(int64_t c) = delete;
+  explicit IndexType(int8_t c) = delete;
+  explicit IndexType(int16_t c) = delete;
+  explicit IndexType(int32_t c) = delete;
+  explicit IndexType(int64_t c) = delete;
 
   // Coordinate value as integer.
   constexpr inline T v() const { return v_; }
@@ -139,11 +139,11 @@ class UIntType {
   T v_;
 };
 
-using GWayIdx = UIntType<uint32_t, UIntTypeName::GWayIdx>;
+using GWayIdx = IndexType<uint32_t, IndexTypeName::GWayIdx>;
 static_assert(sizeof(GWayIdx) == 4);
 CHECK_IS_MM_OK(GWayIdx);
 
-using MWayIdx = UIntType<uint32_t, UIntTypeName::MWayIdx>;
-using MNodeIdx = UIntType<uint32_t, UIntTypeName::MNodeIdx>;
-using MEdgeIdx = UIntType<uint32_t, UIntTypeName::MEdgeIdx>;
-using RVisIdx = UIntType<uint32_t, UIntTypeName::RVisIdx>;
+using MWayIdx = IndexType<uint32_t, IndexTypeName::MWayIdx>;
+using MNodeIdx = IndexType<uint32_t, IndexTypeName::MNodeIdx>;
+using MEdgeIdx = IndexType<uint32_t, IndexTypeName::MEdgeIdx>;
+using RVisIdx = IndexType<uint32_t, IndexTypeName::RVisIdx>;

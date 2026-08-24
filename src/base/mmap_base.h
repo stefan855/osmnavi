@@ -14,7 +14,7 @@
 #include "absl/strings/str_cat.h"
 #include "base/deg_coord.h"
 #include "base/encode_coords.h"
-#include "base/uint_types.h"
+#include "base/index_type.h"
 #include "base/util.h"
 #include "base/varbyte.h"
 #include "graph/graph_def.h"
@@ -214,7 +214,7 @@ class MMCompressedUIntVecTmpl {
     if constexpr (std::is_unsigned_v<TPos>) {
       pos = pos_typed;
     } else {
-      // Works for IndexType defined in uint_types.h
+      // Works for IndexType defined in index_type.h
       pos = pos_typed.v();
     }
 
@@ -455,7 +455,7 @@ struct MMGroupedOSMIds {
     if constexpr (std::is_unsigned_v<TPos>) {
       pos = pos_typed;
     } else {
-      // Works for IndexType defined in uint_types.h
+      // Works for IndexType defined in index_type.h
       pos = pos_typed.v();
     }
     CHECK_LT_S(pos, num__);
