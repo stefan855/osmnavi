@@ -128,8 +128,10 @@ inline constexpr DurationMS decompress_turn_cost(uint32_t compressed_cost) {
 // Example for a curve with length 100m and 90 degree change in direction:
 //   v-max = 63.615 km/h = 3.6 * math.sqrt(0.5*9.81*100/(90*math.pi/180))
 inline double MaxCurveVelocity(DistanceType arc_length, int32_t turn_angle) {
-  return std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * arc_length.meters()) /
-                   (std::fabs(turn_angle) * std::numbers::pi / 180.0));
+  return turn_angle == 0
+             ? 200.0
+             : std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * arc_length.meters()) /
+                         (std::fabs(turn_angle) * std::numbers::pi / 180.0));
 }
 
 struct VehicleAccelerations {
@@ -185,10 +187,10 @@ namespace {
 
 // How much time is needed for 'distance' at static 'speed'?
 inline DurationMS TimeForDistance(DistanceType distance, double speed) {
+  CHECK_GT_S(speed, 0.0);
   // Use use t = s / v (from s = v * t).
   double tsec = distance.meters() / (speed / 3.6);
   int64_t ms = std::lround(tsec * 1000.0);
-  CHECK_GE_S(ms, 0) << tsec;
   return DurationMS(static_cast<uint64_t>(ms));
 }
 
@@ -199,8 +201,9 @@ inline double ComputeAverageSpeed(DistanceType d0, double speed0,
   DurationMS t0 = TimeForDistance(d0, speed0);
   DurationMS t1 = TimeForDistance(d1, speed1);
   // s=v*t ==> v=s/t.
-  CHECK_GT_S(t0.seconds() + t1.seconds(), 0.0);
-  return 3.6 * (d0.meters() + d1.meters()) / (t0.seconds() + t1.seconds());
+  const double t_sum = t0.seconds() + t1.seconds();
+  CHECK_GT_S(t_sum, 0.0) << d0 << " " << speed0 << " " << d1 << " " << speed1;
+  return 3.6 * (d0.meters() + d1.meters()) / t_sum;
 }
 
 // Compute the distance for accelerating or decelerating a vehicle from
@@ -221,6 +224,7 @@ inline DistanceType DistanceForSpeedChange(double speed0_kmh, double speed1_kmh,
                                            double a) {
   CHECK_GE_S(speed0_kmh, 0.0);
   CHECK_GE_S(speed1_kmh, 0.0);
+  CHECK_NE_S(a, 0.0);
   CHECK_EQ_S(speed1_kmh > speed0_kmh, a > 0.0)
       << "speed1_kmh:" << speed1_kmh << " speed0_kmh:" << speed0_kmh
       << " a:" << a;
@@ -357,7 +361,7 @@ inline double avg_speed_after_curve(DistanceType distance,
   // Acceleration is positive.
   const double final_speed =
       SpeedAfterDistance(max_speed_curve, distance, a_accel);
-  const double avg_speed = (max_speed_curve + final_speed) / 2;
+  const double avg_speed = (max_speed_curve + final_speed) / 2.0;
   return avg_speed;
 }
 
@@ -390,7 +394,10 @@ inline CurveStats ComputeCurveLoss(double maxspeed0, double maxspeed1,
   // Assume that the angle has to be driven in 10m, i.e. 5m before and 5m
   // after the curve point.
   const double curve_speed =
-      AvgDriverFactor * MaxCurveVelocity(DistanceType(10u * 100u), turn_angle);
+      (turn_angle == 0)
+          ? maxspeed0
+          : AvgDriverFactor *
+                MaxCurveVelocity(DistanceType(10u * 100u), turn_angle);
 
   // LOG_S(INFO) << "CC1: length0:" << length0 << " length1:" << length1;
   CurveStats res = {.avg_speed_in = avg_speed_before_curve(

@@ -58,6 +58,11 @@ add_compile_options(-O3)
 #     > gdb ./build_graph_main
 #     > run <args>
 #     > when program halts with error, enter 'bt'
+#     > To see more information: 'bt full'
+#     > To inspect one stack frame:
+#     >   frame <N>
+#     >   info args
+#     >   info locals
 #
 # add_compile_options(-O0)
 # add_compile_options(-ggdb)
