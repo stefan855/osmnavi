@@ -43,18 +43,19 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 1. Implement a routing engine using the memory mapped file.
 1. Serve overlay tiles (car graph, Louvain graph, ...) from the memory mapped file instead of csv files.
 1. Add shape node coordinates to the memory mapped file. Shape nodes exist in OSM data to "shape" the curvature of a street. They are omitted from the routing graph itself, because they are not needed to find shortest routes.
-2. Improve routing: Display shape coordinates (street curvature) for start/end segment.
-  
+2. Improve routing: Display shape coordinates (street curvature) for the route.
+3. Concatenate consecutive street segments of the same street in returned routes.
+4. Compute speed reduction for edges with shape nodes (depending on curvature).
+
 ## Current Tasks
 * Fix CrossingCost() to compute better turn costs at crossings. Currently, going straight on a maior street incurs costs when a minor street enters from either side.
 * Compute different turn costs for a left turn vs. a right turn. This also depends on the driving mode in the country (left/right).
-* Compute speed reduction for roads with shape nodes depending on curvature.
-* Improve routing: Concatenate consecutive street segments of the same street in returned routes.
-* Improve routing: Calculate angles at transitions, say things like "turn right on ..."
+* Improve routing description: Say things like "turn right on ..."
 * Fix unrestricted areas behind restricted areas.
+* Ignore dead-end when possible in routing (should speed up routing).
 * Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
 * Remove the serialized graph, it is replaced by the memory mapped graph.
-* Improve routing: Add A* routing to mm_routing_server.
+* Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are only useful for the user experience during navigation. At least find out what needs to be done.
 
 ## Tasks ahead
 2. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
@@ -65,8 +66,8 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 3. Experiment and potentially replace the Louvain clustering algorithm with a MaximumFlow/MinCut based algorithm, which should provide better clusters. See [Schild, Aaron, and Christian Sommer. "On balanced separators in road networks.", 2015](https://aschild.github.io/papers/roadseparator.pdf)
 1. Support routing conditions from users, for instance "avoid toll roads", "stay withing country borders" or "only paved or better ways".
 1. Support dynamic data such as traffic jams. This is similar to the previous point, since both require recomputation of travel times within clusters.
-1. Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are only useful for the user experience during navigation.
 1. Experiment with SIMD parallelization primitives available on modern processors, especially for cluster node travel time computation.
+2. Improve routing: Add A* routing to mm_routing_server.
 
 ## Installation hints
 1. Code is developed on a 64-bit PC (AMD64) using Ubuntu Linux.
