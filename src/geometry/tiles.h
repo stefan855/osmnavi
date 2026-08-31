@@ -193,17 +193,21 @@ using EdgeColorFunc =
     std::function<int(const MMCluster& mc, MEdgeIdx edge_idx)>;
 
 using EdgeSelectFunc = std::function<bool(
-    const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx)>;
+    const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx, int zoom)>;
 
-bool edge_select_all(const MMCluster& mc, MNodeIdx from_idx,
-                     MEdgeIdx edge_idx) {
-  return true;
+bool edge_select_for_zoom(const MMCluster& mc, MNodeIdx from_idx,
+                          MEdgeIdx edge_idx, int zoom) {
+  if (zoom > 7) {
+    return true;
+  }
+  HIGHWAY_LABEL hw = mc.get_wsa(mc.edge_to_way.at(edge_idx)).highway_label_;
+  return (zoom > 5 && hw <= HW_TERTIARY) || (hw <= HW_PRIMARY);
 }
 
 std::string CreatePNGInternal(
     const MMGraphTileData& d, int zoom, int tile_x, int tile_y,
     EdgeColorFunc edge_color_func,
-    EdgeSelectFunc edge_select_func = edge_select_all) {
+    EdgeSelectFunc edge_select_func = edge_select_for_zoom) {
   PNGContext pd(zoom, tile_x, tile_y);
 
   {
@@ -229,7 +233,7 @@ std::string CreatePNGInternal(
                                                      latlon0.lon.AsDouble());
         for (uint32_t idx : mc.edge_indices(node_idx)) {
           const MEdgeIdx edge_idx(idx);
-          if (!edge_select_func(mc, node_idx, edge_idx)) {
+          if (!edge_select_func(mc, node_idx, edge_idx, zoom)) {
             continue;
           }
           const LatLon latlon1 =
@@ -283,33 +287,31 @@ std::string CreateMMGraphPNG(const MMGraphTileData& d, std::string what,
   LOG_S(INFO) << absl::StrFormat("<%s> zoom:%d tile_x/y:(%d,%d)", what, zoom,
                                  tile_x, tile_y);
   if (what == "graph_motorcar") {
-    return CreatePNGInternal(
-        d, zoom, tile_x, tile_y,
-        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int {
-          int color = BLUE;
-          if (mc.get_edge(edge_idx).bridge()) {
-            color = RED;
-          } else if (mc.get_edge(edge_idx).dead_end()) {
-            color = GREEN;
-          }
-          return color;
-        });
+    return CreatePNGInternal(d, zoom, tile_x, tile_y,
+                             [](const MMCluster& mc, MEdgeIdx edge_idx) -> int {
+                               int color = BLUE;
+                               if (mc.get_edge(edge_idx).bridge()) {
+                                 color = RED;
+                               } else if (mc.get_edge(edge_idx).dead_end()) {
+                                 color = GREEN;
+                               }
+                               return color;
+                             });
   } else if (what == "clusters") {
-    return CreatePNGInternal(
-        d, zoom, tile_x, tile_y,
-        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int {
-          if (mc.get_edge(edge_idx).cross_cluster_edge()) {
-            return MAGENTA;
-          } else {
-            return mc.color_no % NUM_COLORS;
-          }
-        });
+    return CreatePNGInternal(d, zoom, tile_x, tile_y,
+                             [](const MMCluster& mc, MEdgeIdx edge_idx) -> int {
+                               if (mc.get_edge(edge_idx).cross_cluster_edge()) {
+                                 return MAGENTA;
+                               } else {
+                                 return mc.color_no % NUM_COLORS;
+                               }
+                             });
   } else if (what == "restricted") {
     return CreatePNGInternal(
         d, zoom, tile_x, tile_y,
         [](const MMCluster& mc, MEdgeIdx edge_idx) -> int { return BROWN; },
-        [](const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx)
-            -> bool { return mc.get_edge(edge_idx).restricted(); });
+        [](const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx,
+           int zoom) -> bool { return mc.get_edge(edge_idx).restricted(); });
   } else {
     LOG_S(INFO) << "not supported: " << what;
     return "";

@@ -10,14 +10,14 @@
 #include "base/deduper_with_ids.h"
 #include "base/deg_coord.h"
 #include "base/frequency_table.h"
-#include "base/mmap_base.h"
 #include "base/index_type.h"
+#include "base/mmap_base.h"
 #include "geometry/geometry.h"
 #include "graph/graph_def.h"
 
 constexpr uint64_t kMMMagic = 7715514337782280064ull;
 constexpr uint32_t kMMVersionMajor = 0;
-constexpr uint32_t kMMVersionMinor = 8;
+constexpr uint32_t kMMVersionMinor = 9;
 
 // Stores basic node data in an uint64_t.
 struct MMNode {
@@ -156,6 +156,12 @@ struct MMBoundingRect {
 // file.
 struct MMCluster {
   uint32_t cluster_id;
+
+  // "up pointer" to the MMGraph that contains this cluster.
+  const MMGraph& mg() const {
+    return *((const MMGraph*)ABS_BLOB_PTR(this, relative_mg_offset__));
+  }
+
   // The "color" of a cluster. A small number drawn in such a way that adjacent
   // clusters have different numbers.
   uint16_t color_no = 0;
@@ -186,6 +192,7 @@ struct MMCluster {
   // Cast to MMEdge to write or read.
   MMCompressedUIntVecTmpl<uint64_t, MEdgeIdx> edges;
   MMCompressedUIntVecTmpl<DistanceType, MEdgeIdx> edge_to_distance;
+  MMCompressedUIntVecTmpl<uint64_t, MEdgeIdx> edge_to_speed_fraction_idx;
   MMCompressedUIntVecTmpl<MWayIdx, MEdgeIdx> edge_to_way;
   MMCompressedUIntVecTmpl<uint64_t, MEdgeIdx> edge_to_turn_costs_pos;
   MMCompressedUIntVecTmpl<uint64_t, MWayIdx> way_to_wsa;
@@ -484,6 +491,12 @@ struct MMCluster {
   // find_from_node_of_edge_slow() to find the from_nide_idx for the edge,
   // therefore it is labelled slow.
   std::string DebugStringEdgeSlow(MEdgeIdx edge_idx) const;
+
+  // Negative offset from this cluster to the MMGraph object.
+  // TODO: A relative offset could be stored *once* for all clusters (instead of
+  // once for each cluster) at the beginning of the clusters array-blob in
+  // MMVec64.
+  int64_t relative_mg_offset__;
 };
 CHECK_IS_MM_OK(MMCluster);
 
@@ -507,6 +520,7 @@ struct MMGraph {
   // Sorted cluster bounding rectangles. Sort order is by increasing
   // bounding_rect.min.lon;
   MMVec64<MMClusterBoundingRect> sorted_bounding_rects;
+  double edge_speed_fraction[MAX_EDGE_SPEED_FRACTION_IDX + 1];
   MMVec64<MMCluster> clusters;
 
   const MMCluster& mc(uint32_t cluster_id) const {
@@ -618,6 +632,7 @@ struct MMGraph {
     DO_STATS_FOR_CLUSTER_ATTR(nodes, total);
     DO_STATS_FOR_CLUSTER_ATTR(edges, total);
     DO_STATS_FOR_CLUSTER_ATTR(edge_to_distance, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edge_to_speed_fraction_idx, total);
     DO_STATS_FOR_CLUSTER_ATTR(edge_to_way, total);
     DO_STATS_FOR_CLUSTER_ATTR(edge_to_turn_costs_pos, total);
     DO_STATS_FOR_CLUSTER_ATTR(way_to_wsa, total);

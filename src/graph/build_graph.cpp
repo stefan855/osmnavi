@@ -11,6 +11,7 @@
 #include "base/index_type.h"
 #include "geometry/distance.h"
 #include "geometry/polygon.h"
+#include "geometry/simplify_polyline.h"
 #include "graph/build_clusters.h"
 #include "graph/build_graph.h"
 #include "graph/data_block.h"
@@ -837,7 +838,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
              const bool has_reverse_shapes, const bool both_directions,
              const size_t way_idx, const DistanceType distance,
              uint16_t start_bearing, uint16_t target_bearing,
-             bool car_restricted) {
+             bool car_restricted, uint16_t speed_fraction_idx) {
   GNode& n = g.nodes.at(start_idx);
   const GNode& other = g.nodes.at(other_idx);
   CHECK_LE_S(distance.cm(), MAX_EDGE_DISTANCE_CM)
@@ -883,6 +884,7 @@ void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
   e.dead_end = 0;
   e.start_bearing = start_bearing;
   e.target_bearing = target_bearing;
+  e.speed_fraction_idx = speed_fraction_idx;
 
   const GWay& way = g.ways.at(way_idx);
   if ((way.priority_road_forward && !contra_way) ||
@@ -1123,9 +1125,13 @@ void AllocateEdgeArrays(GraphMetaData* meta) {
 // Data to create the edges that belong to the way.
 struct PopulateEdgeArraysWayData {
   std::vector<uint64_t> ids;
+  // Contains the index of the node in graph.nodes() or MAXU64 if the node is
+  // not part of the graph..
   std::vector<size_t> node_idx;
   std::vector<uint64_t> dist_sums;
   std::vector<uint16_t> bearings;
+  std::vector<NodeBuilder::VNode> vnodes;
+  DistanceType max_osm_edge_length;
 
   // Fill in the data of way 'way_idx'. All previous data is cleared.
   void Fill(const GraphMetaData& meta, const GWay& way, size_t way_idx) {
@@ -1135,6 +1141,8 @@ struct PopulateEdgeArraysWayData {
     dist_sums.clear();
     // Contains the bearing from [pos-1..pos]. The first value is 0.
     bearings.clear();
+    vnodes.clear();
+    max_osm_edge_length = DistanceType(0u);
     // Decode node_ids.
     std::uint64_t num_nodes;
     const std::uint8_t* ptr = meta.graph.way_node_ids.at(way_idx);
@@ -1155,16 +1163,18 @@ struct PopulateEdgeArraysWayData {
           ABORT_S() << absl::StrFormat("Way:%llu has missing node %llu", way.id,
                                        id);
         }
+        vnodes.push_back(node);
         // Sum up distance so far.
         if (prev_node.id != 0) {
           DistanceType distance = calculate_distance(prev_node.ll, node.ll);
           sum += distance.cm();
+          max_osm_edge_length = std::max(max_osm_edge_length, distance);
           bearing = true_north_bearing(prev_node.ll, node.ll, distance);
         }
         prev_node = node;
       } else {
         // TODO: if this never fires then create a CHECK() above.
-        ABORT_S() << "should be needed";
+        ABORT_S() << "should be in way_nodes_seen";
       }
       dist_sums.push_back(sum);
       bearings.push_back(bearing);
@@ -1173,12 +1183,13 @@ struct PopulateEdgeArraysWayData {
         CHECK_S(idx < meta.graph.nodes.size());
         node_idx.push_back(idx);
       } else {
-        node_idx.push_back(std::numeric_limits<size_t>::max());
+        node_idx.push_back(MAXU64);
       }
     }
     CHECK_EQ_S(ids.size(), dist_sums.size());
     CHECK_EQ_S(ids.size(), bearings.size());
     CHECK_EQ_S(ids.size(), node_idx.size());
+    CHECK_EQ_S(ids.size(), vnodes.size());
   }
 };
 
@@ -1187,17 +1198,33 @@ struct PopulateEdgeArraysWayData {
 double ComputeSpeedOnShapes(const PopulateEdgeArraysWayData& wd,
                             double maxspeed, size_t pos0, size_t pos1,
                             bool debug) {
-  uint16_t prev_bearing = wd.bearings.at(pos0 + 1);
-  DistanceType prev_dist(wd.dist_sums.at(pos0 + 1) - wd.dist_sums.at(pos0));
+  std::vector<NodeBuilder::VNode> coords(wd.vnodes.begin() + pos0,
+                                         wd.vnodes.begin() + (pos1 + 1));
+  // This function is also used when storing shape coordinates in the memory
+  // mapped file, so it using it here too should give a consistent view.
+  SimplifyPolyline(&coords);
+  if (coords.size() <= 2) {
+    // No shape coords left.
+    return maxspeed;
+  }
+
+  DistanceType prev_dist = calculate_distance(coords.at(0).ll, coords.at(1).ll);
+  uint16_t prev_bearing =
+      true_north_bearing(coords.at(0).ll, coords.at(1).ll, prev_dist);
+
   if (prev_dist == DistanceType(0u)) {
     LOG_S(INFO) << absl::StrFormat("Shape leg has distance 0: %lu->%lu",
                                    wd.ids.at(pos0), wd.ids.at(pos0 + 1));
   }
+
   DistanceType sum_dist(0u);
   double avg_speed = 0.0;
-  for (uint32_t k = pos0 + 2; k <= pos1; ++k) {
-    uint16_t bearing = wd.bearings.at(k);
-    DistanceType dist(wd.dist_sums.at(k) - wd.dist_sums.at(k - 1));
+  for (uint32_t k = 2; k < coords.size(); ++k) {
+    DistanceType dist =
+        calculate_distance(coords.at(k - 1).ll, coords.at(k).ll);
+    uint16_t bearing =
+        true_north_bearing(coords.at(k - 1).ll, coords.at(k).ll, dist);
+
     DistanceType dist_inc = prev_dist / 2 + dist / 2;
     if (dist_inc == DistanceType(0u)) {
       // Ignore curves with overall length 0, but log them for inspection.
@@ -1213,6 +1240,7 @@ double ComputeSpeedOnShapes(const PopulateEdgeArraysWayData& wd,
                            GetVHAccel(VH_MOTORCAR), GetVHDecel(VH_MOTORCAR));
       double speed = ComputeAverageSpeed(prev_dist / 2, stats.avg_speed_in,
                                          dist / 2, stats.avg_speed_out);
+
       if (sum_dist == 0u) {
         avg_speed = speed;
       } else {
@@ -1221,8 +1249,8 @@ double ComputeSpeedOnShapes(const PopulateEdgeArraysWayData& wd,
       sum_dist = sum_dist + dist_inc;
       if (debug) {
         LOG_S(INFO) << absl::StrFormat(
-            "PP %lu->%lu->%lu max:%.2f ta:%d speed_in:%.2f curve_speed:%.2f "
-            "speed_out:%.2f loss:%.2fs",
+            "PP %lu->%lu->%lu max:%.2f ta:%d speed_in:%.5f curve_speed:%.5f "
+            "speed_out:%.5f loss:%.2fs",
             wd.ids.at(k - 2), wd.ids.at(k - 1), wd.ids.at(k), maxspeed,
             angle_between_edges(prev_bearing, bearing), stats.avg_speed_in,
             stats.curve_speed, stats.avg_speed_out,
@@ -1237,11 +1265,13 @@ double ComputeSpeedOnShapes(const PopulateEdgeArraysWayData& wd,
     LOG_S(INFO) << absl::StrFormat("PP totals dist:%.2fm avg_speed:%.2f",
                                    sum_dist.meters(), avg_speed);
   }
+  CHECK_LE_S(avg_speed, maxspeed);
   return avg_speed;
 }
 
 void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
-                              GraphMetaData* meta, std::mutex& mut) {
+                              GraphMetaData* meta, std::mutex& mut,
+                              int thread_idx) {
   PopulateEdgeArraysWayData wd;
   Graph& g = meta->graph;
   // std::vector<uint64_t> ids;
@@ -1249,11 +1279,14 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
   // std::vector<uint64_t> dist_sums;
   // std::vector<uint16_t> bearings;
   absl::flat_hash_set<uint32_t> id_set;
+  BuildGraphStats& thread_stats = meta->thread_stats->at(thread_idx);
 
   // Compute distances between the nodes of the way and store
   for (size_t way_idx = start_pos; way_idx < stop_pos; ++way_idx) {
     const GWay& way = g.ways.at(way_idx);
     wd.Fill(*meta, way, way_idx);
+    thread_stats.max_osm_edge_length =
+        std::max(thread_stats.max_osm_edge_length, wd.max_osm_edge_length);
 
     // Go through 'needed' nodes (skip the others) and output edges.
     const WaySharedAttrs& wsa = GetWSA(g, way);
@@ -1289,7 +1322,9 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
           const uint16_t target_bearing = wd.bearings.at(pos);
           const bool has_shapes = pos - prev_pos > 1;
           // Compute curvature of the shape node part of the edge and
+          double speed_fraction = 1.0;
           if (has_shapes) {
+            // std::lock_guard<std::mutex> l(mut);
             uint16_t maxspeed =
                 std::max(GetRAFromWSA(wsa, VH_MOTORCAR, DIR_FORWARD).maxspeed,
                          GetRAFromWSA(wsa, VH_MOTORCAR, DIR_BACKWARD).maxspeed);
@@ -1298,6 +1333,9 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                 wd, maxspeed, prev_pos, pos,
                 /*debug=*/wd.ids.at(prev_pos) == 6606033034 ||
                     way.id == 546591943 || way.id == 43561981);
+            CHECK_LE_S(avg_speed, maxspeed);
+            speed_fraction = avg_speed / maxspeed;
+
             /*
             LOG_S(INFO) << "Shape speed ratio:" << avg_speed / maxspeed
                         << " way:" << way.id;
@@ -1307,6 +1345,15 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
           // Mutex-locked block.
           {
             std::lock_guard<std::mutex> l(mut);
+
+            // We want 1.0 to be surely mapped to MAX_EDGE_SPEED_FRACTION_IDX,
+            // so add a tiny number to it.
+            uint32_t speed_fraction_idx =
+                MAX_EDGE_SPEED_FRACTION_IDX * (speed_fraction + 0.000001);
+            CHECK_LE_S(speed_fraction_idx, MAX_EDGE_SPEED_FRACTION_IDX);
+            // Keep some stats, so we can compute the average for each bucket.
+            meta->edge_speed_fraction_stats[speed_fraction_idx].Add(
+                speed_fraction);
 
             if (prev_pos_is_repeated_id && has_shapes) {
               // This can only occur in ways that have a loop and that have a
@@ -1323,19 +1370,22 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/false, has_shapes,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/true, way_idx, distance,
-                      start_bearing, target_bearing, restr_car_f);
+                      start_bearing, target_bearing, restr_car_f,
+                      speed_fraction_idx);
               AddEdge(g, idx2, idx1, /*inverted=*/false,
                       /*contra_way=*/true, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/has_shapes,
                       /*both_directions=*/true, way_idx, distance,
                       invert_bearing(target_bearing),
-                      invert_bearing(start_bearing), restr_car_b);
+                      invert_bearing(start_bearing), restr_car_b,
+                      speed_fraction_idx);
             } else if (vt_forward) {
               AddEdge(g, idx1, idx2, /*inverted=*/false,
                       /*contra_way=*/false, has_shapes,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance,
-                      start_bearing, target_bearing, restr_car_f);
+                      start_bearing, target_bearing, restr_car_f,
+                      speed_fraction_idx);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
               // querying the way information works the same for inverted and
@@ -1345,7 +1395,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance,
                       invert_bearing(target_bearing),
-                      invert_bearing(start_bearing), restr_car_f);
+                      invert_bearing(start_bearing), restr_car_f,
+                      speed_fraction_idx);
             } else {
               CHECK_S(vt_backward) << way.id;
               AddEdge(g, idx2, idx1, /*inverted=*/false,
@@ -1353,7 +1404,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance,
                       invert_bearing(target_bearing),
-                      invert_bearing(start_bearing), restr_car_b);
+                      invert_bearing(start_bearing), restr_car_b,
+                      speed_fraction_idx);
               // Inverted edges should have the same contra way as the
               // non-inverted original edge. This way, using EDGE_DIR(e) when
               // querying the way information works the same for inverted and
@@ -1363,7 +1415,8 @@ void PopulateEdgeArraysWorker(size_t start_pos, size_t stop_pos,
                       /*contra_way=*/true, /*has_shapes=*/false,
                       /*has_reverse_shapes=*/false,
                       /*both_directions=*/false, way_idx, distance,
-                      start_bearing, target_bearing, restr_car_b);
+                      start_bearing, target_bearing, restr_car_b,
+                      speed_fraction_idx);
             }
           }
         }
@@ -1384,11 +1437,36 @@ void PopulateEdgeArrays(GraphMetaData* meta) {
   ArrayChunker chunker(meta->graph.ways.size(), 1024 * 16);
   for (const auto& chunk : chunker.chunks) {
     pool.AddWork([meta, &mut, &chunk](int thread_idx) {
-      PopulateEdgeArraysWorker(chunk.start, chunk.stop, meta, mut);
+      PopulateEdgeArraysWorker(chunk.start, chunk.stop, meta, mut, thread_idx);
     });
   }
   pool.Start(meta->opt.n_threads);
   pool.WaitAllFinished();
+
+  // Store edge_speed_fraction.
+  Graph* g = &meta->graph;
+  for (uint32_t i = 0; i <= MAX_EDGE_SPEED_FRACTION_IDX; ++i) {
+    const auto& mma = meta->edge_speed_fraction_stats[i];
+    g->edge_speed_fraction[i] = mma.Avg();
+    if (mma.Count() == 0) {
+      // No stats available.
+      g->edge_speed_fraction[i] = std::min(
+          1.0, (static_cast<double>(i) + 0.5) / MAX_EDGE_SPEED_FRACTION_IDX);
+    }
+    LOG_S(INFO) << absl::StrFormat(
+        "edge_speed_fraction[%u] num=%ld avg=%.5f corrected:%.5f", i,
+        mma.Count(), mma.Avg(), g->edge_speed_fraction[i]);
+  }
+  for (uint32_t i = 0; i < MAX_EDGE_SPEED_FRACTION_IDX; ++i) {
+    CHECK_GE_S(g->edge_speed_fraction[i],
+               static_cast<double>(i) / MAX_EDGE_SPEED_FRACTION_IDX)
+        << i;
+    CHECK_LT_S(g->edge_speed_fraction[i],
+               static_cast<double>(i + 1) / MAX_EDGE_SPEED_FRACTION_IDX)
+        << i;
+  }
+  CHECK_DOUBLE_EQ_S(g->edge_speed_fraction[MAX_EDGE_SPEED_FRACTION_IDX], 1.0,
+                    0.000001);
 }
 
 // Sort the edges [start..stop) in g->edges by ascending (target_idx,
@@ -1896,6 +1974,8 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.min_edge_length.cm());
   LOG_S(INFO) << absl::StrFormat("  Max edge length:  %12lld",
                                  stats.max_edge_length.cm());
+  LOG_S(INFO) << absl::StrFormat("  Max OSM edge length:  %8lld",
+                                 stats.max_osm_edge_length.cm());
   LOG_S(INFO) << absl::StrFormat(
       "  Avg edge length   %12.0f",
       (double)stats.sum_edge_length_cm / stats.num_edges_forward);

@@ -12,6 +12,7 @@
 #include "geometry/distance.h"
 #include "geometry/distance_to_segment.h"
 #include "geometry/geometry.h"
+#include "geometry/simplify_polyline.h"
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/mmgraph_def.h"
@@ -85,6 +86,7 @@ struct TmpClusterInfo {
   // Dim #edges
   std::vector<uint64_t> mm_edges;  // Type MMEdge.
   std::vector<uint32_t> mm_edge_to_distance;
+  std::vector<uint8_t> mm_edge_to_speed_fraction_idx;
   std::vector<uint32_t> mm_edge_to_way;
 
   // Dim #ways
@@ -136,7 +138,7 @@ inline void CollectClusterNodes(const Graph& g,
           const GNode& target = g.nodes.at(e.target_idx);
           if (e.unique_target && target.cluster_id != n.cluster_id) {
             CHECK_NE_S(target.cluster_id, INVALID_CLUSTER_ID);
-            // Add connected non-cluster node. This might create duplicate
+            // Add connected off-cluster node. This might create duplicate
             // entries, so we need to de-duplicate after sorting below.
             cluster_infos->at(n.cluster_id)
                 .cnode_to_gnode.push_back(e.target_idx);
@@ -187,6 +189,7 @@ void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
   tci->cedge_to_gedge_offset.reserve(expected_num_edges);
   tci->cedge_to_gway_idx.reserve(expected_num_edges);
   tci->mm_edge_to_distance.reserve(expected_num_edges);
+  tci->mm_edge_to_speed_fraction_idx.reserve(expected_num_edges);
   for (uint32_t c_pos = 0; c_pos < tci->cnode_to_gnode.size(); ++c_pos) {
     uint32_t gn_idx = tci->cnode_to_gnode.at(c_pos);
     const GNode& n = g.nodes.at(gn_idx);
@@ -219,6 +222,7 @@ void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
 
         ++edge_start_idx;
         tci->mm_edge_to_distance.push_back(e.distance.cm());
+        tci->mm_edge_to_speed_fraction_idx.push_back(e.speed_fraction_idx);
         tci->cedge_to_gedge_offset.push_back(gnode_edge_offset(g, gn_idx, e));
         tci->cedge_to_gway_idx.push_back(e.way_idx);
 
@@ -525,52 +529,6 @@ void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
   }
 }
 
-// Simplify a polyline by removing points that only deviate marginally from a
-// straight line. For this, for each sequence of three points, the perpendicular
-// distance of the middle point is computed, and also the angle
-void SimplifyPolyline(std::vector<NodeBuilder::VNode>* coords) {
-  static constexpr bool debug = false;
-  for (uint32_t pos = 0; pos < coords->size() - 2;) {
-    NodeBuilder::VNode A = coords->at(pos);
-    NodeBuilder::VNode M = coords->at(pos + 1);
-    NodeBuilder::VNode B = coords->at(pos + 2);
-
-    DistanceToSegment dts = FastPointToSegmentDistance(M.ll, A.ll, B.ll);
-
-    int32_t bearing1 = true_north_bearing(A.ll, M.ll);
-    int32_t bearing2 = true_north_bearing(M.ll, B.ll);
-    int32_t angle_at_m = std::abs(angle_between_edges(bearing1, bearing2));
-
-    if (debug) {
-      LOG_S(INFO) << absl::StrFormat(
-          "Distance of middle point d1:(%7d,%7d) d2:(%7d,%7d): %5.2fm "
-          "len1:%5.2fm len2:%5.2f angle:%d",
-          M.ll.lat.v() - A.ll.lat.v(), M.ll.lon.v() - A.ll.lon.v(),
-          B.ll.lat.v() - M.ll.lat.v(), B.ll.lon.v() - M.ll.lon.v(),
-          dts.distance_to_seg.meters(), calculate_distance(A.ll, M.ll).meters(),
-          calculate_distance(M.ll, B.ll).meters(), angle_at_m);
-      LOG_S(INFO) << absl::StrFormat("  Ids %ld -> %ld -> %ld", A.id, M.id,
-                                     B.id);
-    }
-
-    if ((dts.distance_to_seg.cm() <= 15 && angle_at_m <= 3) ||
-        (dts.distance_to_seg.cm() <= 19 && angle_at_m <= 1) ||
-        (dts.distance_to_seg.cm() <= 5 && angle_at_m <= 5)) {
-      if (debug) {
-        LOG_S(INFO) << "  Remove shape coord " << coords->size() << " -> "
-                    << coords->size() - 1;
-      }
-      coords->erase(coords->begin() + pos + 1);
-      // Stay at 'pos'
-    } else {
-      if (debug) {
-        LOG_S(INFO) << "  Keep shape coord " << coords->size();
-      }
-      ++pos;
-    }
-  }
-}
-
 // Store the shape coords of edges in the temporary cluster information.
 inline void FillTmpClusterShapeCoords(const Graph& g, TmpClusterInfo* tci) {
   struct DelShape {
@@ -781,6 +739,9 @@ void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mc,
 
   auto dist = mc.edge_to_distance.at(cedge_idx);
   CHECK_EQ_S(dist.cm(), fe.gedge(g).distance.cm());
+
+  auto speed_fraction_idx = mc.edge_to_speed_fraction_idx.at(cedge_idx);
+  CHECK_EQ_S(speed_fraction_idx, fe.gedge(g).speed_fraction_idx);
 }
 
 FullEdge find_full_gedge(const Graph& g, const TmpClusterInfo& tci,
@@ -902,7 +863,7 @@ void CheckShapeCoords(const TmpClusterInfo& tci, const MMCluster& mc) {
   }
 }
 
-void CheckMMCluster(const Graph& g, const MMCluster& mc,
+void CheckMMCluster(const Graph& g, const MMGraph& mg, const MMCluster& mc,
                     const TmpClusterInfo& tci) {
   FUNC_TIMER();
 
@@ -913,10 +874,12 @@ void CheckMMCluster(const Graph& g, const MMCluster& mc,
   LOG_S(INFO) << " num_inner_nodes:" << mc.num_inner_nodes;
   LOG_S(INFO) << " num_dead_end_nodes:" << mc.num_dead_end_nodes;
 
+  CHECK_EQ_S(&mg, &mc.mg());
+
   // Check OSM ids first, because other checks use them.
   compare_check_vectors<MNodeIdx>("grouped_node_to_osm_id",
-                                   mc.grouped_node_to_osm_id,
-                                   tci.mm_node_to_osm_id);
+                                  mc.grouped_node_to_osm_id,
+                                  tci.mm_node_to_osm_id);
   CHECK_EQ_S(mc.grouped_node_to_osm_id.size(), tci.mm_nodes.size());
 
   // way osm ids
@@ -1003,16 +966,19 @@ void CheckMMCluster(const Graph& g, const MMCluster& mc,
   }
 
   compare_check_vectors<MEdgeIdx>("edge_to_distance", mc.edge_to_distance,
-                                   tci.mm_edge_to_distance);
+                                  tci.mm_edge_to_distance);
+  compare_check_vectors<MEdgeIdx>("edge_to_speed_fraction_idx",
+                                  mc.edge_to_speed_fraction_idx,
+                                  tci.mm_edge_to_speed_fraction_idx);
 
   // edge_to_way
   compare_check_vectors<MEdgeIdx>("edge_to_way", mc.edge_to_way,
-                                   tci.mm_edge_to_way);
+                                  tci.mm_edge_to_way);
   CHECK_EQ_S(mc.edge_to_way.size(), tci.mm_edges.size());
 
   // way_to_wsa
   compare_check_vectors<MWayIdx>("way_to_wsa", mc.way_to_wsa,
-                                  tci.mm_way_to_wsa);
+                                 tci.mm_way_to_wsa);
   CHECK_EQ_S(mc.way_to_wsa.size(), tci.gway_to_cway.size());
 
   // way shared attrs
@@ -1081,7 +1047,7 @@ void CheckMMClusters(const Graph& g, const MMGraph& mg,
   for (uint32_t cluster_id = 0; cluster_id < mg.clusters.size(); ++cluster_id) {
     const TmpClusterInfo& tci = tmp_infos.at(cluster_id);
     const MMCluster& mc = mg.clusters.at(cluster_id);
-    pool.AddWork([&g, &mc, &tci](int) { CheckMMCluster(g, mc, tci); });
+    pool.AddWork([&g, &mg, &mc, &tci](int) { CheckMMCluster(g, mg, mc, tci); });
   }
   pool.Start(n_threads);
   pool.WaitAllFinished();
@@ -1108,6 +1074,9 @@ void CheckMMGraph(const Graph& g, const std::string& mm_path,
   CHECK_EQ_S(mmheader.version_major, kMMVersionMajor);
   CHECK_EQ_S(mmheader.version_minor, kMMVersionMinor);
   CHECK_EQ_S(mmheader.file_size, file_size);
+  for (uint32_t i = 0; i <= MAX_EDGE_SPEED_FRACTION_IDX; ++i) {
+    CHECK_EQ_S(mmheader.edge_speed_fraction[i], g.edge_speed_fraction[i]);
+  }
 
   LOG_S(INFO) << "Check " << mmheader.sorted_bounding_rects.size()
               << " sorted bounding rects";
@@ -1306,10 +1275,12 @@ void CheckMMGraph(const Graph& g, const std::string& mm_path,
 
 void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
                               int64_t global_object_offset, int fd) {
+  CHECK_GT_S(global_object_offset, 0);
   mmcluster->cluster_id = tci.cluster_id;
   mmcluster->color_no = tci.color_no;
   ComputeClusterNodeNumbers(tci, mmcluster);
   mmcluster->bounding_rect = tci.mm_bounding_rect;
+  mmcluster->relative_mg_offset__ = -global_object_offset;
 
   LOG_S(INFO) << absl::StrFormat(
       "Write cl:%u ic:%llu og:%llu n:%llu e:%llu w:%llu wsa:%llu tc:%llu "
@@ -1372,6 +1343,11 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
       "edge_to_distance",
       global_object_offset + offsetof(MMCluster, edge_to_distance), fd,
       tci.mm_edge_to_distance);
+
+  mmcluster->edge_to_speed_fraction_idx.WriteDataBlob(
+      "edge_to_speed_fraction_idx",
+      global_object_offset + offsetof(MMCluster, edge_to_speed_fraction_idx),
+      fd, tci.mm_edge_to_speed_fraction_idx);
 
   mmcluster->way_to_wsa.WriteDataBlob(
       "way_to_wsa", global_object_offset + offsetof(MMCluster, way_to_wsa), fd,
@@ -1537,6 +1513,9 @@ void WriteGraphToMMFile(const Graph& g, const std::string& mm_path,
   mmheader.version_major = kMMVersionMajor;
   mmheader.version_minor = kMMVersionMinor;
   mmheader.file_size = 0;
+  for (uint32_t i = 0; i <= MAX_EDGE_SPEED_FRACTION_IDX; ++i) {
+    mmheader.edge_speed_fraction[i] = g.edge_speed_fraction[i];
+  }
 
   std::vector<TmpClusterInfo> tmp_cluster_infos;
   CollectClusterNodes(g, &tmp_cluster_infos);

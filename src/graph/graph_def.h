@@ -129,7 +129,7 @@ CHECK_IS_MM_OK(WaySharedAttrs);
 
 inline bool operator==(const WaySharedAttrs& a, const WaySharedAttrs& b) {
   return a.highway_label_ == b.highway_label_ &&
-             memcmp(&a.ra, &b.ra, sizeof(a.ra)) == 0;
+         memcmp(&a.ra, &b.ra, sizeof(a.ra)) == 0;
 }
 
 namespace std {
@@ -249,6 +249,8 @@ constexpr uint32_t NUM_GEDGE_RESTRICTION_BITS = 3;
 constexpr uint32_t NUM_GEDGE_ROAD_PRIORITY_BITS = 3;
 // constexpr uint32_t NUM_GEDGE_TYPE_BITS = 3;
 
+constexpr uint16_t MAX_EDGE_SPEED_FRACTION_IDX = 15;
+
 struct GEdge {
   enum RESTRICTION : uint8_t {
     LABEL_UNSET = 0,
@@ -348,6 +350,15 @@ struct GEdge {
 
   std::uint16_t start_bearing : 9;
   std::uint16_t target_bearing : 9;
+
+  // A value [0..15] indicating the fraction of the way's maxspeed that can be
+  // achieved on this edge.
+  // How it is computed:
+  //   speed_fraction_idx = round(max_edge_speed/way.maxspeed * 15).
+  // How to use it:
+  //   max_edge_speed =
+  //      graph.speed_fraction_table[edge.speed_fraction_idx] * way.maxspeed
+  std::uint16_t speed_fraction_idx : 4;
 
   int16_t GetTurnAngle(const GEdge& to_edge) const {
     return angle_between_edges(target_bearing, to_edge.start_bearing);
@@ -457,6 +468,13 @@ struct Graph {
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
   std::vector<GEdge> edges;
+
+  // Table with average speed fractions [0..1] seen for every edge speed
+  // fraction bucket.
+  // A speed fraction < 1.0 indicates that the max average speed on the edge is
+  // fraction * way.maxspeed.
+  double edge_speed_fraction[MAX_EDGE_SPEED_FRACTION_IDX + 1];
+
   // Large components, sorted by decreasing size.
   std::vector<Component> large_components;
 
@@ -476,7 +494,7 @@ struct Graph {
   // compressed format. The memory is allocated by unaligned_pool_.
   // See GetGWayNodeIds() on how to use it.
   // Note: this is used during construction only and not stored in the
-  // serialized graph.
+  // final graph.
   std::vector<const uint8_t*> way_node_ids;
   // Set of osm way ids that have oneway set to "reversible". Entering such a
   // way cost a significant cost.

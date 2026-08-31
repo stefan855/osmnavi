@@ -203,7 +203,12 @@ inline double ComputeAverageSpeed(DistanceType d0, double speed0,
   // s=v*t ==> v=s/t.
   const double t_sum = t0.seconds() + t1.seconds();
   CHECK_GT_S(t_sum, 0.0) << d0 << " " << speed0 << " " << d1 << " " << speed1;
-  return 3.6 * (d0.meters() + d1.meters()) / t_sum;
+  double res = 3.6 * (d0.meters() + d1.meters()) / t_sum;
+  // Due to rounding errors in DistanceType and DurationMS the results can be
+  // slightly wrong, so make sure the returned speed is not too big..
+  return std::min(res, std::max(speed0, speed1));
+  // CHECK_S(res <= speed0 && res <= speed1)
+  //     << speed0 << " " << speed1 << " " << res;
 }
 
 // Compute the distance for accelerating or decelerating a vehicle from
@@ -235,21 +240,21 @@ inline DistanceType DistanceForSpeedChange(double speed0_kmh, double speed1_kmh,
       std::lround(std::abs(100.0 * (v1 * v1 - v0 * v0) / (2.0 * a)))));
 }
 
-// Starting with speed0 and acceleration acc over distance d, compute the
-// resulting speed.
+// Starting with speed_kmh and acceleration 'a' over distance 'distance',
+// compute the resulting speed.
 //
-// Check-fails if there is no solution (when 'acc' is too negative).
+// Check-fails if there is no solution (when 'a' is too negative).
 //
 // Formula:
 //     1) Solve the quadratic equation 0 = v0 * t + 1/2 * a * t^2 - dist
 //     2) t = -v0 +- sqrt(v0^2 + 2 * a * s) / a
 //     3) Put the positive t into v1 = v0 + a * t
 //     4) Simplify: v1 = sqrt(v0^2 + 2 * a * s)
-inline double SpeedAfterDistance(double speed0_kmh, DistanceType distance,
+inline double SpeedAfterDistance(double speed_kmh, DistanceType distance,
                                  double a) {
-  const double v0 = speed0_kmh / 3.6;
+  const double v0 = speed_kmh / 3.6;
   const double inner = v0 * v0 + 2.0 * a * distance.meters();
-  CHECK_GE_S(inner, 0.0) << speed0_kmh << " " << distance << " " << a;
+  CHECK_GE_S(inner, 0.0) << speed_kmh << " " << distance << " " << a;
   return 3.6 * std::sqrt(inner);
 }
 
@@ -305,7 +310,7 @@ inline double avg_speed_before_curve(DistanceType distance,
     const double avg_speed =
         ComputeAverageSpeed(distance - dist_needed, max_speed_road, dist_needed,
                             (max_speed_road + max_speed_curve) / 2.0);
-    return avg_speed;
+    return std::min(avg_speed, max_speed_road);
   }
 
   // Case 3)
@@ -321,7 +326,7 @@ inline double avg_speed_before_curve(DistanceType distance,
   const double speed_at_a =
       SpeedAfterDistance(max_speed_curve, distance, -a_decel);
   const double avg_speed = (speed_at_a + max_speed_curve) / 2;
-  return avg_speed;
+  return std::min(avg_speed, max_speed_road);
 }
 
 // Compute the average speed when accelerating to 'max_speed_road' after a curve
@@ -351,7 +356,7 @@ inline double avg_speed_after_curve(DistanceType distance,
     const double avg_speed =
         ComputeAverageSpeed(distance - dist_needed, max_speed_road, dist_needed,
                             (max_speed_road + max_speed_curve) / 2.0);
-    return avg_speed;
+    return std::min(avg_speed, max_speed_road);
   }
 
   // Case 3)
@@ -362,7 +367,7 @@ inline double avg_speed_after_curve(DistanceType distance,
   const double final_speed =
       SpeedAfterDistance(max_speed_curve, distance, a_accel);
   const double avg_speed = (max_speed_curve + final_speed) / 2.0;
-  return avg_speed;
+  return std::min(avg_speed, max_speed_road);
 }
 
 // The time loss in a curve is computed from the maximum curve speed and the

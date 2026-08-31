@@ -151,6 +151,7 @@ struct BuildGraphStats {
   int64_t max_edges_inverted = 0;
   DistanceType min_edge_length = DistanceType(MAXU32);
   DistanceType max_edge_length = DistanceType(0u);
+  DistanceType max_osm_edge_length = DistanceType(0u);
   int64_t sum_edge_length_cm = 0;
 
   // Tarjan algorithm
@@ -246,10 +247,11 @@ struct BuildGraphStats {
     num_edges_cluster_skeleton += other.num_edges_cluster_skeleton;
     max_edges = std::max(max_edges, other.max_edges);
     max_edges_out = std::max(max_edges_out, other.max_edges_out);
-    max_edges_inverted =
-        std::max(max_edges_inverted, other.max_edges_inverted);
+    max_edges_inverted = std::max(max_edges_inverted, other.max_edges_inverted);
     min_edge_length = std::min(min_edge_length, other.min_edge_length);
     max_edge_length = std::max(max_edge_length, other.max_edge_length);
+    max_osm_edge_length =
+        std::max(max_osm_edge_length, other.max_osm_edge_length);
     sum_edge_length_cm += other.sum_edge_length_cm;
 
     num_dead_end_nodes += other.num_dead_end_nodes;
@@ -286,6 +288,10 @@ struct GraphMetaData final {
   // Simple turn restrictions with a single via node. Only needed during
   // construction of the graph.
   std::vector<TurnRestriction> simple_turn_restrictions;
+
+  // Collects stats about edge speeds, used to compute average speed fractions
+  // for each bucket.
+  MinMaxAvg<double> edge_speed_fraction_stats[MAX_EDGE_SPEED_FRACTION_IDX + 1];
 
   // Finalized stats containing all thread stats and more.
   BuildGraphStats global_stats;
