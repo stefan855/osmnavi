@@ -572,6 +572,7 @@ inline void ComputeShortestClusterEdgePaths(Graph* g,
           vis.at(out_edge.tmp_c_edge_idx).min_weight);
     }
 
+#if 0
     {
       // Visit all shortest paths (ending at a border-out-edge) and label the
       // nodes as 'cluster_skeleton'.
@@ -594,6 +595,7 @@ inline void ComputeShortestClusterEdgePaths(Graph* g,
         } while (e_idx != INFU32);
       }
     }
+#endif
   }
   CHECK_EQ_S(cluster->edge_distances.size(), cluster->border_in_edges.size());
 }

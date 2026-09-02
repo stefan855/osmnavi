@@ -35,8 +35,10 @@ struct ExtractedWayNode {
   int64_t id;
   uint16_t ncc;
   // Keep track of duplicate ids in a list of node ids.
-  bool dup_earlier;  // true iff there is the same id earlier in the list.
-  bool dup_later;    // true iff there is the same id later in the list.
+  bool dup_earlier : 1;  // true iff there is the same id earlier in the list.
+  bool dup_later : 1;    // true iff there is the same id later in the list.
+  bool long_edge_needed : 1;  // node is adjacent to "long" edge, therefore
+                              // needed.
 };
 
 // Data needed while constructing the way representation of type GWay.
@@ -162,7 +164,6 @@ void ConsumeNodeBlob(VEHICLE vt, const OSMTagHelper& tagh,
 
   for (const OSMPBF::PrimitiveGroup& pg : prim_block.primitivegroup()) {
     const auto& keys_vals = pg.dense().keys_vals();
-    // NodeBuilder::VNode node = {.id = 0, .lat = 0, .lon = 0};
     OsmPbfReader::NodeWithTags node;
 
     // kv_start points to terminating 0-element of previous node. Before the
@@ -319,6 +320,8 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
   *missing_nodes = false;
   std::vector<ExtractedWayNode> way_nodes;
   std::int64_t running_id = 0;
+  NodeBuilder::VNode prev_vnode{.id = 0};
+
   for (int ref_idx = 0; ref_idx < osm_way.refs().size(); ++ref_idx) {
     running_id += osm_way.refs(ref_idx);
 
@@ -354,24 +357,41 @@ std::vector<ExtractedWayNode> ExtractWayNodes(const GraphMetaData& meta,
       }
     }
 
-    NodeBuilder::VNode node;
-    if (!NodeBuilder::FindNode(meta.graph.node_table, running_id, &node)) {
-      // Node is referenced by osm_way, but the node was not loaded.
+    NodeBuilder::VNode vnode;
+    if (!NodeBuilder::FindNode(meta.graph.node_table, running_id, &vnode)) {
+      // Node is referenced by osm_way, but the vnode was not loaded.
       // This happens often when a clipped country file does contain a way but
       // not all the nodes of the way.
       // LOG_S(INFO) << "Way " << osm_way.id() << " references non-existing"
-      //                " node " << running_id;
+      //                " vnode " << running_id;
       *missing_nodes = true;
       continue;
     }
-    uint16_t ncc = meta.tiler->GetCountryNum(node.ll.lon, node.ll.lat);
+    uint16_t ncc = meta.tiler->GetCountryNum(vnode.ll.lon, vnode.ll.lat);
+
+    bool long_edge_needed = false;
+    if (prev_vnode.id != 0) {
+      // Check if the length of the edge is "large". If yes, then mark both
+      // nodes as needed, such that we don't create an even longer edge with
+      // shape nodes afterwards.
+      DistanceType d = calculate_distance(prev_vnode.ll, vnode.ll);
+      if (d.meters() >= 1000.0) {
+        way_nodes.back().long_edge_needed = true;
+        long_edge_needed = true;
+        LOG_S(INFO) << "Detected long edge " << prev_vnode.id << "->"
+                    << vnode.id;
+      }
+    }
+    prev_vnode = vnode;
+
     way_nodes.push_back({.id = running_id,
                          .ncc = ncc,
                          .dup_earlier = false,
-                         .dup_later = false});
+                         .dup_later = false,
+                         .long_edge_needed = long_edge_needed});
   }
   if (*missing_nodes) {
-    LOG_S(INFO) << "Way " << osm_way.id() << " has missing node(s) -- country:"
+    LOG_S(INFO) << "Way " << osm_way.id() << " has missing vnode(s) -- country:"
                 << (way_nodes.empty()
                         ? "<empty>"
                         : CountryNumToString(way_nodes.front().ncc));
@@ -448,6 +468,9 @@ void MarkSeenAndNeeded(GraphMetaData* meta,
     } else {
       // Not seen before, so mark as 'seen'.
       meta->way_nodes_seen->SetBit(nc.id, true);
+      if (nc.long_edge_needed) {
+        meta->way_nodes_needed->SetBit(nc.id, true);
+      }
     }
   }
   // Start and end nodes are both 'needed'.
@@ -716,8 +739,129 @@ std::pair<bool, bool> GetPriorityRoadSetting(
 }
 }  // namespace
 
+namespace {
+void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
+             const bool inverted, const bool contra_way, const bool has_shapes,
+             const bool has_reverse_shapes, const bool both_directions,
+             const size_t way_idx, const DistanceType distance,
+             uint16_t start_bearing, uint16_t target_bearing,
+             bool car_restricted, uint16_t speed_fraction_idx) {
+  GNode& n = g.nodes.at(start_idx);
+  const GNode& other = g.nodes.at(other_idx);
+  CHECK_LE_S(distance.cm(), MAX_EDGE_DISTANCE_CM)
+      << absl::StrFormat("Node %lld->%lld way %lld", n.node_id, other.node_id,
+                         GetGWayIdSafe(g, way_idx));
+  const int64_t edge_start = n.edges_start_pos;
+  const int64_t edges_stop = gnode_edges_stop(g, start_idx);
+  int64_t ep;
+  if (inverted) {
+    for (ep = edges_stop - 1; ep >= edge_start; --ep) {
+      if (g.edges.at(ep).target_idx == INFU32) break;
+    }
+  } else {
+    for (ep = edge_start; ep < edges_stop; ++ep) {
+      if (g.edges.at(ep).target_idx == INFU32) break;
+    }
+    CHECK_LT_S(n.num_forward_edges, MAX_NUM_EDGES_OUT) << n.node_id;
+    n.num_forward_edges++;
+  }
+  CHECK_S(ep >= edge_start && ep < edges_stop);
+  CHECK_S(other_idx != INFU32);
+  GEdge& e = g.edges.at(ep);
+  e.target_idx = other_idx;
+  e.way_idx = way_idx;
+  e.distance = distance;
+  e.turn_cost_idx = INVALID_TURN_COST_IDX;
+  e.unique_target = 0;
+  e.to_bridge = 0;
+  e.contra_way = contra_way ? 1 : 0;
+  e.has_shapes = has_shapes ? 1 : 0;
+  e.has_reverse_shapes = has_reverse_shapes ? 1 : 0;
+  e.cross_country = n.ncc != other.ncc;
+  e.inverted = inverted ? 1 : 0;
+  e.both_directions = both_directions ? 1 : 0;
+  e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
+  e.car_label_strange = 0;
+  e.complex_turn_restriction_trigger = 0;
+  e.stop_sign = 0;
+  e.traffic_signal = 0;
+  e.road_priority = GEdge::PRIO_UNSET;
+  e.bridge = 0;
+  e.cross_cluster_edge = 0;
+  e.dead_end = 0;
+  e.start_bearing = start_bearing;
+  e.target_bearing = target_bearing;
+  e.speed_fraction_idx = speed_fraction_idx;
+
+  const GWay& way = g.ways.at(way_idx);
+  if ((way.priority_road_forward && !contra_way) ||
+      (way.priority_road_backward && contra_way)) {
+    e.road_priority = GEdge::PRIO_HIGH;
+  }
+}
+
+void MarkUniqueOther(std::span<GEdge> edges) {
+  for (size_t i = 0; i < edges.size(); ++i) {
+    size_t k = 0;
+    while (k < i) {
+      // TODO: C++26 allows .at() with bounds checking.
+      if (edges[i].target_idx == edges[k].target_idx) {
+        break;
+      }
+      k++;
+    }
+    edges[i].unique_target = (i == k);
+  }
+}
+
+void DetermineComponents(Graph* g) {
+  g->large_components = components::FindComponents(*g, /*min_size=*/2000);
+  components::MarkLargeComponents(g->large_components, g);
+}
+
+void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
+                     GraphMetaData* meta, TRResult* result) {
+  ParseTurnRestriction(meta->graph, tagh, osm_rel,
+                       meta->opt.verb_turn_restrictions, result);
+}
+
+// Read the ways that might useful for routing, remember the nodes ids touched
+// by these ways, then read the node coordinates and store them in
+// 'node_table'.
+void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
+                                  DataBlockTable* node_table,
+                                  GraphMetaData* meta) {
+  FUNC_TIMER();
+  // Node ids touched by ways that we are interested in.
+  HugeBitset touched_nodes_ids;
+  // Read ways and remember the touched nodes in 'touched_nodes_ids'.
+  reader->ReadWays([&touched_nodes_ids, meta](const OSMTagHelper& tagh,
+                                              const OSMPBF::Way& way,
+                                              int thread_idx, std::mutex& mut) {
+    ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids,
+                                   &meta->Stats(thread_idx));
+  });
+
+  // Read all the node coordinates for nodes in 'touched_nodes_ids'.
+  reader->ReadBlobs(
+      OsmPbfReader::ContentNodes,
+      [vt, &touched_nodes_ids, node_table, meta](
+          const OSMTagHelper& tagh, const OSMPBF::PrimitiveBlock& prim_block,
+          int thread_idx, std::mutex& mut) {
+        ConsumeNodeBlob(vt, tagh, prim_block, mut, touched_nodes_ids,
+                        node_table, meta);
+      });
+  // Make node table searchable, so we can look up lat/lon by node_id.
+  node_table->Sort();
+  // Sort the node tags.
+  std::sort(meta->graph.node_tags_sorted.begin(),
+            meta->graph.node_tags_sorted.end(),
+            [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
+}
+}  // namespace
+
 // Check if osm_way is part of the routable network (routable by car etc.) and
-// add a record to graph.ways. Also updates 'seen nodes' and 'needed nodes'
+// add an entry to graph.ways. Also updates 'seen nodes' and 'needed nodes'
 // bitsets.
 void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
                     std::mutex& mut,
@@ -815,12 +959,15 @@ void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     if (wc.direction == DIR_REVERSIBLE) {
       meta->graph.way_ids_with_oneway_reversible.insert(wc.way.id);
     }
-    uint8_t* node_ids_buff =
+    uint8_t* node_ids_buff_ptr =
         meta->graph.unaligned_pool_.AllocBytes(node_ids_wb.used());
-    memcpy(node_ids_buff, node_ids_wb.base_ptr(), node_ids_wb.used());
-    meta->graph.way_node_ids.push_back(node_ids_buff);
+    memcpy(node_ids_buff_ptr, node_ids_wb.base_ptr(), node_ids_wb.used());
+    meta->graph.way_node_ids.push_back(node_ids_buff_ptr);
 
     std::string_view streetname = tagh.GetValue(wc.osm_way, "name");
+    if (streetname.empty()) {
+      streetname = tagh.GetValue(wc.osm_way, "ref");
+    }
     CHECK_EQ_S(streetname.find('\0'), streetname.npos) << streetname;
     wc.way.streetname_idx = streetname_deduper->Add(std::string(streetname));
 
@@ -833,124 +980,6 @@ void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
 }
 
 namespace {
-void AddEdge(Graph& g, const size_t start_idx, const size_t other_idx,
-             const bool inverted, const bool contra_way, const bool has_shapes,
-             const bool has_reverse_shapes, const bool both_directions,
-             const size_t way_idx, const DistanceType distance,
-             uint16_t start_bearing, uint16_t target_bearing,
-             bool car_restricted, uint16_t speed_fraction_idx) {
-  GNode& n = g.nodes.at(start_idx);
-  const GNode& other = g.nodes.at(other_idx);
-  CHECK_LE_S(distance.cm(), MAX_EDGE_DISTANCE_CM)
-      << absl::StrFormat("Node %lld->%lld way %lld", n.node_id, other.node_id,
-                         GetGWayIdSafe(g, way_idx));
-  const int64_t edge_start = n.edges_start_pos;
-  const int64_t edges_stop = gnode_edges_stop(g, start_idx);
-  int64_t ep;
-  if (inverted) {
-    for (ep = edges_stop - 1; ep >= edge_start; --ep) {
-      if (g.edges.at(ep).target_idx == INFU32) break;
-    }
-  } else {
-    for (ep = edge_start; ep < edges_stop; ++ep) {
-      if (g.edges.at(ep).target_idx == INFU32) break;
-    }
-    CHECK_LT_S(n.num_forward_edges, MAX_NUM_EDGES_OUT) << n.node_id;
-    n.num_forward_edges++;
-  }
-  CHECK_S(ep >= edge_start && ep < edges_stop);
-  CHECK_S(other_idx != INFU32);
-  GEdge& e = g.edges.at(ep);
-  e.target_idx = other_idx;
-  e.way_idx = way_idx;
-  e.distance = distance;
-  e.turn_cost_idx = INVALID_TURN_COST_IDX;
-  e.unique_target = 0;
-  e.to_bridge = 0;
-  e.contra_way = contra_way ? 1 : 0;
-  e.has_shapes = has_shapes ? 1 : 0;
-  e.has_reverse_shapes = has_reverse_shapes ? 1 : 0;
-  e.cross_country = n.ncc != other.ncc;
-  e.inverted = inverted ? 1 : 0;
-  e.both_directions = both_directions ? 1 : 0;
-  e.car_label = car_restricted ? GEdge::LABEL_RESTRICTED : GEdge::LABEL_UNSET;
-  e.car_label_strange = 0;
-  e.complex_turn_restriction_trigger = 0;
-  e.stop_sign = 0;
-  e.traffic_signal = 0;
-  e.road_priority = GEdge::PRIO_UNSET;
-  e.bridge = 0;
-  e.cross_cluster_edge = 0;
-  e.dead_end = 0;
-  e.start_bearing = start_bearing;
-  e.target_bearing = target_bearing;
-  e.speed_fraction_idx = speed_fraction_idx;
-
-  const GWay& way = g.ways.at(way_idx);
-  if ((way.priority_road_forward && !contra_way) ||
-      (way.priority_road_backward && contra_way)) {
-    e.road_priority = GEdge::PRIO_HIGH;
-  }
-}
-
-void MarkUniqueOther(std::span<GEdge> edges) {
-  for (size_t i = 0; i < edges.size(); ++i) {
-    size_t k = 0;
-    while (k < i) {
-      // TODO: C++26 allows .at() with bounds checking.
-      if (edges[i].target_idx == edges[k].target_idx) {
-        break;
-      }
-      k++;
-    }
-    edges[i].unique_target = (i == k);
-  }
-}
-
-void DetermineComponents(Graph* g) {
-  g->large_components = components::FindComponents(*g, /*min_size=*/2000);
-  components::MarkLargeComponents(g->large_components, g);
-}
-
-void ConsumeRelation(const OSMTagHelper& tagh, const OSMPBF::Relation& osm_rel,
-                     GraphMetaData* meta, TRResult* result) {
-  ParseTurnRestriction(meta->graph, tagh, osm_rel,
-                       meta->opt.verb_turn_restrictions, result);
-}
-
-// Read the ways that might useful for routing, remember the nodes ids touched
-// by these ways, then read the node coordinates and store them in
-// 'node_table'.
-void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
-                                  DataBlockTable* node_table,
-                                  GraphMetaData* meta) {
-  FUNC_TIMER();
-  HugeBitset touched_nodes_ids;
-  // Read ways and remember the touched nodes in 'touched_nodes_ids'.
-  reader->ReadWays([&touched_nodes_ids, meta](const OSMTagHelper& tagh,
-                                              const OSMPBF::Way& way,
-                                              int thread_idx, std::mutex& mut) {
-    ConsumeWayStoreSeenNodesWorker(tagh, way, mut, &touched_nodes_ids,
-                                   &meta->Stats(thread_idx));
-  });
-
-  // Read all the node coordinates for nodes in 'touched_nodes_ids'.
-  reader->ReadBlobs(
-      OsmPbfReader::ContentNodes,
-      [vt, &touched_nodes_ids, node_table, meta](
-          const OSMTagHelper& tagh, const OSMPBF::PrimitiveBlock& prim_block,
-          int thread_idx, std::mutex& mut) {
-        ConsumeNodeBlob(vt, tagh, prim_block, mut, touched_nodes_ids,
-                        node_table, meta);
-      });
-  // Make node table searchable, so we can look up lat/lon by node_id.
-  node_table->Sort();
-  // Sort the node tags.
-  std::sort(meta->graph.node_tags_sorted.begin(),
-            meta->graph.node_tags_sorted.end(),
-            [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
-}
-
 void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
   FUNC_TIMER();
 
@@ -2158,7 +2187,10 @@ void LabelEdgesFromNodeTags(GraphMetaData* meta) {
   for (NodeTags& nt : meta->graph.node_tags_sorted) {
     const size_t node_idx = g.FindNodeIndex(nt.node_id);
     if (node_idx >= g.nodes.size()) {
-      LOG_S(INFO) << "Node " << nt.node_id << " for stop not found";
+      // These occur often, for example nodes on paths that are not accessible
+      // for the current vehicle type.
+      //
+      // LOG_S(INFO) << "Node " << nt.node_id << " for stop not found";
       continue;
     }
 
@@ -2320,9 +2352,15 @@ void ComputeAllTurnCosts(GraphMetaData* meta) {
         // For each outgoing edge of this node.
         for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
           GEdge& e = g.edges.at(from_node.edges_start_pos + off);
+
+          const TrafficSide traffic_side =
+              meta->left_traffic_bits.GetBit(g.nodes.at(e.target_idx).ncc)
+                  ? TRAFFIC_SIDE_LEFT
+                  : TRAFFIC_SIDE_RIGHT;
+
           // Compute the turn costs for the target node of 'e'.
           TurnCostData tcd = ComputeTurnCostsForEdge(
-              g, meta->opt.vt, indexed_trs, {from_idx, off});
+              g, traffic_side, meta->opt.vt, indexed_trs, {from_idx, off});
           e.turn_cost_idx = deduper_per_thread.at(thread_idx).Add(tcd);
         }
       }

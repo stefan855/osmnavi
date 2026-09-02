@@ -713,9 +713,11 @@ int main(int argc, char* argv[]) {
     pool.AddWork([&meta](int thread_idx) {
       WriteCrossCountryEdges(meta, "/tmp/cross.csv");
     });
+#if 0
     pool.AddWork([&g](int thread_idx) {
       WriteClusterSkeletonEdges(g, "green", "/tmp/experimental9.csv");
     });
+#endif
     pool.Start(std::min(meta.opt.n_threads, std::min(8, opt.n_threads)));
     pool.WaitAllFinished();
 #if 0

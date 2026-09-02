@@ -94,7 +94,7 @@ class MMHybridRouter final {
   }
 
   // All data needed for a specific routing request.
-  // The MMHybridRouter object itself acctually doesn't store any data,
+  // The MMHybridRouter object itself actually doesn't store any data,
   // therefore all methods are 'static'.
   struct RouterData {
     // Only entries 0 and 1 are used.
@@ -707,12 +707,28 @@ class MMHybridRouter final {
         tc = res.full_edges.at(i - 1).GetTurnCost(mg, res.full_edges.at(i));
       }
       CHECK_GE_S(res.edge_metric(i), tc);
+
+      const MMFullEdge fe = res.full_edges.at(i);
+      const MMCluster& mc = fe.mc(mg);
+      const MEdgeIdx edge_idx = fe.edge_idx(mc);
+      const MWayIdx way_idx = mc.edge_to_way.at(edge_idx);
+      const WaySharedAttrs& wsa = fe.get_wsa(mc);
+      const uint32_t maxspeed =
+          GetRAFromWSA(wsa, VH_MOTORCAR,
+                       static_cast<DIRECTION>(fe.edge(mc).contra_way()))
+              .maxspeed;
       LOG_S(INFO) << absl::StrFormat(
-          "%5i. tc:%.2fs m:%.2fs d:%.2fm tot:%.2fs fe:<%s>", i + 1,
-          tc.seconds(),
+          "%5i. %6.2fs m:%5.2fs tc:%5.2fs d:%6.2fm %11lld->%-11lld "
+          "ms:%3u sf:%4.2f cl:%u %-11s %-22s",
+          i + 1, res.min_metrics.at(i) / 1000.0,
           ((int64_t)res.edge_metric(i) - (int64_t)tc.ms()) / 1000.0,
-          res.distance(mg, i).meters(), res.min_metrics.at(i) / 1000.0,
-          res.full_edges.at(i).DebugString(mg));
+          tc.seconds(), res.distance(mg, i).meters(),
+          mc.get_node_id(fe.from_node_idx), mc.get_node_id(fe.target_idx(mc)),
+          maxspeed,
+          mc.mg()
+              .edge_speed_fraction[mc.edge_to_speed_fraction_idx.at(edge_idx)],
+          mc.cluster_id, HighwayLabelToString(wsa.highway_label_).substr(0, 11),
+          mc.get_streetname(way_idx).substr(0, 24));
     }
     LOG_S(INFO) << "*************************************";
   }

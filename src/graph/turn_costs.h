@@ -129,7 +129,7 @@ inline constexpr DurationMS decompress_turn_cost(uint32_t compressed_cost) {
 //   v-max = 63.615 km/h = 3.6 * math.sqrt(0.5*9.81*100/(90*math.pi/180))
 inline double MaxCurveVelocity(DistanceType arc_length, int32_t turn_angle) {
   return turn_angle == 0
-             ? 200.0
+             ? 300.0
              : std::sqrt((3.6 * 3.6 * 0.5 * 9.81 * arc_length.meters()) /
                          (std::fabs(turn_angle) * std::numbers::pi / 180.0));
 }
@@ -394,15 +394,23 @@ inline CurveStats ComputeCurveLoss(double maxspeed0, double maxspeed1,
   // We don't need the sign for now.
   turn_angle = std::labs(turn_angle);
 
-  // Assume that normal drivers achieve 50% of the max possible velocity.
-  constexpr double AvgDriverFactor = 0.5;
+  // Assume that normal drivers achieve this percentage of the max possible
+  // velocity.
+  // TODO: This should be used together with the maximum possible curve speed,
+  // not against the average speed which is always <= max allowed speed.
+  // This for instance lowers the speed below maxspeed on highways for tiny
+  // curves, although it might be possible to drive at maxspeed.
+  constexpr double AvgDriverFactor = 0.8;
   // Assume that the angle has to be driven in 10m, i.e. 5m before and 5m
   // after the curve point.
+
+  // Assume longer curve for higher max speed.
+  DistanceType arc_length((maxspeed0 > 70 ? 20u : 10u) * 100u);
+  // Speed possible through the curve.
   const double curve_speed =
       (turn_angle == 0)
           ? maxspeed0
-          : AvgDriverFactor *
-                MaxCurveVelocity(DistanceType(10u * 100u), turn_angle);
+          : AvgDriverFactor * MaxCurveVelocity(arc_length, turn_angle);
 
   // LOG_S(INFO) << "CC1: length0:" << length0 << " length1:" << length1;
   CurveStats res = {.avg_speed_in = avg_speed_before_curve(
@@ -666,10 +674,9 @@ DurationMS NodeTagsCost(const Graph& g, const N3Path& n3p) {
   return cost;
 }
 
-// The cost that occurs when entering a new way, i.e. when turning from way A
-// onto way B. Currently this is used only for ways with oneway 'reversible',
+// The cost that occurs when entering ways with oneway 'reversible',
 // i.e. alternating traffic over a long period.
-DurationMS EnterNewWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
+DurationMS ReversibleWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
   if (vt != VH_FOOT) {
     const uint32_t way_idx0 = n3p.full_edge0().gedge(g).way_idx;
     const uint32_t way_idx1 = n3p.full_edge1().gedge(g).way_idx;
@@ -684,8 +691,8 @@ DurationMS EnterNewWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
 
 // Compute the (uncompressed) turn cost for the specific turn 'n3p'.
 inline DurationMS ComputeTurnCostForN3Path(
-    const Graph& g, VEHICLE vt, const IndexedTurnRestrictions& indexed_trs,
-    const N3Path& n3p) {
+    const Graph& g, TrafficSide traffic_side, VEHICLE vt,
+    const IndexedTurnRestrictions& indexed_trs, const N3Path& n3p) {
   const bool debug = n3p.node1(g).node_id == 0;
 
   if (debug) {
@@ -742,26 +749,30 @@ inline DurationMS ComputeTurnCostForN3Path(
   // So far we know we can do the turn and it is not a u-turn.
   //
   // Compute three time losses and use the maximum:
-  // 1) Time loss because of node (stop sign, signals, etc.)
-  // 2) Time loss because of curve.
-  // 3) Real crossing
-  // 4) Entering a new way. Currently this has costs of 30m when entering a
-  // way with direction 'reversible'.
-
-  const DurationMS cost_node_tags = NodeTagsCost(g, n3p);
-  const DurationMS cost_crossing = CrossingCost(g, vt, n3p, debug);
+  // 1) Time loss because of curve.
+  // 2) Time loss because of node (stop sign, signals, etc.)
+  // 3) Crossing cost because of other cars crossing my way.
+  // 4) Cost for entering a way with direction 'reversible'.
   const DurationMS cost_curve =
       ComputeCurveLoss(g, vt, n3p, GetVHAccel(vt), GetVHDecel(vt), debug)
           .time_loss_total;
-  const DurationMS cost_enter_new_way = EnterNewWayCost(g, vt, n3p);
-  const DurationMS cost =
-      std::max({cost_node_tags, cost_curve, cost_crossing, cost_enter_new_way});
+  const DurationMS cost_node_tags = NodeTagsCost(g, n3p);
+  const DurationMS cost_crossing =
+      CrossingCost(g, traffic_side, vt, n3p, debug);
+  const DurationMS cost_reversible_way = ReversibleWayCost(g, vt, n3p);
+
+  // It seems reasonable to take the maximum value instead of adding values. For
+  // instance, if one has to stop at a crossing because other traffic has
+  // priority then this includes the costs for slowing down and speeding up
+  // through the curve.
+  const DurationMS cost = std::max(
+      {cost_node_tags, cost_curve, cost_crossing, cost_reversible_way});
 
   if (debug) {
     LOG_S(INFO) << "  Cost node tags " << cost_node_tags;
     LOG_S(INFO) << "  Cost crossing " << cost_crossing;
     LOG_S(INFO) << "  Cost curve " << cost_curve;
-    LOG_S(INFO) << "  Cost enter new way " << cost_enter_new_way;
+    LOG_S(INFO) << "  Cost reversible way" << cost_reversible_way;
     LOG_S(INFO) << "  Cost max " << cost;
   }
   return cost;
@@ -775,15 +786,16 @@ inline DurationMS ComputeTurnCostForN3Path(
 // fe: The edge for which we compute turn costs at the target node.
 // Returns the resulting turn costs data for fe.target_node(g).
 inline TurnCostData ComputeTurnCostsForEdge(
-    const Graph& g, VEHICLE vt, const IndexedTurnRestrictions& indexed_trs,
-    const FullEdge fe) {
+    const Graph& g, TrafficSide traffic_side, VEHICLE vt,
+    const IndexedTurnRestrictions& indexed_trs, const FullEdge fe) {
   // Create a tcd with the needed dimension.
   const GNode& crossing_node = fe.target_node(g);
   TurnCostData tcd(crossing_node.num_forward_edges, TURN_COST_ZERO_COMPRESSED);
 
   for (uint32_t off = 0; off < crossing_node.num_forward_edges; ++off) {
     tcd.turn_costs.at(off) = compress_turn_cost(ComputeTurnCostForN3Path(
-        g, vt, indexed_trs, N3Path::Create(g, fe, {fe.target_idx(g), off})));
+        g, traffic_side, vt, indexed_trs,
+        N3Path::Create(g, fe, {fe.target_idx(g), off})));
   }
   return tcd;
 }

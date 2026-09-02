@@ -438,6 +438,8 @@ struct MMCluster {
     return out_edges.at(pos);
   }
 
+  double edge_speed_fraction(MEdgeIdx edge_idx) const;
+
   // For an edge, return the shape coordinates or an empty list if they don't
   // exist.
   //
@@ -656,6 +658,10 @@ struct MMGraph {
 };
 CHECK_IS_MM_OK(MMGraph);
 
+inline double MMCluster::edge_speed_fraction(MEdgeIdx edge_idx) const {
+  return mg().edge_speed_fraction[edge_to_speed_fraction_idx.at(edge_idx)];
+}
+
 // An edge with enough data to find it in a mmgraph.
 struct MMFullEdge {
   MNodeIdx from_node_idx;
@@ -761,13 +767,15 @@ struct MMFullEdge {
         cluster_id_to = mc.find_outgoing_edge(edge_idx(mc)).to_cluster_id;
       }
     }
-    return absl::StrFormat("%lld->%lld w:%lld <%s> dist:%.2fm cl-id:%u->%u",
-                           mc.get_node_id(from_node_idx),
-                           mc.get_node_id(target_idx(mc)),
-                           mc.get_edge_to_way_id(edge_idx(mc)),
-                           HighwayLabelToString(get_wsa(mc).highway_label_),
-                           mc.edge_to_distance.at(edge_idx(mc)).meters(),
-                           cluster_id_from, cluster_id_to);
+    return absl::StrFormat(
+        "%lld->%lld w:%lld <%s> dist:%.2fm sp-fr:%.2f cl-id:%u->%u",
+        mc.get_node_id(from_node_idx), mc.get_node_id(target_idx(mc)),
+        mc.get_edge_to_way_id(edge_idx(mc)),
+        HighwayLabelToString(get_wsa(mc).highway_label_),
+        mc.edge_to_distance.at(edge_idx(mc)).meters(),
+        mc.mg().edge_speed_fraction[mc.edge_to_speed_fraction_idx.at(
+            edge_idx(mc))],
+        cluster_id_from, cluster_id_to);
   }
 
   std::string DebugString(const MMGraph& mg) const {
@@ -842,6 +850,7 @@ struct MMClusterWrapper {
   // Pre-compute all edge weights for the edges of the cluster.
   void FillEdgeWeights(VEHICLE vt, const RoutingMetric& metric,
                        bool include_dead_ends) {
+    const MMGraph& mg = mc.mg();
     const size_t num =
         include_dead_ends ? mc.edges.size() : mc.num_non_dead_end_edges();
     edge_weights.clear();
@@ -851,7 +860,9 @@ struct MMClusterWrapper {
       const DIRECTION direction =
           ((DIRECTION)MM_EDGE(mc.edges.at(edge_idx)).contra_way());
       const DistanceType distance(mc.edge_to_distance.at(edge_idx));
-      edge_weights.push_back(metric.Compute(wsa, vt, direction, distance));
+      edge_weights.push_back(metric.Compute(
+          wsa, vt, direction, distance,
+          mg.edge_speed_fraction[mc.edge_to_speed_fraction_idx.at(edge_idx)]));
     }
   }
 

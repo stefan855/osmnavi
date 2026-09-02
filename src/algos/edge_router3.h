@@ -405,9 +405,9 @@ class EdgeRouter3 {
       uint32_t v_idx =
           FindOrAddVisitedEdge(edge_label, ctx.opt.use_astar_heuristic);
       VisitedEdge& ve = visited_edges_.at(v_idx);
-      ve.min_metric =
-          ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(curr_ge),
-                             curr_ge.distance, TURN_COST_ZERO_COMPRESSED);
+      ve.min_metric = ctx.metric.Compute(
+          wsa, ctx.opt.vt, EDGE_DIR(curr_ge), curr_ge.distance,
+          g_.edge_speed_fraction[curr_ge.speed_fraction_idx], TURN_COST_ZERO);
       ve.prev_v_idx = INFU32;
       ve.restricted_obsolete = (curr_ge.car_label != GEdge::LABEL_FREE);
 
@@ -510,9 +510,11 @@ class EdgeRouter3 {
       }
 
       std::uint32_t new_metric =
-          prev.metric + ctx.metric.Compute(wsa, ctx.opt.vt, EDGE_DIR(curr_ge),
-                                           curr_ge.distance,
-                                           turn_costs.turn_costs.at(offset));
+          prev.metric +
+          ctx.metric.Compute(
+              wsa, ctx.opt.vt, EDGE_DIR(curr_ge), curr_ge.distance,
+              g_.edge_speed_fraction[curr_ge.speed_fraction_idx],
+              decompress_turn_cost(turn_costs.turn_costs.at(offset)));
 
       if (new_metric < ve.min_metric) {
         ve.min_metric = new_metric;

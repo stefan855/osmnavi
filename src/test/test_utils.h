@@ -175,8 +175,8 @@ void AddTurnCostsForTests(std::vector<TurnRestriction> simple_turn_restrictions,
     // For each outgoing edge of this node.
     for (uint32_t off = 0; off < from_node.num_forward_edges; ++off) {
       GEdge& e = g->edges.at(from_node.edges_start_pos + off);
-      TurnCostData tcd =
-          ComputeTurnCostsForEdge(*g, vh, indexed_trs, {from_idx, off});
+      TurnCostData tcd = ComputeTurnCostsForEdge(*g, TRAFFIC_SIDE_RIGHT, vh,
+                                                 indexed_trs, {from_idx, off});
       e.turn_cost_idx = g->turn_costs.size();
       g->turn_costs.push_back(tcd);
     }

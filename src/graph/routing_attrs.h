@@ -163,9 +163,9 @@ inline double TrafficFrequencyToFraction(TrafficFrequency tf) {
     case TFREQ_LOW:
       return 0.2;
     case TFREQ_MEDIUM:
-      return 0.5;
+      return 0.4;
     case TFREQ_HIGH:
-      return 0.8;
+      return 0.7;
     case TFREQ_VERY_HIGH:
       return 1.0;
     default:
@@ -176,6 +176,14 @@ inline double TrafficFrequencyToFraction(TrafficFrequency tf) {
 inline double HighwayToTrafficFraction(HIGHWAY_LABEL hw) {
   return TrafficFrequencyToFraction(HighwayLabelToTrafficFrequency(hw));
 }
+
+// Indicates if traffic is on the right or left hand side.
+// See CountryBitset left_traffic_bits in GraphMetaData.
+enum TrafficSide : uint16_t {
+  TRAFFIC_SIDE_RIGHT = 0,
+  TRAFFIC_SIDE_LEFT,
+  TRAFFIC_SIDE_MAX
+};
 
 // Direction of a way, deduced from the oneway and related tags.
 // DIR_FORWARD and DIR_BACKWARD are used as array indices in the code and should
