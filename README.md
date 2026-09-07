@@ -46,9 +46,9 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 2. Improve routing: Display shape coordinates (street curvature) for the route.
 3. Concatenate consecutive street segments of the same street in returned routes.
 4. Compute speed reduction for edges with shape nodes (depending on curvature).
+5. CrossingCost() now considers conflicts with other traffic, handles right/left driving countries and uses road hierarchy to have a rough extimate for traffic frequency.
 
 ## Current Tasks
-* Fix CrossingCost() to compute better turn costs at crossings. Currently, going straight on a maior street incurs costs when a minor street enters from either side.
 * Compute different turn costs for a left turn vs. a right turn. This also depends on the driving mode in the country (left/right).
 * Improve routing description: Say things like "turn right on ..."
 * Fix unrestricted areas behind restricted areas.
