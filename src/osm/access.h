@@ -14,10 +14,28 @@ struct AccessPerDirection {
 
 namespace {
 
-inline ACCESS ExtendedAccessToEnum(std::string_view val, bool bicycle) {
-  ACCESS acc = AccessToEnum(val);  // Returns ACC_MAX for empty strings.
-  if (acc == ACC_MAX && bicycle && val == "use_sidepath") {
-    // Special case, bicycle should use separate bicycle path.
+// Parse access tag. Handles multiple access separated by ';' such as
+// motor_vehicle=agricultural;destination and returns the "best" access, which
+// is ACC_DESTINATION in this case, since agricultural is ignored.
+// Returns ACC_MAX if val can't be interpreted.
+// Returns ACC_NO for 'use_sidepath' iff detect_use_sidepath is true. This is
+// needed for bicycles/pedestrians, for instance 'foot=use_sidepath'.
+inline ACCESS ExtendedAccessToEnum(std::string_view val,
+                                   bool detect_use_sidepath) {
+  ACCESS acc = ACC_MAX;
+  if (val.contains(';')) {
+    for (std::string_view sub : absl::StrSplit(val, ';')) {
+      ACCESS sub_acc = AccessToEnum(sub);
+      if (sub_acc != ACC_MAX && (acc == ACC_MAX || sub_acc > acc)) {
+        // Keep the most permissive.
+        acc = sub_acc;
+      }
+    }
+  } else {
+    acc = AccessToEnum(val);  // Returns ACC_MAX for empty strings.
+  }
+  if (acc == ACC_MAX && detect_use_sidepath && val == "use_sidepath") {
+    // Special case.
     acc = ACC_NO;
   }
   return acc;
@@ -29,9 +47,10 @@ struct InterpretAccessResult {
 };
 
 inline InterpretAccessResult InterpretAccessValue(std::string_view val,
-                                                  bool lanes, bool bicycle) {
+                                                  bool lanes,
+                                                  bool detect_use_sidepath) {
   if (!lanes) {
-    return {.acc = ExtendedAccessToEnum(val, bicycle),
+    return {.acc = ExtendedAccessToEnum(val, detect_use_sidepath),
             .improve_only = val.empty()};
   }
   // When there are lanes, we have to be careful to distinguish between empty
@@ -41,7 +60,7 @@ inline InterpretAccessResult InterpretAccessValue(std::string_view val,
   bool has_empty = false;
   for (std::string_view sub : absl::StrSplit(val, '|')) {
     has_empty |= sub.empty();
-    ACCESS sub_acc = ExtendedAccessToEnum(sub, bicycle);
+    ACCESS sub_acc = ExtendedAccessToEnum(sub, detect_use_sidepath);
     // Only replace if value is "better".
     if (sub_acc != ACC_MAX && (acc == ACC_MAX || sub_acc > acc)) {
       acc = sub_acc;
@@ -57,7 +76,10 @@ inline InterpretAccessResult InterpretAccessValue(std::string_view val,
 inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
                       AccessPerDirection* apd) {
   InterpretAccessResult res = InterpretAccessValue(
-      value, pt.bits.test(KEY_BIT_LANES_INNER), pt.first == KEY_BIT_BICYCLE);
+      value, pt.bits.test(KEY_BIT_LANES_INNER),
+      /*detect_use_sidepath=*/
+      (pt.first == KEY_BIT_BICYCLE || pt.first == KEY_BIT_FOOT ||
+       pt.first == KEY_BIT_MOPED));
   if (res.acc == ACC_MAX) {
     // In general, if we don't know the access value, then it has to be
     // interpreted as a 'no'.

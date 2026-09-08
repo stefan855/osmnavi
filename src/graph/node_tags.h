@@ -69,15 +69,15 @@ void SetNodeTagBits(VEHICLE vt, const ParsedTagInfo& pti, int64_t node_id,
   std::string_view val;
   val = pti.FindValue({KEY_BIT_DIRECTION});
   if (!val.empty()) {
-    nt->direction = DirectionToEnum(val);
+    nt->node_direction = DirectionToEnum(val);
   }
   val = pti.FindValue({KEY_BIT_TRAFFIC_SIGN, KEY_BIT_DIRECTION});
   if (!val.empty()) {
-    nt->direction = DirectionToEnum(val);
+    nt->node_direction = DirectionToEnum(val);
   }
   val = pti.FindValue({KEY_BIT_TRAFFIC_SIGNALS, KEY_BIT_DIRECTION});
   if (!val.empty()) {
-    nt->direction = DirectionToEnum(val);
+    nt->node_direction = DirectionToEnum(val);
   }
 
   // Handle
@@ -193,7 +193,7 @@ bool GetBarrierAccess(const ParsedTagInfo& pti, int64_t node_id,
 
 std::vector<std::bitset<VH_MAX>> ComputeBarrierVehicleAllowed() {
   std::vector<std::bitset<VH_MAX>> res;
-  for (const BarrierDef bd : g_barrier_def_vector) {
+  for (const BarrierDef& bd : g_barrier_def_vector) {
     std::bitset<VH_MAX> bs;
     for (VEHICLE vh = VH_MOTORCAR; vh < VH_MAX; vh = (VEHICLE)(vh + 1)) {
       if (SpanContains(VehicleToString(vh),
@@ -214,6 +214,8 @@ std::vector<std::bitset<VH_MAX>> ComputeBarrierVehicleAllowed() {
 //   3) "motor_vehicle=" sets access for all motorized traffic.
 //   4) "bicycle=", "foot=", "horse=" etc. set access for individual vehicle
 //      types.
+//
+// Depends on attribute 'node_direction', so this should be parsedc before.
 inline void SetBarrierRestrictions(VEHICLE vt, const ParsedTagInfo& pti,
                                    int64_t node_id, NodeTags* node_tags) {
   node_tags->barrier_type = BarrierToEnum(pti.FindValue({KEY_BIT_BARRIER}));
@@ -240,8 +242,25 @@ inline void SetBarrierRestrictions(VEHICLE vt, const ParsedTagInfo& pti,
     ABORT_S() << "vehicle type not (yet) supported:" << (int)vt;
   }
 
-  node_tags->acc_forw = apd.acc_forw;
-  node_tags->acc_backw = apd.acc_backw;
+  node_tags->barrier_acc_forw = apd.acc_forw;
+  node_tags->barrier_acc_backw = apd.acc_backw;
+
+  // Set free access if direction=forward|backward is present.
+  if (node_tags->node_direction == DIR_FORWARD) {
+    if (apd.acc_forw != apd.acc_backw && !RoutableFullAccess(apd.acc_backw)) {
+      // Log cases that for instance set direction=forward and access:backward
+      // at the same time.
+      LOG_S(INFO) << "SetBarrierRestrictions(): mixed directions at node "
+                  << node_id;
+    }
+    node_tags->barrier_acc_backw = ACC_YES;
+  } else if (node_tags->node_direction == DIR_BACKWARD) {
+    if (apd.acc_forw != apd.acc_backw && !RoutableFullAccess(apd.acc_forw)) {
+      LOG_S(INFO) << "SetBarrierRestrictions(): mixed directions at node"
+                  << node_id;
+    }
+    node_tags->barrier_acc_forw = ACC_YES;
+  }
 }
 
 }  // namespace

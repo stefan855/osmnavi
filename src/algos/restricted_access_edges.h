@@ -4,9 +4,11 @@
  * We want to label the areas of the road network that have destination-only or
  * otherwise restricted access. When these areas are properly labeled, then we
  * can use this during shortest route search to disallow traveling restricted
- * edges except for the start and the end of the route. We also make sure that
- * all restricted access areas end up in the same cluster during clustering, so
- * we never need to handle restricted edges when travelling across clusters.
+ * edges except for the start and the end of the route.
+ *
+ * During clustering, we also make sure that restricted access areas don't
+ * cross cluster border, so we never need to handle restricted edges when
+ * travelling across clusters.
  *
  * Problems to solve:
  * 1) Nodes can't be labeled 'restricted' or 'free', but edges can.
@@ -56,6 +58,7 @@ struct LabelEdgesResult {
   bool found_restricted = false;
   // Only residential street types have been followed.
   bool only_residential_street_types = true;
+  bool all_dead_end = true;
 };
 
 // Label all reachable edges that have edge flag 'follow_label' with
@@ -76,6 +79,10 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
     // non-unique ones.
     for (GEdge& e : gnode_all_edges(*g, node_idx)) {
       if (e.car_label == follow_label) {
+        res.all_dead_end = res.all_dead_end && (e.dead_end || e.bridge);
+        if (set_strange) {
+          LOG_S(INFO) << "Strange edge:" << debug_str(*g, e);
+        }
         e.car_label = set_label;
         e.car_label_strange = set_strange;
         queue.push_back(e.target_idx);
@@ -101,6 +108,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
 // edges that were not labelled ACC_CUSTOMERS, ACC_DELIVERY, ACC_DESTINATION
 // during creation.
 inline void LabelAllCarEdges(Graph* g, Verbosity verbosity) {
+  verbosity = Verbosity::Debug;
   constexpr bool strange_no = false;
   constexpr bool strange_yes = true;
   FUNC_TIMER();
@@ -139,7 +147,8 @@ inline void LabelAllCarEdges(Graph* g, Verbosity verbosity) {
     } else if (g->nodes.at(i).large_component == 0) {
       if (verbosity >= Verbosity::Debug) {
         LOG_S(INFO) << "Mark small comp:" << res.count
-                    << " node_id:" << g->nodes.at(i).node_id;
+                    << " node_id:" << g->nodes.at(i).node_id
+                    << " country:" << CountryNumToString(g->nodes.at(i).ncc);
       }
       // Small component, and it didn't fit 'secondary', label as free.
       const auto res2 = LabelCarEdges(i, GEdge::LABEL_TEMPORARY,
@@ -152,6 +161,7 @@ inline void LabelAllCarEdges(Graph* g, Verbosity verbosity) {
                     << " node_id:" << g->nodes.at(i).node_id
                     << " country:" << CountryNumToString(g->nodes.at(i).ncc)
                     << " found restricted:" << res.found_restricted
+                    << " all dead end:" << res.all_dead_end
                     << " only residential:" << res.only_residential_street_types
                     << " large_comp:" << g->nodes.at(i).large_component;
       }

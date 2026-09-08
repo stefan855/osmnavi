@@ -40,11 +40,10 @@ struct TurnCostData {
 };
 
 // Attributes extracted from node key-val pairs.
-// Currently, only barrier based access restrictions are extracted.
 struct NodeTags {
   int64_t node_id : 40 = 0;
 
-  DIRECTION direction : 3 = DIR_MAX;
+  DIRECTION node_direction : 3 = DIR_MAX;
 
   // Nodes with highway=crossing.
   std::uint32_t bit_crossing : 1 = 0;
@@ -74,10 +73,15 @@ struct NodeTags {
   std::uint32_t bit_public_transport : 1 = 0;
   std::uint32_t bit_traffic_calming : 1 = 0;
 
-  // Access for each individual vehicle type for barriers.
+  // Barrier type (if any) and the allowed access for the default vehicle type.
   BARRIER barrier_type : 6 = BARRIER_MAX;
-  ACCESS acc_forw = ACC_YES;
-  ACCESS acc_backw = ACC_YES;
+  // acc_forw/acc_backw reflect what is allowed by the type of barrier (see
+  // SetBarrierRestrictions()), which might have been overridden with explicit
+  // access tags on the node.
+  //
+  // Note that the direction is possible because of explicit tags.
+  ACCESS barrier_acc_forw = ACC_YES;
+  ACCESS barrier_acc_backw = ACC_YES;
 
   constexpr bool empty() const {
     return node_id == 0 && !bit_crossing && !bit_crossing_markings &&
@@ -85,8 +89,8 @@ struct NodeTags {
            !bit_turning_circle && !bit_stop && !bit_traffic_signals &&
            !bit_railway_crossing && !bit_railway_crossing_barrier &&
            !bit_public_transport && !bit_traffic_calming &&
-           (barrier_type == BARRIER_MAX) && acc_forw == ACC_YES &&
-           acc_backw == ACC_YES;
+           (barrier_type == BARRIER_MAX) && barrier_acc_forw == ACC_YES &&
+           barrier_acc_backw == ACC_YES;
   }
 };
 
@@ -956,8 +960,12 @@ inline RoutingAttrs GetRAFromWay(const Graph& g, const GWay& way, VEHICLE vt,
   return GetRAFromWSA(GetWSA(g, way), vt, dir);
 }
 
+// This can be PRIVATE or CUSTOMERS. Using private opens private streets for
+// routing, but it might have strange results, such as the possibility to leave highways through a private route. So it is turned off for now.
+constexpr ACCESS g_routable_access_low_end = ACC_CUSTOMERS;
+
 inline bool RoutableAccess(ACCESS acc) {
-  return acc >= ACC_CUSTOMERS && acc < ACC_MAX;
+  return acc >= g_routable_access_low_end && acc < ACC_MAX;
 }
 
 // Access is not restricted in any way.
@@ -971,7 +979,7 @@ inline bool FreeAccess(ACCESS acc) {
 
 // Access is allowed but restricted.
 inline bool RestrictedAccess(ACCESS acc) {
-  return acc >= ACC_CUSTOMERS && acc <= ACC_DESTINATION;
+  return acc >= g_routable_access_low_end && acc <= ACC_DESTINATION;
 }
 
 // Access is allowed but restricted.

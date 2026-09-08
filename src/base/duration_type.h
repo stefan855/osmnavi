@@ -63,6 +63,10 @@ class DurationMS {
     return DurationMS(ms_ / rhs);
   }
 
+  constexpr DurationMS operator*(uint64_t rhs) const {
+    return DurationMS(ms_ * rhs);
+  }
+
   constexpr DurationMS& operator+=(uint32_t rhs) {
     assert(ms_ <= MAXU32 - rhs);
     ms_ += rhs;

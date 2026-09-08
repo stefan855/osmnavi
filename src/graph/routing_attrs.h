@@ -5,6 +5,7 @@
 
 #include "absl/strings/str_split.h"
 #include "base/country_code.h"
+#include "base/duration_type.h"
 #include "base/util.h"
 #include "logging/loguru.h"
 
@@ -680,77 +681,99 @@ struct BarrierDef {
   BARRIER enum_val;
   std::string_view name;
   std::string_view allowed_vehicles;
+  // Time cost for an allowed vehicle to pass the obstacle. This could be
+  // different for different vehicles, but we go with one value for now.
+  DurationMS cost_to_pass;
 };
 
 static const std::vector<BarrierDef> g_barrier_def_vector = {
-    {BARRIER_BLOCK, "block", ""},
-    {BARRIER_BOLLARD, "bollard", "foot,bicycle,motorcycle"},
+    {BARRIER_BLOCK, "block", "", DurationMS(0u)},
+    {BARRIER_BOLLARD, "bollard", "foot,bicycle,motorcycle", DurationMS(0u)},
     {BARRIER_BORDER_CONTROL, "border_control",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
+     "emergency",
+     DurationMS(60'000u)},
     {BARRIER_BUMP_GATE, "bump_gate",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_BUS_TRAP, "bus_trap", "bus,truck,hgv"},
+     "emergency",
+     DurationMS(5'000u)},
+    {BARRIER_BUS_TRAP, "bus_trap", "bus,truck,hgv", DurationMS(5'000u)},
     {BARRIER_CATTLE_GRID, "cattle_grid",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_CHAIN, "chain", "foot,bicycle,motorcycle"},
+     "emergency",
+     DurationMS(5'000u)},
+    {BARRIER_CHAIN, "chain", "foot,bicycle,motorcycle", DurationMS(5'000u)},
     {BARRIER_CHECKPOINT, "checkpoint",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_CITY_WALL, "city_wall", ""},  // Stadtmauer
+     "emergency",
+     DurationMS(10'000u)},
+    {BARRIER_CITY_WALL, "city_wall", "", DurationMS(0u)},  // Stadtmauer
     {BARRIER_COUPURE, "coupure",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},  // Öffnung in einem Deich.
-    {BARRIER_CYCLE_BARRIER, "cycle_barrier", "foot,bicycle"},
-    {BARRIER_DEBRIS, "debris", ""},
+     "emergency",
+     DurationMS(0u)},  // Öffnung in einem Deich.
+    {BARRIER_CYCLE_BARRIER, "cycle_barrier", "foot,bicycle",
+     DurationMS(2'000u)},
+    {BARRIER_DEBRIS, "debris", "", DurationMS(0u)},
     {BARRIER_DITCH, "ditch",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
+     "emergency",
+     DurationMS(10'000u)},
     {BARRIER_ENTRANCE, "entrance",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_FENCE, "fence", ""},
-    {BARRIER_FULL_HEIGHT_TURNSTILE, "full-height_turnstile", "foot"},
+     "emergency",
+     DurationMS(200u)},
+    {BARRIER_FENCE, "fence", "", DurationMS(0u)},
+    {BARRIER_FULL_HEIGHT_TURNSTILE, "full-height_turnstile", "foot",
+     DurationMS(1'000u)},
     {BARRIER_GATE, "gate",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_HEDGE, "hedge", ""},
+     "emergency",
+     DurationMS(10'000u)},
+    {BARRIER_HEDGE, "hedge", "", DurationMS(0u)},
     {BARRIER_HEIGHT_RESTRICTOR, "height_restrictor",
-     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency"},
-    {BARRIER_HORSE_STILE, "horse_stile", "horse,foot"},
-    {BARRIER_KERB, "kerb", "foot,bicycle,wheelchair"},
-    {BARRIER_KISSING_GATE, "kissing_gate", "foot,bicycle"},
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency",
+     DurationMS(1'000u)},
+    {BARRIER_HORSE_STILE, "horse_stile", "horse,foot", DurationMS(2'000u)},
+    {BARRIER_KERB, "kerb", "foot,bicycle,wheelchair", DurationMS(1'000u)},
+    {BARRIER_KISSING_GATE, "kissing_gate", "foot,bicycle", DurationMS(2'000u)},
     {BARRIER_LIFT_GATE, "lift_gate",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_LOG, "log", "foot,bicycle,4wd"},  // Baumstamm als Barriere
-    {BARRIER_MOTORCYCLE_BARRIER, "motorcycle_barrier",
-     "foot,bicycle"},  // Motorräder werden blockiert
-    {BARRIER_ROPE, "rope", "foot,bicycle"},
-    {BARRIER_SALLY_PORT, "sally_port", "military"},
-    {BARRIER_SLIPWAY, "slipway", "foot,bicycle,boat"},  // Slipanlage für Boote
-    {BARRIER_SPIKES, "spikes", "foot"},  // für Fußgänger, blockiert Räder
-    {BARRIER_STILE, "stile", "foot"},
-    {BARRIER_STONE, "stone", ""},  // Steine als Barriere
-    {BARRIER_SUMP_BUSTER, "sump_buster", "4wd"},
+     "emergency",
+     DurationMS(10'000u)},
+    {BARRIER_LOG, "log", "foot,bicycle,4wd",
+     DurationMS(2'000u)},  // Baumstamm als Barriere
+    {BARRIER_MOTORCYCLE_BARRIER, "motorcycle_barrier", "foot,bicycle",
+     DurationMS(2'000u)},  // Motorräder werden blockiert
+    {BARRIER_ROPE, "rope", "foot,bicycle", DurationMS(2'000u)},
+    {BARRIER_SALLY_PORT, "sally_port", "military", DurationMS(2'000u)},
+    {BARRIER_SLIPWAY, "slipway", "foot,bicycle,boat",
+     DurationMS(0u)},  // Slipanlage für Boote
+    {BARRIER_SPIKES, "spikes", "foot",
+     DurationMS(1'000u)},  // für Fußgänger, blockiert Räder
+    {BARRIER_STILE, "stile", "foot", DurationMS(2'000u)},
+    {BARRIER_STONE, "stone", "", DurationMS(0u)},  // Steine als Barriere
+    {BARRIER_SUMP_BUSTER, "sump_buster", "4wd", DurationMS(5'000u)},
     {BARRIER_SWING_GATE, "swing_gate",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_TANK_TRAP, "tank_trap",
-     ""},  // für Panzer, normalerweise für alle blockierend
+     "emergency",
+     DurationMS(5'000u)},
+    {BARRIER_TANK_TRAP, "tank_trap", "",
+     DurationMS(0u)},  // für Panzer, normalerweise für alle blockierend
     {BARRIER_TOLL_BOOTH, "toll_booth",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
-    {BARRIER_TURNSTILE, "turnstile", "foot"},
-    {BARRIER_WALL, "wall", ""},
+     "emergency",
+     DurationMS(10'000u)},
+    {BARRIER_TURNSTILE, "turnstile", "foot", DurationMS(2'000u)},
+    {BARRIER_WALL, "wall", "", DurationMS(0u)},
     {BARRIER_WIDTH_RESTRICTOR, "width_restrictor",
-     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency"},
-    {BARRIER_WIRE_FENCE, "wire_fence", ""},  // Stacheldrahtzaun
+     "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,emergency",
+     DurationMS(2'000u)},
+    {BARRIER_WIRE_FENCE, "wire_fence", "", DurationMS(0u)},  // Stacheldrahtzaun
     {BARRIER_YES, "yes",
      "foot,bicycle,motorcar,truck,hgv,bus,agricultural,motorcycle,horse,"
-     "emergency"},
+     "emergency",
+     DurationMS(5'000u)},  // Unknown type, typically from aerial imagery.
     {BARRIER_UNKNOWN_VAL, "<non-empty-unknown>", ""}  // Can't interpret value.
 };
 

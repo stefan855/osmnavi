@@ -2200,7 +2200,7 @@ void LabelEdgesFromNodeTags(GraphMetaData* meta) {
     }
 
     if (nt.bit_stop || nt.bit_give_way || nt.bit_traffic_signals) {
-      if (nt.direction == DIR_BOTH || nt.direction == DIR_MAX) {
+      if (nt.node_direction == DIR_BOTH || nt.node_direction == DIR_MAX) {
         // ======================================
         // Missing direction or direction "both".
         // ======================================
@@ -2220,7 +2220,7 @@ void LabelEdgesFromNodeTags(GraphMetaData* meta) {
           // A single street with both directions allowed. Infer direction if
           // we find a crossing for one edge, but not for the other.
           if (nt.bit_traffic_signals ||
-              (nt.bit_stop && nt.direction == DIR_BOTH)) {
+              (nt.bit_stop && nt.node_direction == DIR_BOTH)) {
             // Assume it is both ways and there is no crossing to look for.
             // TODO: Some cases might not be handled correctly, for instance a
             // bicycle way crossing a car-road might be invisible here because
@@ -2283,7 +2283,7 @@ void LabelEdgesFromNodeTags(GraphMetaData* meta) {
         // ================
         // Valid direction.
         // ================
-        const bool contra_way = (nt.direction == DIR_BACKWARD);
+        const bool contra_way = (nt.node_direction == DIR_BACKWARD);
         if (in_edges.size() == 1) {
           // Check that the direction is correct.
           const FullEdge& in_edge = in_edges.front();

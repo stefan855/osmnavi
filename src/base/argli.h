@@ -180,6 +180,7 @@ class Argli {
     prog_ = argv[0];
 
     for (int pos = 1; pos < argc; ++pos) {
+      if (argv[pos] == nullptr) continue;  // nulled by other consumer.
       std::string_view name = argv[pos];
       ArgValue* found_arg = nullptr;
       bool has_hyphen = name.starts_with('-');

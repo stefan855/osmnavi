@@ -471,42 +471,23 @@ inline CurveStats ComputeCurveLoss(const Graph& g, VEHICLE vt,
   return res;
 }
 
-// Check if access through a node is blocked.
-// Special case:
-//   If the access at the node is restricted (for instance "destination"), then
-//   the incoming and outgoing ways have to be investigated. At least one of
-//   them should have the same access, otherwise the node can't be traversed.
+// Check if access through a node is blocked by a barrier.
 bool VehicleBlockedAtNode(const Graph& g, VEHICLE vt, const NodeTags* node_tags,
                           const N3Path& n3p) {
-  if (node_tags == nullptr || (RoutableFullAccess(node_tags->acc_forw) &&
-                               RoutableFullAccess(node_tags->acc_backw))) {
+  if (node_tags == nullptr || node_tags->barrier_type == BARRIER_MAX) {
     return false;  // not blocked.
   }
 
-  // TODO: handle direction? It is not clear how a direction on a bollard makes
-  // any sense.
-  if (!RoutableAccess(node_tags->acc_forw) ||
-      !RoutableAccess(node_tags->acc_backw)) {
-    return true;  // blocked.
-  }
+  // Use the direction of the arriving edge to select forward/backward from the
+  // node tag.
+  const ACCESS barrier_access = EDGE_DIR(n3p.edge0(g)) == DIR_FORWARD
+                                    ? node_tags->barrier_acc_forw
+                                    : node_tags->barrier_acc_backw;
 
-  // We know that at least one of the accesses is not "full" (and both are not
-  // ACC_NO) from above, i.e. it is restricted. Find the lowest value of
-  // restriction.
-  ACCESS min_acc = std::min(node_tags->acc_forw, node_tags->acc_backw);
-  // Check that either the incoming or outgoing way has the same access,
-  // otherwise the vehicle is blocked.
-
-  if (GetRAFromEdge(g, n3p.edge0(g), vt).access == min_acc ||
-      GetRAFromEdge(g, n3p.edge1(g), vt).access == min_acc) {
-    LOG_S(INFO) << "VehicleBlockedAtNode(): allow access acc:"
-                << AccessToStringSafe(min_acc) << " " << n3p.DebugStr(g);
-    return false;  // not blocked.
-  } else {
-    LOG_S(INFO) << "VehicleBlockedAtNode(): forbid access acc:"
-                << AccessToStringSafe(min_acc) << " " << n3p.DebugStr(g);
-    return true;  // blocked.
-  }
+  // We ignore special accesses like "destination", but will put a higher
+  // penalty on passing the node if the access is not full (see
+  // RoutableFullAccess()).
+  return !RoutableAccess(barrier_access);
 }
 
 // Is the U-Turn represented by 'n3p' allowed?
@@ -647,28 +628,47 @@ DurationMS NodeTagsCost(const Graph& g, const N3Path& n3p) {
     cost += 3'000;
   }
 
-  const NodeTags* attr = g.FindNodeTags(n3p.node1(g).node_id);
-  if (attr != nullptr) {
-    if (attr->bit_railway_crossing) {
+  const NodeTags* node_tags = g.FindNodeTags(n3p.node1(g).node_id);
+  if (node_tags != nullptr) {
+    if (node_tags->bit_railway_crossing) {
       cost += 500;
-      if (attr->bit_railway_crossing_barrier) {
+      if (node_tags->bit_railway_crossing_barrier) {
         // Check if the previous node is closer than 50m and already had a
         // railway barrier. If so, then discount the current "barrier", it
         // probably doesn't exist.
         // See https://www.openstreetmap.org/node/103007646
-        const NodeTags* attr_prev = g.FindNodeTags(n3p.node0(g).node_id);
-        if (attr_prev == nullptr || !attr_prev->bit_railway_crossing ||
-            !attr_prev->bit_railway_crossing_barrier ||
+        const NodeTags* node_tags_prev = g.FindNodeTags(n3p.node0(g).node_id);
+        if (node_tags_prev == nullptr ||
+            !node_tags_prev->bit_railway_crossing ||
+            !node_tags_prev->bit_railway_crossing_barrier ||
             n3p.edge0(g).distance.cm() > 5000) {
           // TODO: Maybe guess how busy the railway is? This is very inexact!
           cost += 40'000;
         }
       }
     }
-    if (attr->bit_traffic_calming || attr->barrier_type != BARRIER_MAX) {
-      // Assume every type of traffic calming or barrier slows down traffic by
-      // one second.
+    if (node_tags->bit_traffic_calming) {
+      // Assume every type of traffic calming slows down traffic by one second.
       cost += 1'000;
+    }
+    if (node_tags->barrier_type != BARRIER_MAX) {
+      const BarrierDef& bd = g_barrier_def_vector.at(node_tags->barrier_type);
+      // Check if the barrier has restricted accessibility. In this case we
+      // increase the cost to make it more unlikely that the barrier is passed
+      // to shorten a way to a target outside the "barrier-protected" area.
+      //
+      // Handling this type of access through barriers often is problematic,
+      // because taggers sometimes don't tag the ways themselves with the
+      // restricted access, which seems wrong (at least from a routing engine's
+      // perspective).
+      const ACCESS barrier_access = EDGE_DIR(n3p.edge0(g)) == DIR_FORWARD
+                                        ? node_tags->barrier_acc_forw
+                                        : node_tags->barrier_acc_backw;
+      if (RestrictedAccess(barrier_access)) {
+        cost = cost + bd.cost_to_pass * 3;
+      } else {
+        cost = cost + bd.cost_to_pass;
+      }
     }
   }
   return cost;
@@ -693,7 +693,7 @@ DurationMS ReversibleWayCost(const Graph& g, VEHICLE vt, const N3Path& n3p) {
 inline DurationMS ComputeTurnCostForN3Path(
     const Graph& g, TrafficSide traffic_side, VEHICLE vt,
     const IndexedTurnRestrictions& indexed_trs, const N3Path& n3p) {
-  const bool debug = n3p.node1(g).node_id == 0;
+  const bool debug = n3p.node1(g).node_id == 92298090;
 
   if (debug) {
     LOG_S(INFO) << "Compute turn cost for " << n3p.DebugStr(g);
@@ -711,6 +711,8 @@ inline DurationMS ComputeTurnCostForN3Path(
   // Is this a u-turn that is forbidden, given the type of crossing at the
   // middle node? Note that a positive turn restriction from above always
   // allows a u-turn.
+
+  // Note that node_tags might be a nullptr!
   const NodeTags* node_tags = g.FindNodeTags(n3p.node1(g).node_id);
   const bool uturn = (n3p.node0_idx == n3p.node2_idx);
   if (uturn) {
@@ -769,10 +771,10 @@ inline DurationMS ComputeTurnCostForN3Path(
       {cost_node_tags, cost_curve, cost_crossing, cost_reversible_way});
 
   if (debug) {
+    LOG_S(INFO) << "  Cost curve " << cost_curve;
     LOG_S(INFO) << "  Cost node tags " << cost_node_tags;
     LOG_S(INFO) << "  Cost crossing " << cost_crossing;
-    LOG_S(INFO) << "  Cost curve " << cost_curve;
-    LOG_S(INFO) << "  Cost reversible way" << cost_reversible_way;
+    LOG_S(INFO) << "  Cost reversible way " << cost_reversible_way;
     LOG_S(INFO) << "  Cost max " << cost;
   }
   return cost;
