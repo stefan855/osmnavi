@@ -51,6 +51,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 ## Current Tasks
 * Compute different turn costs for a left turn vs. a right turn. This also depends on the driving mode in the country (left/right).
 * Improve routing description: Say things like "turn right on ..."
+* Determine reachability for clusters and nodes. This is useful to prevent expensive searches of routes when there is no possible path. Also, it is interesting to identify parts in the graph that are isolated, i.e. can't reach or can't be reached by most other nodes in the same component.
 * Fix unrestricted areas behind restricted areas.
 * Ignore dead-end when possible in routing (should speed up routing).
 * Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
