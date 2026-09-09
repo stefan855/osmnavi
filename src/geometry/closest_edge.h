@@ -84,7 +84,6 @@ std::vector<ClusterInfo> FindGoodClusters(const MMGraph& mg, LatLon pt) {
   std::vector<ClusterInfo> result;
 
   // Roughly ten kilometers in lat direction.
-  // constexpr int64_t lat_10km = 1'111'111;
   constexpr LatE6 lat_10km(360.0 * (100.0 * 1000.0 * 10.0) /
                            static_cast<double>(kEarthRadiusCm));
   // Roughly ten kilometers in lon direction.

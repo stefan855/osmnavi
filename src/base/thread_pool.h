@@ -67,9 +67,13 @@ class ThreadPool {
     {
       std::unique_lock<std::mutex> l(mutex_);
       wait_all_finished_ = true;
+      // From now on if a worker finishes and there is no work left then it will
+      // terminate the thread.
     }
+    // Tell all threads to start running.
     cond_var_.notify_all();
     for (auto& thread : threads_) {
+      // Wait until the thread finishes.
       thread.join();
     }
   }
@@ -88,6 +92,9 @@ class ThreadPool {
         std::unique_lock<std::mutex> l(tp.mutex_);
         if (tp.queue_.empty()) {
           if (tp.wait_all_finished_) {
+            // Work has started (tp.wait_all_finished_) but there is no more
+            // work available, so finish the thread and make it ready to be
+            // "joined" by the main thread.
             return;
           }
           tp.cond_var_.wait(
@@ -108,11 +115,59 @@ class ThreadPool {
   }
 };
 
+/*
+ * void worker(int id, SerializingLock& ser_lock) {
+ *   .. parallel section ..
+ *
+ *   std::unique_lock<std::mutex> lock(ser_lock.mtx);
+ *   ser_lock.wait_until_its_my_row(id, lock); // blocks; returns with lock held
+ *   .. serialized section ..
+ *   ser_lock.advance(lock);           // marks this row done, wakes next thread
+ *
+ *   .. parallel section ..
+ * }
+ */
+
+// A serializing lock allows to serialize output when using a thread pool, but
+// still do a lot of work in parallel.
+//
+// This for example can be used to serialize writing to a file. Each worker
+// creates the data it wants to write in parallel. When it is done, it will use
+// the serializing lock to wait writing the output until it is its turn.
+//
+// For this, each worker unit in the thread pool must know its 'serial number'
+// 0,1,2,3...N and the ordering must correspond to how the worker units where
+// added to the thread pool above.
+//
+// For a code example see above.
+class SerializingLock {
+ public:
+  std::mutex mtx;
+
+  // 'lock' must already be held (locked on mtx) when this is called.
+  // Blocks until it's thread `id`'s turn; returns with 'lock' still held.
+  void wait_until_its_my_row(int id, std::unique_lock<std::mutex>& lock) {
+    cv_.wait(lock, [&] { return next_ == id; });
+  }
+
+  // Call this once you're done with your row, while still holding 'lock'.
+  // Advances the turn, releases the lock, and wakes the waiting threads.
+  void advance(std::unique_lock<std::mutex>& lock) {
+    ++next_;
+    lock.unlock();
+    cv_.notify_all();
+  }
+
+ private:
+  std::condition_variable cv_;
+  int next_ = 0;
+};
+
 // Helper class to process data in an array/vector using a ThreadPool. The array
 // is partitioned into contiguous chunks, which are processed be threads.
 // ChunkDataT can be used to store data for each thread. For instance, it can be
 // used to store in which thread a chunk was executed in.
-template <typename ChunkDataT=int>
+template <typename ChunkDataT = int>
 class ArrayChunker {
  public:
   struct Chunk {

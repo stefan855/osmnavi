@@ -33,8 +33,7 @@ struct TmpComplexTR {
   std::vector<uint32_t> path;
 };
 
-// Temporary data for a cluster, before it is written to the mmap file.
-struct TmpClusterInfo {
+struct TmpClusterBase {
   uint32_t cluster_id;
   uint16_t color_no;
 
@@ -42,6 +41,12 @@ struct TmpClusterInfo {
   // Auxiliary data.
   // **************************************************************************
   std::vector<uint32_t> cnode_to_gnode;
+};
+
+// Temporary data for a cluster, before it is written to the mmap file.
+struct TmpClusterInfo {
+  const TmpClusterBase& cb;
+
   absl::flat_hash_map<uint32_t, MNodeIdx> gnode_to_cnode;
 
   absl::flat_hash_map<uint32_t, MWayIdx> gway_to_cway;
@@ -106,8 +111,8 @@ TmpNodeClass GetTmpNodeClass(uint32_t cluster_id, const GNode& n) {
   return n.dead_end ? TmpNodeClass::DeadEnd : TmpNodeClass::Normal;
 }
 
-// For each cluster, initialise TmpClusterInfo and collect the nodes belonging
-// to the cluster in tci.cnode_to_gnode.
+// For each cluster, initialise TmpClusterBase and collect the nodes belonging
+// to the cluster in tci.cb.cnode_to_gnode.
 //
 // This includes dead-ends, that is every dead-end belongs to exactly one
 // cluster.
@@ -115,23 +120,23 @@ TmpNodeClass GetTmpNodeClass(uint32_t cluster_id, const GNode& n) {
 // This also includes border nodes of other clusters that are connected through
 // incoming or outgoing edges to the cluster.
 inline void CollectClusterNodes(const Graph& g,
-                                std::vector<TmpClusterInfo>* cluster_infos) {
-  // Prepare TmpClusterInfo for each cluster.
-  cluster_infos->assign(g.clusters.size(), {0});
+                                std::vector<TmpClusterBase>* v_cluster_base) {
+  // Prepare TmpClusterBase for each cluster.
+  v_cluster_base->assign(g.clusters.size(), {0});
   for (uint32_t cluster_id = 0; cluster_id < g.clusters.size(); ++cluster_id) {
     const GCluster& gc = g.clusters.at(cluster_id);
-    TmpClusterInfo* tci = &cluster_infos->at(cluster_id);
-    tci->cluster_id = cluster_id;
-    tci->color_no = gc.color_no;
+    TmpClusterBase* cb = &v_cluster_base->at(cluster_id);
+    cb->cluster_id = cluster_id;
+    cb->color_no = gc.color_no;
     // +500 to accommodate the border nodes of connected clusters.
-    tci->cnode_to_gnode.reserve(gc.num_nodes + gc.num_deadend_nodes + 500);
+    cb->cnode_to_gnode.reserve(gc.num_nodes + gc.num_deadend_nodes + 500);
   }
 
   // Iterate over graph nodes and store node indices for each cluster.
   for (uint32_t node_idx = 0; node_idx < g.nodes.size(); ++node_idx) {
     const GNode& n = g.nodes.at(node_idx);
     if (n.cluster_id != INVALID_CLUSTER_ID) {
-      cluster_infos->at(n.cluster_id).cnode_to_gnode.push_back(node_idx);
+      v_cluster_base->at(n.cluster_id).cnode_to_gnode.push_back(node_idx);
       if (n.cluster_border_node) {
         // Store connected nodes from other clusters.
         for (const GEdge& e : gnode_all_edges(g, node_idx)) {
@@ -140,7 +145,7 @@ inline void CollectClusterNodes(const Graph& g,
             CHECK_NE_S(target.cluster_id, INVALID_CLUSTER_ID);
             // Add connected off-cluster node. This might create duplicate
             // entries, so we need to de-duplicate after sorting below.
-            cluster_infos->at(n.cluster_id)
+            v_cluster_base->at(n.cluster_id)
                 .cnode_to_gnode.push_back(e.target_idx);
           }
         }
@@ -154,13 +159,13 @@ inline void CollectClusterNodes(const Graph& g,
   //   3. "normal nodes"
   //   4. "dead-end nodes"
   // Within each category, nodes are sorted by gnode-idx.
-  for (TmpClusterInfo& tci : *cluster_infos) {
+  for (TmpClusterBase& cb : *v_cluster_base) {
     // Sort.
     std::sort(
-        tci.cnode_to_gnode.begin(), tci.cnode_to_gnode.end(),
-        [&g, &tci](const uint32_t a, const uint32_t b) {
-          const auto class_a = GetTmpNodeClass(tci.cluster_id, g.nodes.at(a));
-          const auto class_b = GetTmpNodeClass(tci.cluster_id, g.nodes.at(b));
+        cb.cnode_to_gnode.begin(), cb.cnode_to_gnode.end(),
+        [&g, &cb](const uint32_t a, const uint32_t b) {
+          const auto class_a = GetTmpNodeClass(cb.cluster_id, g.nodes.at(a));
+          const auto class_b = GetTmpNodeClass(cb.cluster_id, g.nodes.at(b));
           if (class_a != class_b) {
             return class_a < class_b;
           } else {
@@ -169,10 +174,9 @@ inline void CollectClusterNodes(const Graph& g,
         });
     // De-duplicate (only works when it is sorted).
     // See above why this is needed.
-    auto last =
-        std::unique(tci.cnode_to_gnode.begin(), tci.cnode_to_gnode.end());
-    if (last != tci.cnode_to_gnode.end()) {
-      tci.cnode_to_gnode.erase(last, tci.cnode_to_gnode.end());
+    auto last = std::unique(cb.cnode_to_gnode.begin(), cb.cnode_to_gnode.end());
+    if (last != cb.cnode_to_gnode.end()) {
+      cb.cnode_to_gnode.erase(last, cb.cnode_to_gnode.end());
     }
   }
 }
@@ -180,7 +184,7 @@ inline void CollectClusterNodes(const Graph& g,
 // Add edges from g to the cluster and fill 'tci->cedge_to_gedge_offset' and
 // 'tci->cedge_to_gway_idx'.
 void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
-  const GCluster& gcl = g.clusters.at(tci->cluster_id);
+  const GCluster& gcl = g.clusters.at(tci->cb.cluster_id);
   const uint32_t expected_num_edges =
       gcl.num_inner_edges + gcl.num_deadend_edges + 500;
   // Edges.
@@ -190,20 +194,20 @@ void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
   tci->cedge_to_gway_idx.reserve(expected_num_edges);
   tci->mm_edge_to_distance.reserve(expected_num_edges);
   tci->mm_edge_to_speed_fraction_idx.reserve(expected_num_edges);
-  for (uint32_t c_pos = 0; c_pos < tci->cnode_to_gnode.size(); ++c_pos) {
-    uint32_t gn_idx = tci->cnode_to_gnode.at(c_pos);
+  for (uint32_t c_pos = 0; c_pos < tci->cb.cnode_to_gnode.size(); ++c_pos) {
+    uint32_t gn_idx = tci->cb.cnode_to_gnode.at(c_pos);
     const GNode& n = g.nodes.at(gn_idx);
-    // CHECK_EQ_S(n.cluster_id, tci->cluster_id);
+    // CHECK_EQ_S(n.cluster_id, tci->cb.cluster_id);
     MM_NODE_RW(tci->mm_nodes.at(c_pos)).set_edge_start_idx(edge_start_idx);
     CHECK_EQ_S(MM_NODE(tci->mm_nodes.at(c_pos)).edge_start_idx(),
                edge_start_idx);
     for (const GEdge& e : gnode_forward_edges(g, gn_idx)) {
       const GNode& target = g.nodes.at(e.target_idx);
       // We're interested in the edge if one of the two nodes is in-cluster.
-      if (n.cluster_id == tci->cluster_id ||
-          target.cluster_id == tci->cluster_id) {
-        CHECK_EQ_S((n.cluster_id == tci->cluster_id) !=
-                       (target.cluster_id == tci->cluster_id),
+      if (n.cluster_id == tci->cb.cluster_id ||
+          target.cluster_id == tci->cb.cluster_id) {
+        CHECK_EQ_S((n.cluster_id == tci->cb.cluster_id) !=
+                       (target.cluster_id == tci->cb.cluster_id),
                    e.cross_cluster_edge);
         // Add edge;
         MNodeIdx ctarget_idx =
@@ -303,14 +307,14 @@ void FillTmpClusterTurnCosts(const Graph& g, TmpClusterInfo* tci) {
         // Now we have two edges representing a turn:
         //   (cn0_idx, ce0_idx) and (cn1_idx, ce1_idx).
         // Get the turn cost for this turn that were computed in 'graph'.
-        const uint32_t gn0_idx = tci->cnode_to_gnode.at(cn0_idx.v());
+        const uint32_t gn0_idx = tci->cb.cnode_to_gnode.at(cn0_idx.v());
         const uint32_t ge0_off = tci->cedge_to_gedge_offset.at(ce0_idx);
-        const uint32_t gn1_idx = tci->cnode_to_gnode.at(cn1_idx.v());
+        const uint32_t gn1_idx = tci->cb.cnode_to_gnode.at(cn1_idx.v());
         const uint32_t ge1_off = tci->cedge_to_gedge_offset.at(ce1_idx);
         const FullEdge fe0(gn0_idx, ge0_off);
         const FullEdge fe1(gn1_idx, ge1_off);
         if (fe0.start_idx() == fe1.target_idx(g) &&
-            fe1.start_node(g).cluster_id != tci->cluster_id) {
+            fe1.start_node(g).cluster_id != tci->cb.cluster_id) {
           // U-turn og_edge -> ic_edge is always disallowed, because this should
           // be evaluated on the target cluster, i.e. incoming to outgoing edge.
           tcd.turn_costs.push_back(TURN_COST_INFINITY_COMPRESSED);
@@ -367,8 +371,8 @@ void FillTmpClusterComplexTRs(const Graph& g, TmpClusterInfo* tci) {
       const MMEdge eb = MM_EDGE(tci->mm_edges.at(cedge_idx));
       if (eb.complex_turn_restriction_trigger()) {
         const MNodeIdx cto_idx = eb.target_idx();
-        const uint32_t gfrom_idx = tci->cnode_to_gnode.at(cfrom_idx.v());
-        const uint32_t gto_idx = tci->cnode_to_gnode.at(cto_idx.v());
+        const uint32_t gfrom_idx = tci->cb.cnode_to_gnode.at(cfrom_idx.v());
+        const uint32_t gto_idx = tci->cb.cnode_to_gnode.at(cto_idx.v());
         const uint32_t gway_idx = tci->cedge_to_gway_idx.at(cedge_idx);
 
         // Find triggering turn restrictions.
@@ -397,7 +401,7 @@ void FillTmpClusterComplexTRs(const Graph& g, TmpClusterInfo* tci) {
 }
 
 void FillTmpClusterInEdges(const Graph& g, TmpClusterInfo* tci) {
-  const GCluster& gcl = g.clusters.at(tci->cluster_id);
+  const GCluster& gcl = g.clusters.at(tci->cb.cluster_id);
   for (const GCluster::EdgeDescriptor& gi : gcl.border_in_edges) {
     const GEdge& g_edge = g.edges.at(gi.g_edge_idx);
     const auto iter_from = tci->gnode_to_cnode.find(gi.g_from_idx);
@@ -425,7 +429,7 @@ void FillTmpClusterInEdges(const Graph& g, TmpClusterInfo* tci) {
         tci->mm_in_edges.push_back({
             .from_cluster_id = g.nodes.at(gi.g_from_idx).cluster_id,
             .from_node_idx = cfrom_idx,
-            .to_cluster_id = tci->cluster_id,
+            .to_cluster_id = tci->cb.cluster_id,
             .to_node_idx = cto_idx,
             .edge_idx = MEdgeIdx(c_edge_idx),
             .in_edge_pos = static_cast<uint16_t>(tci->mm_in_edges.size()),
@@ -442,7 +446,7 @@ void FillTmpClusterInEdges(const Graph& g, TmpClusterInfo* tci) {
 }
 
 void FillTmpClusterOutEdges(const Graph& g, TmpClusterInfo* tci) {
-  const GCluster& gcl = g.clusters.at(tci->cluster_id);
+  const GCluster& gcl = g.clusters.at(tci->cb.cluster_id);
   for (const GCluster::EdgeDescriptor& gi : gcl.border_out_edges) {
     const GEdge& g_edge = g.edges.at(gi.g_edge_idx);
     const auto iter_from = tci->gnode_to_cnode.find(gi.g_from_idx);
@@ -468,7 +472,7 @@ void FillTmpClusterOutEdges(const Graph& g, TmpClusterInfo* tci) {
         CHECK_LT_S(tci->mm_out_edges.size(),
                    std::numeric_limits<uint16_t>::max());
         tci->mm_out_edges.push_back({
-            .from_cluster_id = tci->cluster_id,
+            .from_cluster_id = tci->cb.cluster_id,
             .from_node_idx = cfrom_idx,
             .to_cluster_id = g.nodes.at(g_edge.target_idx).cluster_id,
             .to_node_idx = cto_idx,
@@ -487,21 +491,22 @@ void FillTmpClusterOutEdges(const Graph& g, TmpClusterInfo* tci) {
 }
 
 void FillTmpClusterNodes(const Graph& g, TmpClusterInfo* tci) {
-  CHECK_LT_S(tci->cnode_to_gnode.size(), std::numeric_limits<uint32_t>::max());
+  CHECK_LT_S(tci->cb.cnode_to_gnode.size(),
+             std::numeric_limits<uint32_t>::max());
   CHECK_S(tci->gnode_to_cnode.empty());
 
   // Mapping table from cluster node idx to graph node idx.
-  for (uint32_t pos = 0; pos < tci->cnode_to_gnode.size(); ++pos) {
-    tci->gnode_to_cnode[tci->cnode_to_gnode.at(pos)] = MNodeIdx(pos);
+  for (uint32_t pos = 0; pos < tci->cb.cnode_to_gnode.size(); ++pos) {
+    tci->gnode_to_cnode[tci->cb.cnode_to_gnode.at(pos)] = MNodeIdx(pos);
   }
 
-  tci->mm_nodes.reserve(tci->cnode_to_gnode.size());
-  for (uint32_t idx : tci->cnode_to_gnode) {
+  tci->mm_nodes.reserve(tci->cb.cnode_to_gnode.size());
+  for (uint32_t idx : tci->cb.cnode_to_gnode) {
     const GNode& n = g.nodes.at(idx);
     MMNode nb = {0};
     nb.set_border_node(n.cluster_border_node);
     nb.set_dead_end(n.dead_end);
-    nb.set_off_cluster_node(n.cluster_id != tci->cluster_id);
+    nb.set_off_cluster_node(n.cluster_id != tci->cb.cluster_id);
     // Off cluster nodes must be border nodes.
     CHECK_S(!nb.off_cluster_node() || nb.border_node());
     tci->mm_nodes.push_back(nb.data__);
@@ -548,7 +553,7 @@ inline void FillTmpClusterShapeCoords(const Graph& g, TmpClusterInfo* tci) {
   tci->cedge_shape_coord_length.reserve(num_edges);
 
   for (MNodeIdx cnode_idx(0u); cnode_idx < tci->mm_nodes.size(); ++cnode_idx) {
-    const uint32_t gfrom_idx = tci->cnode_to_gnode.at(cnode_idx.v());
+    const uint32_t gfrom_idx = tci->cb.cnode_to_gnode.at(cnode_idx.v());
     const GNode& gfrom_node = g.nodes.at(gfrom_idx);
 
     for (uint32_t cedge_idx : cnode_edge_indices(*tci, cnode_idx)) {
@@ -632,9 +637,17 @@ void FillTmpClusterInfo(const Graph& g, TmpClusterInfo* tci) {
   FillTmpClusterShapeCoords(g, tci);
 }
 
+#if 0
 void ComputeTmpClusterInfos(const Graph& g, int n_threads,
+                            const std::vector<TmpClusterBase>& v_cluster_base,
                             std::vector<TmpClusterInfo>* tmp_cluster_infos) {
   FUNC_TIMER();
+  CHECK_S(tmp_cluster_infos->empty());
+  tmp_cluster_infos->reserve(tmp_cluster_infos->size());
+  for (const TmpClusterBase& cb : v_cluster_base) {
+    tmp_cluster_infos->emplace_back(cb);
+  }
+
   // Create input data.
   ThreadPool pool;
   for (TmpClusterInfo& tci : *tmp_cluster_infos) {
@@ -643,6 +656,7 @@ void ComputeTmpClusterInfos(const Graph& g, int n_threads,
   pool.Start(n_threads);
   pool.WaitAllFinished();
 }
+#endif
 
 void ComputeClusterNodeNumbers(const TmpClusterInfo& tci,
                                MMCluster* mmcluster) {
@@ -720,8 +734,8 @@ void CheckGEdge(const Graph& g, const TmpClusterInfo& tci, const MMCluster& mc,
   int64_t to_id = tci.mm_node_to_osm_id.at(cto_idx.v());
   int64_t way_id = tci.mm_way_to_osm_id.at(cway_idx.v());
 
-  uint32_t gfrom_idx = tci.cnode_to_gnode.at(cfrom_idx.v());
-  uint32_t gto_idx = tci.cnode_to_gnode.at(cto_idx.v());
+  uint32_t gfrom_idx = tci.cb.cnode_to_gnode.at(cfrom_idx.v());
+  uint32_t gto_idx = tci.cb.cnode_to_gnode.at(cto_idx.v());
   uint32_t gway_idx = g.FindWayIndex(way_id);
   CHECK_EQ_S(from_id, g.nodes.at(gfrom_idx).node_id);
   CHECK_EQ_S(to_id, g.nodes.at(gto_idx).node_id);
@@ -751,8 +765,8 @@ FullEdge find_full_gedge(const Graph& g, const TmpClusterInfo& tci,
   MNodeIdx cto_idx = e.target_idx();
   MWayIdx cway_idx = mc.edge_to_way.at(cedge_idx);
 
-  uint32_t gfrom_idx = tci.cnode_to_gnode.at(cfrom_idx.v());
-  uint32_t gto_idx = tci.cnode_to_gnode.at(cto_idx.v());
+  uint32_t gfrom_idx = tci.cb.cnode_to_gnode.at(cfrom_idx.v());
+  uint32_t gto_idx = tci.cb.cnode_to_gnode.at(cto_idx.v());
   int64_t way_id = tci.mm_way_to_osm_id.at(cway_idx.v());
   uint32_t gway_idx = g.FindWayIndex(way_id);
 
@@ -864,15 +878,18 @@ void CheckShapeCoords(const TmpClusterInfo& tci, const MMCluster& mc) {
 }
 
 void CheckMMCluster(const Graph& g, const MMGraph& mg, const MMCluster& mc,
-                    const TmpClusterInfo& tci) {
+                    const TmpClusterBase& cb) {
   FUNC_TIMER();
 
   LOG_S(INFO) << "Check cluster " << mc.cluster_id;
-  CHECK_EQ_S(tci.cluster_id, mc.cluster_id);
+  CHECK_EQ_S(cb.cluster_id, mc.cluster_id);
   LOG_S(INFO) << " num_border_nodes:" << mc.num_border_nodes;
   LOG_S(INFO) << " num_off_cluster_nodes:" << mc.num_off_cluster_nodes;
   LOG_S(INFO) << " num_inner_nodes:" << mc.num_inner_nodes;
   LOG_S(INFO) << " num_dead_end_nodes:" << mc.num_dead_end_nodes;
+
+  TmpClusterInfo tci(cb);
+  FillTmpClusterInfo(g, &tci);
 
   CHECK_EQ_S(&mg, &mc.mg());
 
@@ -1037,7 +1054,7 @@ void CheckMMCluster(const Graph& g, const MMGraph& mg, const MMCluster& mc,
 }
 
 void CheckMMClusters(const Graph& g, const MMGraph& mg,
-                     const std::vector<TmpClusterInfo>& tmp_infos,
+                     const std::vector<TmpClusterBase>& v_cluster_base,
                      int n_threads) {
   FUNC_TIMER();
   LOG_S(INFO) << "Check " << mg.clusters.size() << " clusters";
@@ -1045,16 +1062,16 @@ void CheckMMClusters(const Graph& g, const MMGraph& mg,
 
   ThreadPool pool;
   for (uint32_t cluster_id = 0; cluster_id < mg.clusters.size(); ++cluster_id) {
-    const TmpClusterInfo& tci = tmp_infos.at(cluster_id);
+    const TmpClusterBase& cb = v_cluster_base.at(cluster_id);
     const MMCluster& mc = mg.clusters.at(cluster_id);
-    pool.AddWork([&g, &mg, &mc, &tci](int) { CheckMMCluster(g, mg, mc, tci); });
+    pool.AddWork([&g, &mg, &mc, &cb](int) { CheckMMCluster(g, mg, mc, cb); });
   }
   pool.Start(n_threads);
   pool.WaitAllFinished();
 }
 
 void CheckMMGraph(const Graph& g, const std::string& mm_path,
-                  const std::vector<TmpClusterInfo>& tmp_cluster_infos,
+                  const std::vector<TmpClusterBase>& v_cluster_base,
                   int n_threads) {
   FUNC_TIMER();
   int fd = ::open(mm_path.c_str(), O_RDONLY | O_CLOEXEC, 0644);
@@ -1096,15 +1113,15 @@ void CheckMMGraph(const Graph& g, const std::string& mm_path,
     }
   }
 
-  CheckMMClusters(g, mmheader, tmp_cluster_infos, n_threads);
+  CheckMMClusters(g, mmheader, v_cluster_base, n_threads);
   munmap((void*)ptr, file_size);
 }
 
 void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
                               int64_t global_object_offset, int fd) {
   CHECK_GT_S(global_object_offset, 0);
-  mmcluster->cluster_id = tci.cluster_id;
-  mmcluster->color_no = tci.color_no;
+  mmcluster->cluster_id = tci.cb.cluster_id;
+  mmcluster->color_no = tci.cb.color_no;
   ComputeClusterNodeNumbers(tci, mmcluster);
   mmcluster->bounding_rect = tci.mm_bounding_rect;
   mmcluster->relative_mg_offset__ = -global_object_offset;
@@ -1112,7 +1129,7 @@ void WriteMMClusterHybridPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
   LOG_S(INFO) << absl::StrFormat(
       "Write cl:%u ic:%llu og:%llu n:%llu e:%llu w:%llu wsa:%llu tc:%llu "
       "ctrs:%llu",
-      tci.cluster_id, tci.mm_in_edges.size(), tci.mm_out_edges.size(),
+      tci.cb.cluster_id, tci.mm_in_edges.size(), tci.mm_out_edges.size(),
       tci.mm_nodes.size(), tci.mm_edges.size(), tci.gway_to_cway.size(),
       tci.mm_way_shared_attrs.size(), tci.turn_costs.size(),
       tci.complex_tr.size());
@@ -1145,7 +1162,7 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
   LOG_S(INFO) << absl::StrFormat(
       "Write cl:%u ic:%llu og:%llu n:%llu e:%llu w:%llu wsa:%llu tc:%llu "
       "ctrs:%llu",
-      tci.cluster_id, tci.mm_in_edges.size(), tci.mm_out_edges.size(),
+      tci.cb.cluster_id, tci.mm_in_edges.size(), tci.mm_out_edges.size(),
       tci.mm_nodes.size(), tci.mm_edges.size(), tci.gway_to_cway.size(),
       tci.mm_way_shared_attrs.size(), tci.turn_costs.size(),
       tci.complex_tr.size());
@@ -1344,40 +1361,141 @@ void WriteGraphToMMFile(const Graph& g, const std::string& mm_path,
     mmheader.edge_speed_fraction[i] = g.edge_speed_fraction[i];
   }
 
-  std::vector<TmpClusterInfo> tmp_cluster_infos;
-  CollectClusterNodes(g, &tmp_cluster_infos);
-  CHECK_EQ_S(g.clusters.size(), tmp_cluster_infos.size());
+  std::vector<TmpClusterBase> v_cluster_base;
+  CollectClusterNodes(g, &v_cluster_base);
+  CHECK_EQ_S(g.clusters.size(), v_cluster_base.size());
 
+#if 0
   // Create input data.
-  ComputeTmpClusterInfos(g, n_threads, &tmp_cluster_infos);
+  std::vector<TmpClusterInfo> tmp_cluster_infos;
+  ComputeTmpClusterInfos(g, n_threads, v_cluster_base, &tmp_cluster_infos);
+#endif
 
   LogMemoryUsage();
 
+  {
+    // Hybrid Cluster Data
+    ThreadPool pool;
+    // Use a serializing lock to write data for clusters ordered by cluster_id.
+    SerializingLock ser_lock;
+    for (uint32_t cluster_id = 0; cluster_id < v_cluster_base.size();
+         ++cluster_id) {
+      const TmpClusterBase& cb = v_cluster_base.at(cluster_id);
+      CHECK_EQ_S(cluster_id, cb.cluster_id);
+
+      pool.AddWork([&cb, &g, fd, &clusters, &sorted_bounding_rects,
+                    clusters_data_offset, &ser_lock](int thread_idx) {
+        TmpClusterInfo tci(cb);
+        FillTmpClusterInfo(g, &tci);
+        {
+          std::unique_lock<std::mutex> lock(ser_lock.mtx);
+          ser_lock.wait_until_its_my_row(cb.cluster_id, lock);
+          // Critical section.
+          LOG_S(INFO) << "Writing hybrid part cluster " << cb.cluster_id;
+
+          WriteMMClusterHybridPart(
+              tci, &clusters.at(cb.cluster_id),
+              // global file offset of this MMCluster object.
+              clusters_data_offset + (cb.cluster_id * sizeof(MMCluster)), fd);
+          sorted_bounding_rects.at(cb.cluster_id) = {
+              .cluster_id = cb.cluster_id,
+              .bounding_rect = tci.mm_bounding_rect};
+
+          ser_lock.advance(lock);
+        }
+      });
+    }
+    pool.Start(n_threads);
+    pool.WaitAllFinished();
+  }
+
+#if 0
+  // Hybrid Cluster Data
+  LOG_S(INFO) << "Start WriteMMClusterHybridPart";
+  for (const TmpClusterBase& cb : v_cluster_base) {
+    TmpClusterInfo tci(cb);
+    FillTmpClusterInfo(g, &tci);
+    WriteMMClusterHybridPart(
+        tci, &clusters.at(tci.cb.cluster_id),
+        // global file offset of this MMCluster object.
+        clusters_data_offset + (tci.cb.cluster_id * sizeof(MMCluster)), fd);
+    sorted_bounding_rects.at(tci.cb.cluster_id) = {
+        .cluster_id = tci.cb.cluster_id, .bounding_rect = tci.mm_bounding_rect};
+  }
+#endif
+
+  {
+    // Expanded Cluster Data.
+    ThreadPool pool;
+    // Use a serializing lock to write data for clusters ordered by cluster_id.
+    SerializingLock ser_lock;
+    for (uint32_t cluster_id = 0; cluster_id < v_cluster_base.size();
+         ++cluster_id) {
+      const TmpClusterBase& cb = v_cluster_base.at(cluster_id);
+      CHECK_EQ_S(cluster_id, cb.cluster_id);
+
+      pool.AddWork([&cb, &g, fd, &clusters, clusters_data_offset,
+                    &ser_lock](int thread_idx) {
+        TmpClusterInfo tci(cb);
+        FillTmpClusterInfo(g, &tci);
+        {
+          std::unique_lock<std::mutex> lock(ser_lock.mtx);
+          ser_lock.wait_until_its_my_row(cb.cluster_id, lock);
+          // Critical section.
+          LOG_S(INFO) << "Writing expanded part cluster " << cb.cluster_id;
+          WriteMMClusterExpandedPart(
+              tci, &clusters.at(cb.cluster_id),
+              // global file offset of this MMCluster object.
+              clusters_data_offset + (tci.cb.cluster_id * sizeof(MMCluster)),
+              fd);
+          ser_lock.advance(lock);
+        }
+      });
+    }
+    pool.Start(n_threads);
+    pool.WaitAllFinished();
+  }
+
+#if 0
+  // Expanded Cluster Data.
+  LOG_S(INFO) << "Start WriteMMClusterExpandedPart";
+  for (const TmpClusterBase& cb : v_cluster_base) {
+    TmpClusterInfo tci(cb);
+    FillTmpClusterInfo(g, &tci);
+    WriteMMClusterExpandedPart(
+        tci, &clusters.at(tci.cb.cluster_id),
+        // global file offset of this MMCluster object.
+        clusters_data_offset + (tci.cb.cluster_id * sizeof(MMCluster)), fd);
+}
+#endif
+
+#if 0
   // Hybrid Cluster Data
   LOG_S(INFO) << "Start WriteMMClusterHybridPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
     // FillTmpClusterInfo(g, &tci);
     WriteMMClusterHybridPart(
-        tci, &clusters.at(tci.cluster_id),
+        tci, &clusters.at(tci.cb.cluster_id),
         // global file offset of this MMCluster object.
-        clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)), fd);
-    sorted_bounding_rects.at(tci.cluster_id) = {
-        .cluster_id = tci.cluster_id, .bounding_rect = tci.mm_bounding_rect};
+        clusters_data_offset + (tci.cb.cluster_id * sizeof(MMCluster)), fd);
+    sorted_bounding_rects.at(tci.cb.cluster_id) = {
+        .cluster_id = tci.cb.cluster_id, .bounding_rect = tci.mm_bounding_rect};
   }
 
   // Expanded Cluster Data.
   LOG_S(INFO) << "Start WriteMMClusterExpandedPart";
   for (TmpClusterInfo& tci : tmp_cluster_infos) {
     WriteMMClusterExpandedPart(
-        tci, &clusters.at(tci.cluster_id),
+        tci, &clusters.at(tci.cb.cluster_id),
         // global file offset of this MMCluster object.
-        clusters_data_offset + (tci.cluster_id * sizeof(MMCluster)), fd);
+        clusters_data_offset + (tci.cb.cluster_id * sizeof(MMCluster)), fd);
 #if 0
     if (!check_mmgraph) {
       tci = {};  // Clear all data, release memory.
     }
 #endif
   }
+#endif
 
   std::sort(sorted_bounding_rects.begin(), sorted_bounding_rects.end(),
             [](const MMClusterBoundingRect& a, const MMClusterBoundingRect& b) {
@@ -1404,6 +1522,6 @@ void WriteGraphToMMFile(const Graph& g, const std::string& mm_path,
   if (::close(fd) != 0) FileAbortOnError("close");
 
   if (check_mmgraph) {
-    CheckMMGraph(g, mm_path, tmp_cluster_infos, n_threads);
+    CheckMMGraph(g, mm_path, v_cluster_base, n_threads);
   }
 }
