@@ -53,6 +53,7 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 * Improve routing description: Say things like "turn right on ..."
 * Determine reachability for clusters and nodes. This is useful to prevent expensive searches of routes when there is no possible path. Also, it is interesting to identify parts in the graph that are isolated, i.e. can't reach or can't be reached by most other nodes in the same component.
 * Fix unrestricted areas behind restricted areas.
+* Sometimes it works to drive into a dead-end just to do a u-turn. These u-turns should be recorded as special turn cost at the bridge that leads into the dead-end. Without this, we can't ignore dead-ends even when the target is not in one, because we would miss these u-turns.
 * Ignore dead-end when possible in routing (should speed up routing).
 * Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
 * Remove the serialized graph, it is replaced by the memory mapped graph.
