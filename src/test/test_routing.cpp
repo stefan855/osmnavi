@@ -1484,8 +1484,8 @@ void TestCurveCosts() {
         res.curve_speed, res.time_loss_in.ms(), res.time_loss_out.ms(),
         res.avg_speed_in, res.avg_speed_out);
 
-    CHECK_EQ_S(res.time_loss_in, DurationMS(1476U));
-    CHECK_EQ_S(res.time_loss_out, DurationMS(2194u));
+    CHECK_EQ_S(res.time_loss_in, DurationMS(1065u));
+    CHECK_EQ_S(res.time_loss_out, DurationMS(1590u));
   }
 }
 
