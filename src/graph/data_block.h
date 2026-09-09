@@ -125,8 +125,8 @@ class NodeBuilder {
  private:
   struct InternalBlockIter {
     const DataBlockTable::DataBlock* b_ = nullptr;
-    std::uint32_t pos_;
-    std::uint32_t cnt_;
+    std::uint32_t pos_ = 0;
+    std::uint32_t cnt_ = 0;
     VNode n_;
     void Start(const DataBlockTable::DataBlock* block) {
       assert(block != nullptr);

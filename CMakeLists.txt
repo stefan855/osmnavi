@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.7)
 
 set( CMAKE_CXX_STANDARD 26 )
+set( CMAKE_CXX_STANDARD_REQUIRED on )
 # valgrind needs this.
 # set( CMAKE_CXX_FLAGS "-mno-avx" ) 
 set( CMAKE_POSITION_INDEPENDENT_CODE true )

@@ -271,7 +271,8 @@ void WriteGraphToCSV(const Graph& g, VEHICLE vt, const std::string& filename) {
       }
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
                                 n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
-                                other.ll.lat.AsDouble(), other.ll.lon.AsDouble());
+                                other.ll.lat.AsDouble(),
+                                other.ll.lon.AsDouble());
       count++;
     }
   }
@@ -298,7 +299,8 @@ void WriteLabeledEdges(const Graph& g, GEdge::RESTRICTION label, bool strange,
       const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
                                 n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
-                                other.ll.lat.AsDouble(), other.ll.lon.AsDouble());
+                                other.ll.lat.AsDouble(),
+                                other.ll.lon.AsDouble());
       count++;
     }
   }
@@ -328,7 +330,8 @@ void WriteClusterSkeletonEdges(const Graph& g, const std::string& color,
       const GNode& target = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
                                 n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
-                                target.ll.lat.AsDouble(), target.ll.lon.AsDouble());
+                                target.ll.lat.AsDouble(),
+                                target.ll.lon.AsDouble());
       count++;
     }
   }
@@ -385,7 +388,8 @@ void WriteRestrictedRoadsToCSV(const Graph& g, VEHICLE vt,
       const GNode& other = g.nodes.at(e.target_idx);
       myfile << absl::StrFormat("line,%s,%.6f,%.6f,%.6f,%.6f\n", color.c_str(),
                                 n.ll.lat.AsDouble(), n.ll.lon.AsDouble(),
-                                other.ll.lat.AsDouble(), other.ll.lon.AsDouble());
+                                other.ll.lat.AsDouble(),
+                                other.ll.lon.AsDouble());
       count++;
     }
   }
@@ -788,8 +792,7 @@ int main(int argc, char* argv[]) {
   }
 #endif
 
-  WriteGraphToMMFile(g, "/tmp/mmgraph.file", opt.n_threads,
-                     check_mmgraph);
+  WriteGraphToMMFile(g, "/tmp/mmgraph.file", opt.n_threads, check_mmgraph);
   {
     int fd = ::open("/tmp/mmgraph.file", O_RDWR | O_CLOEXEC, 0644);
     if (fd < 0) FileAbortOnError("open");
@@ -824,9 +827,10 @@ int main(int argc, char* argv[]) {
               idx1, idx2, ma, mb, ma != mb ? " DIFF" : "");
           */
           if (ma != mb) {
-            LOG_S(INFO) << "Error checking cluster routing tables: cluster_id:"
-                        << mmc.cluster_id << " idx1:" << idx1
-                        << " idx2:" << idx2;
+            LOG_S(INFO) << absl::StrFormat(
+                "Error checking cluster routing tables cluster:%u idx1:%u "
+                "idx2:%u val-g:%u val-mm:%u",
+                mmc.cluster_id, idx1, idx2, ma, mb);
           }
         }
       }

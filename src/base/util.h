@@ -16,7 +16,8 @@
 
 #define CHECK_IS_POD(type_to_check)                             \
   static_assert(std::is_standard_layout<type_to_check>::value); \
-  static_assert(std::is_trivial<type_to_check>::value);
+  static_assert(std::is_trivially_default_constructible<type_to_check>::value); \
+  static_assert(std::is_trivially_copyable<type_to_check>::value);
 
 #define CHECK_IS_MM_OK(type_to_check) \
   static_assert(std::is_standard_layout<type_to_check>::value);

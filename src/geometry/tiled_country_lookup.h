@@ -76,8 +76,8 @@ class TiledCountryLookup {
   uint64_t TileKey(int32_t lon, int32_t lat) const {
     int64_t norm_lon = 180ll * kDegreeUnits + TileOrigin(lon);
     int64_t norm_lat = 180ll * kDegreeUnits + TileOrigin(lat);
-    CHECK_GE_S(norm_lon, 0);
-    CHECK_GE_S(norm_lat, 0);
+    CHECK_GE_S(norm_lon, 0) << lon;
+    CHECK_GE_S(norm_lat, 0) << lat;
     return ((static_cast<uint64_t>(norm_lon) / tile_size_) << 32) +
            (static_cast<uint64_t>(norm_lat) / tile_size_);
   }

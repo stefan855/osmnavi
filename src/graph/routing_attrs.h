@@ -814,8 +814,7 @@ struct alignas(2) RoutingAttrs {
   // 0 = unknown, otherwise width in decimeters.
   uint8_t width_dm;
 };
-static_assert(std::is_standard_layout<RoutingAttrs>::value);
-static_assert(std::is_trivial<RoutingAttrs>::value);
+CHECK_IS_POD(RoutingAttrs);
 
 inline void ClearRoutingAttrs(RoutingAttrs* ra) {
   std::memset(ra, 0, sizeof(RoutingAttrs));
