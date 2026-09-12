@@ -46,23 +46,23 @@ Under Construction. Expect code to be buggy and unstable. Use at your own risk.
 2. Improve routing: Display shape coordinates (street curvature) for the route.
 3. Concatenate consecutive street segments of the same street in returned routes.
 4. Compute speed reduction for edges with shape nodes (depending on curvature).
-5. CrossingCost() now considers conflicts with other traffic, handles right/left driving countries and uses road hierarchy to have a rough extimate for traffic frequency.
+5. CrossingCost() now considers conflicts with other traffic, handles right/left driving countries and uses road hierarchy to have a rough estimate for traffic frequency.
+6. Compute different turn costs for a left turn vs. a right turn. This also depends on the driving mode in the country (left/right).
 
 ## Current Tasks
-* Compute different turn costs for a left turn vs. a right turn. This also depends on the driving mode in the country (left/right).
-* Improve routing description: Say things like "turn right on ..."
+* Ignore dead-end when possible in routing (should speed up routing). Fix or remove functions like start_dead_end_edges() or num_non_dead_end_edges() which give wrong numbers (or have wrong descriptions).
 * Determine reachability for clusters and nodes. This is useful to prevent expensive searches of routes when there is no possible path. Also, it is interesting to identify parts in the graph that are isolated, i.e. can't reach or can't be reached by most other nodes in the same component.
+* Improve routing description: Say things like "turn right on ..."
 * Fix unrestricted areas behind restricted areas.
 * Sometimes it works to drive into a dead-end just to do a u-turn. These u-turns should be recorded as special turn cost at the bridge that leads into the dead-end. Without this, we can't ignore dead-ends even when the target is not in one, because we would miss these u-turns.
-* Ignore dead-end when possible in routing (should speed up routing).
-* Move remaining overlays from tile_server to mm_routing_server and retire tile_server.
+* Move remaining overlays (cross country edges, ...) from tile_server to mm_routing_server and retire tile_server.
 * Remove the serialized graph, it is replaced by the memory mapped graph.
 * Support lanes. It isn't currently clear to me if lanes are needed for routing, or if they are only useful for the user experience during navigation. At least find out what needs to be done.
 
 ## Tasks ahead
 2. Handle streets where one can not stop - "highway=motorway" or some usage of "no_stopping" - when finding start or target positions. For instance,  a motorway edge can not be a target for routing.
 3. Extend config for car routing and cover more central European countries (see [routing.cfg](config/routing.cfg)).
-4. Find and fix issues in car routing. Known issues are for instance incomplete restrcited areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
+4. Find and fix issues in car routing. Known issues are for instance incomplete restricted areas (such as a parking lot with restricted entry/exit but the parking lot itself not restricted). 
 1. Support more transportation means, especially bicycles and pedestrians. So far, development mainly targets cars.
 2. Make the routing server use https instead of http.
 3. Experiment and potentially replace the Louvain clustering algorithm with a MaximumFlow/MinCut based algorithm, which should provide better clusters. See [Schild, Aaron, and Christian Sommer. "On balanced separators in road networks.", 2015](https://aschild.github.io/papers/roadseparator.pdf)
