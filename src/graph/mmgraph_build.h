@@ -693,18 +693,6 @@ void ComputeClusterNodeNumbers(const TmpClusterInfo& tci,
   }
 }
 
-// IdxT: Index type of first vector.
-template <typename IdxT = uint32_t, typename T1, typename T2>
-void compare_check_vectors(const std::string& name, const T1& v1,
-                           const T2& v2) {
-  LOG_S(INFO) << "  Check " << name << ":" << v1.size();
-  CHECK_EQ_S(v1.size(), v2.size());
-  CHECK_EQ_S(v1.size(), v2.size());
-  for (uint32_t i = 0; i < v1.size(); ++i) {
-    CHECK_EQ_S(v1.at(IdxT(i)), v2.at(i));
-  }
-}
-
 // check that a cnode is plausible:
 //   - exists in g.
 //   - is in expected cluster or a border node.

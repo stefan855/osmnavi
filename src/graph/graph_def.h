@@ -378,6 +378,7 @@ struct GCluster {
     uint32_t g_edge_idx = INFU32;
     uint32_t tmp_c_from_idx = INFU32;
     uint32_t tmp_c_edge_idx = INFU32;
+    // Position of the edge descriptor in its list.
     uint32_t pos = INFU32;
   };
   uint32_t cluster_id = 0;

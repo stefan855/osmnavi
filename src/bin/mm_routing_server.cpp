@@ -272,7 +272,6 @@ class StepsData {
 
     for (uint32_t pos = from_pos; pos <= to_pos; ++pos) {
       const MMFullEdge& fe = res_.full_edges.at(pos);
-      const MMCluster& mc = fe.mc(mg);
       sum_duration += res_.edge_metric(pos);
       sum_distance += res_.distance(mg, pos).cm();
 
@@ -283,18 +282,19 @@ class StepsData {
       std::vector<LatLon> coords;
       double start_at_fraction;  // The shape list starts at this fraction.
       if (pos == 0) {
-        coords = ComputeStartShapeCoords(mc, res_.start);
+        coords = ComputeStartShapeCoords(res_.start.fe.mc(mg), res_.start);
         start_at_fraction = res_.start.to_fraction;
         // We dont have a prev, so use the start bearing of the route.
         CHECK_GE_S(coords.size(), 2);
         prev_bearing = true_north_bearing(coords.at(0), coords.at(1));
       } else {
-        coords =
-            mc.get_shape_coords_extended(fe.from_node_idx, fe.edge_idx(mc));
+        coords = fe.mc(mg).get_shape_coords_extended(fe.from_node_idx,
+                                                     fe.edge_idx(fe.mc(mg)));
         start_at_fraction = 0.0;
       }
       if (pos + 1 == num_steps()) {
-        TerminateTargetShapeCoords(mc, res_.target, start_at_fraction, &coords);
+        TerminateTargetShapeCoords(res_.target.fe.mc(mg), res_.target,
+                                   start_at_fraction, &coords);
       }
 
       if (pos == from_pos) {

@@ -81,6 +81,19 @@ inline double RelativeDifference(double a, double b) {
   CHECK_S(RelativeDifference(a, b) <= tolerance) \
       << absl::StrFormat("a=%.19f and b=%.19f are different", a, b);
 
+// Check if two vectors are the same.
+// IdxT: Index type of first vector.
+template <typename IdxT = uint32_t, typename T1, typename T2>
+void compare_check_vectors(const std::string& name, const T1& v1,
+                           const T2& v2) {
+  LOG_S(INFO) << "  Check " << name << ":" << v1.size();
+  CHECK_EQ_S(v1.size(), v2.size());
+  CHECK_EQ_S(v1.size(), v2.size());
+  for (uint32_t i = 0; i < v1.size(); ++i) {
+    CHECK_EQ_S(v1.at(IdxT(i)), v2.at(i));
+  }
+}
+
 // Object that measures time execution time of a function and prints information
 // about start, end and elapsed time.
 // Just put the macro FUNC_TIMER() on the first line of you function.

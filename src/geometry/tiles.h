@@ -392,8 +392,8 @@ std::string CreatePNGForHybridRouting(const MMGraph& mg,
     const MMOutgoingEdge& out_edge =
         MMHybridRouter::out_edge_from_hybrid_key(mg, key);
     const MMCluster& mc = mg.mc(out_edge.from_cluster_id);
-    const TileColor color =
-        hvis.done ? (TileColor)(mc.color_no % NUM_COLORS) : GREY;
+    const TileColor color = hvis.done ? BLACK : GREY;
+        // hvis.done ? (TileColor)(mc.color_no % NUM_COLORS) : GREY;
     const LatLon latlon0 = mc.node_to_latlon(out_edge.from_node_idx);
     const LatLon latlon1 = mc.node_to_latlon(out_edge.to_node_idx);
     DrawLineInternal(pd, latlon0, latlon1, MAGENTA);

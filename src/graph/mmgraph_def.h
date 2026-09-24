@@ -369,10 +369,15 @@ struct MMCluster {
   uint32_t start_dead_end_nodes() const {
     return num_border_nodes + num_off_cluster_nodes + num_inner_nodes;
   }
-  // The first index of an edge belonging to a dead end. This is the first edge
-  // that is labelled bridge() or dead_end().
+
+  // The first index of an edge belonging to a dead-end. This is the first edge
+  // that is labelled bridge() or dead_end(). <-- wrong!.
   // Note that this is - by construction - the same as the number of
   // non-dead-end edges in the cluster.
+  //
+  // TODO: this seems wrong, i.e. it contains dead-end edges and outgoing
+  // bridges (from dead-end to non-dead-end), but not edges from non-dead-end to
+  // dead-end.
   MEdgeIdx start_dead_end_edges() const {
     uint32_t first_n_idx = start_dead_end_nodes();
     if (first_n_idx == 0) {
@@ -758,24 +763,28 @@ struct MMFullEdge {
     // Find the from/to clusters.
     uint32_t cluster_id_from = cluster_id;
     uint32_t cluster_id_to = cluster_id;
+    const char *from_cluster_str = "";
+    const char *to_cluster_str = "";
     if (edge(mc).cross_cluster_edge()) {
       if (mc.get_node(from_node_idx).off_cluster_node()) {
         // incoming edge.
         cluster_id_from = mc.find_incoming_edge(edge_idx(mc)).from_cluster_id;
+        to_cluster_str = "h";
       } else {
         // outgoing edge.
         cluster_id_to = mc.find_outgoing_edge(edge_idx(mc)).to_cluster_id;
+        from_cluster_str = "h";
       }
     }
     return absl::StrFormat(
-        "%lld->%lld w:%lld <%s> dist:%.2fm sp-fr:%.2f cl-id:%u->%u",
+        "%lld->%lld w:%lld <%s> dist:%.2fm sp-fr:%.2f cl-id:%u%s->%u%s",
         mc.get_node_id(from_node_idx), mc.get_node_id(target_idx(mc)),
         mc.get_edge_to_way_id(edge_idx(mc)),
         HighwayLabelToString(get_wsa(mc).highway_label_),
         mc.edge_to_distance.at(edge_idx(mc)).meters(),
         mc.mg().edge_speed_fraction[mc.edge_to_speed_fraction_idx.at(
             edge_idx(mc))],
-        cluster_id_from, cluster_id_to);
+        cluster_id_from, from_cluster_str, cluster_id_to, to_cluster_str);
   }
 
   std::string DebugString(const MMGraph& mg) const {

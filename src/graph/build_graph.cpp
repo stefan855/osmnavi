@@ -17,6 +17,7 @@
 #include "graph/data_block.h"
 #include "graph/graph_def.h"
 #include "graph/graph_def_utils.h"
+#include "graph/graph_sccs.h"
 #include "graph/node_tags.h"
 #include "graph/routing_attrs.h"
 #include "graph/routing_config.h"
@@ -2461,6 +2462,8 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 
   ComputeAllTurnCosts(&meta);
   ComputeClusterPaths(meta.opt, &meta);
+  // Experimental
+  ComputeClusterGraphSCCs(meta.graph);
   build_clusters::PrintClusterInformation(meta.graph);
 
   // Add up all the per thread stats.

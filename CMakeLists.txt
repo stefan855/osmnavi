@@ -159,6 +159,10 @@ add_executable(test_base src/test/test_base.cpp)
 target_include_directories(test_base SYSTEM PRIVATE)
 target_link_libraries(test_base PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
 
+add_executable(test_tarjan src/test/test_tarjan.cpp)
+target_include_directories(test_tarjan SYSTEM PRIVATE)
+target_link_libraries(test_tarjan PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)
+
 add_executable(test_serialize src/test/test_serialize.cpp)
 target_include_directories(test_serialize SYSTEM PRIVATE)
 target_link_libraries(test_serialize PRIVATE absl::strings absl::flat_hash_map absl::str_format loguru_lib absl::time)

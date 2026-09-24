@@ -694,8 +694,9 @@ int main(int argc, char* argv[]) {
   opt.check_shortest_cluster_paths =
       argli.GetBool("check_shortest_cluster_paths");
   opt.keep_all_nodes = argli.GetBool("keep_all_nodes");
-
   const bool check_mmgraph = argli.GetBool("check_mmgraph");
+
+  LOG_S(INFO) << "Using up to " << opt.n_threads << " threads";
 
   build_graph::GraphMetaData meta = build_graph::BuildGraph(opt);
   const Graph& g = meta.graph;
