@@ -69,7 +69,10 @@ namespace {
 // "oneway:bicycle"). Executing modifications on data in increasing
 // selectivity order properly overwrites broad values with more specific values.
 uint32_t ComputeTagSelectivity(KeySet bitset) {
-  uint32_t selectivity = 0;
+  uint32_t selectivity = 1;
+  if (BitsetsOverlap(bitset, BITSET_VERY_BROAD)) {
+    selectivity = 0;
+  }
   // Cycleway is treated the same as a vehicle type for priority.
   if (BitsetsOverlap(bitset, BITSET_MODIFIERS)) {
     selectivity += 10;

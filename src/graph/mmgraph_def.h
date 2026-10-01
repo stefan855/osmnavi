@@ -17,7 +17,7 @@
 
 constexpr uint64_t kMMMagic = 7715514337782280064ull;
 constexpr uint32_t kMMVersionMajor = 0;
-constexpr uint32_t kMMVersionMinor = 9;
+constexpr uint32_t kMMVersionMinor = 10;
 
 // Stores basic node data in an uint64_t.
 struct MMNode {
@@ -220,6 +220,9 @@ struct MMCluster {
   MMGroupedOSMIds<MWayIdx> grouped_way_to_osm_id;
 
   MMShapeCoords edge_shape_coords;
+
+  // Debugging data.
+  MMCompressedUIntVecTmpl<uint8_t, MEdgeIdx> edge_to_isolated_scc;
 
   // Helper functions.
   uint32_t get_path_metric(uint32_t in_edge_pos, uint32_t out_edge_pos) const {
@@ -633,6 +636,7 @@ struct MMGraph {
               "avg max     min      avg      max         sum");
     RAW_LOG_F(INFO, std::string(115, '=').c_str());
     uint64_t total = 0;
+
     DO_STATS_FOR_CLUSTER_ATTR(in_edges, total);
     DO_STATS_FOR_CLUSTER_ATTR(out_edges, total);
     DO_STATS_FOR_CLUSTER_ATTR(path_metrics, total);
@@ -654,6 +658,8 @@ struct MMGraph {
     DO_STATS_FOR_CLUSTER_ATTR(grouped_node_to_osm_id, total);
     DO_STATS_FOR_CLUSTER_ATTR(grouped_way_to_osm_id, total);
     DO_STATS_FOR_CLUSTER_ATTR(edge_shape_coords, total);
+    DO_STATS_FOR_CLUSTER_ATTR(edge_to_isolated_scc, total);
+
     RAW_LOG_F(INFO, std::string(115, '-').c_str());
     RAW_LOG_F(INFO, "Total %6lu clusters %63lu %20lu (%5.2f%%)",
               clusters.size(), total / clusters.size(), total,

@@ -105,9 +105,15 @@ inline void SetAccess(const ParsedTag& pt, bool weak, std::string_view value,
     }
   }
 }
+
+void SetDrivewayAccess(AccessPerDirection* apd) {
+  apd->acc_forw = std::min(apd->acc_forw, ACC_DESTINATION);
+  apd->acc_backw = std::min(apd->acc_backw, ACC_DESTINATION);
+}
+
 }  // namespace
 
-inline AccessPerDirection CarAccess(const OSMTagHelper& tagh,
+inline AccessPerDirection CarAccess(const OSMTagHelper& tagh, HIGHWAY_LABEL hw,
                                     std::int64_t way_id,
                                     const std::vector<ParsedTag>& ptags,
                                     const AccessPerDirection dflt) {
@@ -116,8 +122,8 @@ inline AccessPerDirection CarAccess(const OSMTagHelper& tagh,
   // 1) access:lanes:backward=motorcar;motorcycle|hgv (TODO!)
   // 2) lanes:motor_vehicle=yes|no|yes
   constexpr KeySet selector_bits =
-      KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_MOTOR_VEHICLE,
-              KEY_BIT_MOTORCAR});
+      KeySet({KEY_BIT_SERVICE, KEY_BIT_ACCESS, KEY_BIT_VEHICLE,
+              KEY_BIT_MOTOR_VEHICLE, KEY_BIT_MOTORCAR});
   // ":both_ways" is not used here. It means a lane that is for both directions,
   // not both ":forward" and ":backward" for the road. See
   // https://wiki.openstreetmap.org/wiki/Forward_&_backward,_left_&_right
@@ -130,14 +136,19 @@ inline AccessPerDirection CarAccess(const OSMTagHelper& tagh,
     }
 
     const KeySet ks = pt.bits & ~modifier_bits;
-    if (ks == KeySet({KEY_BIT_ACCESS}) ||
-        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}) ||
-        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE}) ||
-        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR}) ||
-        // Instead of access:motorcar=... one can say motorcar=...
-        ks == KeySet({KEY_BIT_VEHICLE}) ||
-        ks == KeySet({KEY_BIT_MOTOR_VEHICLE}) ||
-        ks == KeySet({KEY_BIT_MOTORCAR})) {
+    if (hw == HW_SERVICE && ks == KeySet({KEY_BIT_SERVICE}) &&
+        tagh.ToString(pt.val_st_idx) == "driveway") {
+      // service=driveway marks minor service roads, we mark them as
+      // destination.
+      SetDrivewayAccess(&apd);
+    } else if (ks == KeySet({KEY_BIT_ACCESS}) ||
+               ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}) ||
+               ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTOR_VEHICLE}) ||
+               ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_MOTORCAR}) ||
+               // Instead of access:motorcar=... one can say motorcar=...
+               ks == KeySet({KEY_BIT_VEHICLE}) ||
+               ks == KeySet({KEY_BIT_MOTOR_VEHICLE}) ||
+               ks == KeySet({KEY_BIT_MOTORCAR})) {
       const bool weak = (ks == KeySet({KEY_BIT_ACCESS}));
       SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), &apd);
     }
@@ -146,12 +157,12 @@ inline AccessPerDirection CarAccess(const OSMTagHelper& tagh,
 }
 
 inline AccessPerDirection BicycleAccess(const OSMTagHelper& tagh,
-                                        std::int64_t way_id,
+                                        HIGHWAY_LABEL hw, std::int64_t way_id,
                                         const std::vector<ParsedTag>& ptags,
                                         const AccessPerDirection dflt) {
   AccessPerDirection apd = dflt;
-  constexpr KeySet selector_bits =
-      KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_BICYCLE});
+  constexpr KeySet selector_bits = KeySet(
+      {KEY_BIT_SERVICE, KEY_BIT_ACCESS, KEY_BIT_VEHICLE, KEY_BIT_BICYCLE});
   constexpr KeySet modifier_bits =
       KeySet({KEY_BIT_FORWARD, KEY_BIT_BACKWARD, KEY_BIT_BOTH_WAYS,
               KEY_BIT_LANES_INNER});
@@ -162,11 +173,17 @@ inline AccessPerDirection BicycleAccess(const OSMTagHelper& tagh,
     }
 
     const KeySet ks = pt.bits & ~modifier_bits;
-    if (ks == KeySet({KEY_BIT_ACCESS}) ||
-        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}) ||
-        ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_BICYCLE}) ||
-        // Instead of access:bicycle=... one can say bicycle=...
-        ks == KeySet({KEY_BIT_VEHICLE}) || ks == KeySet({KEY_BIT_BICYCLE})) {
+    if (hw == HW_SERVICE && ks == KeySet({KEY_BIT_SERVICE}) &&
+        tagh.ToString(pt.val_st_idx) == "driveway") {
+      // service=driveway marks minor service roads, we mark them as
+      // destination.
+      SetDrivewayAccess(&apd);
+    } else if (ks == KeySet({KEY_BIT_ACCESS}) ||
+               ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_VEHICLE}) ||
+               ks == KeySet({KEY_BIT_ACCESS, KEY_BIT_BICYCLE}) ||
+               // Instead of access:bicycle=... one can say bicycle=...
+               ks == KeySet({KEY_BIT_VEHICLE}) ||
+               ks == KeySet({KEY_BIT_BICYCLE})) {
       const bool weak = (ks == KeySet({KEY_BIT_ACCESS}));
       SetAccess(pt, weak, tagh.ToString(pt.val_st_idx), &apd);
     }

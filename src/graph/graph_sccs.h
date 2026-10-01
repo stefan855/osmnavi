@@ -7,155 +7,66 @@
 #include "graph/graph_def_utils.h"
 
 namespace {
+// ThinGraph for the edge graph in component 'comp.
+struct FullGraphThinGraph : ThinGraph {
+ private:
+  const Graph& g_;
+  // Map from ThinGraph-node-index to Graph-edge-index.
+  std::vector<uint32_t> tarjan_nodes_;
+  // Inverse mapping from above.
+  absl::flat_hash_map<uint32_t, uint32_t> gidx_to_tarjan_;
 
-// Create a graph at cluster level to be used as input to Tarjan SCC. Because
-// we have turn restrictions, we need to make the edges of the cluster graph
-// the "primary" objects, i.e. the nodes, for Tarjan SCC. Edges in Tarjan SCC
-// are actually edge-to-edge paths in the cluster graph.
-//
-// Incoming cluster edges are interpreted as "nodes" for Tarjan. Every
-// outgoing edge is converted to the corresponding incoming edge, so all nodes
-// are incoming edges.
-//
-// Each valid path through a cluster consists of incoming edge -> outgoing
-// edge. This is converted to incoming-to-incoming-edge and interpreted as
-// "edge" for Tarjan SCC.
-struct MyThinGraph : ThinGraph {
-  MyThinGraph(const Graph& g) : g_(g) {
-    // Build the vector of "nodes" for tarjan SCC, in our case incoming edges
-    // of the clusters.
-    uint32_t num = 0;
-    for (const GCluster& c : g_.clusters) {
-      num += c.border_in_edges.size();
-    }
-
-    idx_to_edge_key_.reserve(num);
-    for (const GCluster& c : g_.clusters) {
-      for (const GCluster::EdgeDescriptor& d : c.border_in_edges) {
-        uint32_t edge_key = create_edge_key(c.cluster_id, d.pos);
-        edge_key_to_idx_[edge_key] = idx_to_edge_key_.size();
-        idx_to_edge_key_.push_back(edge_key);
-      }
-    }
-    LOG_S(INFO) << "Created Thingraph nodes:" << idx_to_edge_key_.size();
-    LOG_S(INFO) << "Created Thingraph map:" << edge_key_to_idx_.size();
-
-    // =======================================================================
-
-    // Check outgoing edge reachability within clusters.
-    for (const GCluster& c : g_.clusters) {
-      for (const GCluster::EdgeDescriptor& out : c.border_out_edges) {
-        // Check if it can be reached from any incoming edge.
-        uint32_t cnt = 0;
-        for (uint32_t in_pos = 0; in_pos < c.border_in_edges.size(); ++in_pos) {
-          cnt += c.edge_distances.at(in_pos).at(out.pos) != INFU32;
+ public:
+  FullGraphThinGraph(const Graph& g, const Graph::Component& comp) : g_(g) {
+    // Run through all nodes in component and fill mapping data.
+    for (uint32_t gnode_idx : comp.nodes_sorted) {
+      for (const GEdge& e : gnode_forward_edges(g_, gnode_idx)) {
+        if (!e.unique_target || e.target_idx == gnode_idx) {
+          continue;
         }
-        if (cnt < 2) {
-          const uint32_t to_node_idx = g_.edges.at(out.g_edge_idx).target_idx;
-          const GCluster& target_c =
-              g_.clusters.at(g_.nodes.at(to_node_idx).cluster_id);
-          const uint32_t converted_in_pos =
-              target_c.FindIncomingEdgePos(out.g_edge_idx);
-
-          LOG_S(INFO) << absl::StrFormat(
-              "Outgoing edge (%u,%u) (as in:(%u,%u)) reachability:%u",
-              c.cluster_id, out.pos, target_c.cluster_id, converted_in_pos,
-              cnt);
-        }
+        uint32_t gedge_idx = gnode_edge_idx(g_, e);
+        gidx_to_tarjan_[gedge_idx] = tarjan_nodes_.size();
+        tarjan_nodes_.push_back(gedge_idx);
       }
     }
 
-    // =======================================================================
-
-    // We have the nodes. Now add the edges.
-    uint32_t count = 0;
-    for (const GCluster& c : g_.clusters) {
-      for (const GCluster::EdgeDescriptor& in : c.border_in_edges) {
-        const std::vector<std::uint32_t>& dist = c.GetEdgeOutDistances(in.pos);
-        for (const GCluster::EdgeDescriptor& out : c.border_out_edges) {
-          if (dist.at(out.pos) != INFU32) {
-            // Find the to-cluster of the outgoing edge.
-            const uint32_t to_node_idx = g_.edges.at(out.g_edge_idx).target_idx;
-            const GCluster& target_c =
-                g_.clusters.at(g_.nodes.at(to_node_idx).cluster_id);
-            const uint32_t converted_in_pos =
-                target_c.FindIncomingEdgePos(out.g_edge_idx);
-            CHECK_LT_S(converted_in_pos, target_c.border_in_edges.size());
-            // Add this edge from the in edge in the current cluster to the
-            // target in_edge in the target cluster.
-            AddEdge(get_tarjan_node_idx(create_edge_key(c.cluster_id, in.pos)),
-                    get_tarjan_node_idx(create_edge_key(target_c.cluster_id,
-                                                        converted_in_pos)));
-            /*
-            LOG_S(INFO) << absl::StrFormat(
-                "Add edge #%u (%u,%u) -> (%u,%u)", count, c.cluster_id, in.pos,
-                target_c.cluster_id, converted_in_pos);
-            */
-            LOG_S(INFO) << absl::StrFormat(
-                "Add edge #%u |%s| ---> |%s|", count,
-                EdgeKeyDebugStr(create_edge_key(c.cluster_id, in.pos)),
-                EdgeKeyDebugStr(
-                    create_edge_key(target_c.cluster_id, converted_in_pos)));
-            count++;
-          }
+    // Add data to the thin graph.
+    for (uint32_t t_idx = 0; t_idx < tarjan_nodes_.size(); ++t_idx) {
+      uint32_t gedge_idx1 = tarjan_nodes_.at(t_idx);
+      uint32_t t_idx1 = FindInMapOrFail(gidx_to_tarjan_, gedge_idx1);
+      const GEdge& e1 = g_.edges.at(gedge_idx1);
+      const GNode& target = g_.nodes.at(e1.target_idx);
+      // Now iterate the forward edges at the target node and check turn costs
+      // if the can be accessed.
+      for (uint32_t off = 0; off < target.num_forward_edges; ++off) {
+        uint32_t gedge_idx2 = target.edges_start_pos + off;
+        const GEdge& e2 = g_.edges.at(gedge_idx2);
+        if (!e2.unique_target || e2.target_idx == e1.target_idx) {
+          continue;
         }
+        // TODO: turn costs, this way all u-turns are enabled.
+        uint32_t t_idx2 = FindInMapOrFail(gidx_to_tarjan_, gedge_idx2);
+        AddEdge(t_idx1, t_idx2, /*verbose=*/false);
       }
     }
-    LOG_S(INFO) << "Created Thingraph edges:" << count;
-
     AddSentinel();
+
+    LOG_S(INFO) << absl::StrFormat("Created Thingraph #nodes:%lu #edges:%lu",
+                                   starts.size() - 1, targets.size());
+    CHECK_EQ_S(starts.size(), tarjan_nodes_.size() + 1u);
   }
 
-  std::string EdgeKeyDebugStr(uint32_t edge_key) const {
-    const GCluster c = g_.clusters.at(cluster_id_from_edge_key(edge_key));
-    const uint32_t pos = edge_pos_from_edge_key(edge_key);
-    const GCluster::EdgeDescriptor& ed = c.border_in_edges.at(pos);
-    const GEdge& e = g_.edges.at(ed.g_edge_idx);
-    return absl::StrFormat("key(%u,%u) %lu->%ld way:%ld", c.cluster_id, pos,
-                           GetGNodeIdSafe(g_, ed.g_from_idx),
-                           GetGNodeIdSafe(g_, e.target_idx),
-                           GetGWayIdSafe(g_, e.way_idx));
+  std::string GEdgeDebugStr(uint32_t gedge_idx) const {
+    return debug_str(g_, g_.edges.at(gedge_idx),
+                     g_.FindStartIdxByEdgeIdxSlowish(gedge_idx));
   }
 
   virtual std::string DebugStr(uint32_t tarjan_node_idx) const {
-    return EdgeKeyDebugStr(idx_to_edge_key_.at(tarjan_node_idx));
-    /*
-    const uint32_t edge_key = idx_to_edge_key_.at(tarjan_node_idx);
-    const GCluster c = g_.clusters.at(cluster_id_from_edge_key(edge_key));
-    const uint32_t pos = edge_pos_from_edge_key(edge_key);
-    const GCluster::EdgeDescriptor& ed = c.border_in_edges.at(pos);
-    const GEdge& e = g_.edges.at(ed.g_edge_idx);
-    return absl::StrFormat("key(%u,%u) %lu->%ld way:%ld", c.cluster_id, pos,
-                           GetGNodeIdSafe(g_, ed.g_from_idx),
-                           GetGNodeIdSafe(g_, e.target_idx),
-                           GetGWayIdSafe(g_, e.way_idx));
-                           */
+    return GEdgeDebugStr(tarjan_nodes_.at(tarjan_node_idx));
   }
 
-  uint32_t get_tarjan_node_idx(uint32_t edge_key) {
-    return FindInMapOrFail(edge_key_to_idx_, edge_key);
-  }
-
- private:
-  const Graph& g_;
-  std::vector<uint32_t> idx_to_edge_key_;
-  absl::flat_hash_map<uint32_t, uint32_t> edge_key_to_idx_;
-
-  static constexpr uint32_t CLUSTER_ID_SHIFT = 32 - NUM_CLUSTER_BITS;
-  static_assert(NUM_CLUSTER_BITS < 32 && CLUSTER_ID_SHIFT >= 10);
-
-  // Encode a cluster id and the position of an in-/outgoing edge of the
-  // cluster into a 32bit value.
-  static inline uint32_t create_edge_key(uint32_t cluster_id,
-                                         uint32_t edge_pos) {
-    CHECK_LT_S(edge_pos, 1u << CLUSTER_ID_SHIFT);
-    return (cluster_id << CLUSTER_ID_SHIFT) + edge_pos;
-  }
-  static inline uint32_t cluster_id_from_edge_key(uint32_t edge_key) {
-    return edge_key >> CLUSTER_ID_SHIFT;
-  }
-  static inline uint32_t edge_pos_from_edge_key(uint32_t edge_key) {
-    return edge_key & ((1u << CLUSTER_ID_SHIFT) - 1);
+  uint32_t tarjan_node_to_gedge_idx(uint32_t tarjan_node_idx) const {
+    return tarjan_nodes_.at(tarjan_node_idx);
   }
 };
 
@@ -166,12 +77,34 @@ struct MyThinGraph : ThinGraph {
 // Determine the strongly connected components in the cluster level graph. Every
 // incoming/outgoing edge in the cluster graph is assigned a unique component
 // number (scc_no) in this process.
-void ComputeClusterGraphSCCs(const Graph& g) {
+void ComputeFullGraphSCCs(const Graph& g,
+                          std::vector<bool>* edge_to_isolated_scc) {
   FUNC_TIMER();
 
-  MyThinGraph tg(g);
-  TarjanSCC tarjan(tg);
-  tarjan.DFS(TarjanSCC::Iterative);
+  // 'edge_colors' assigns a color to each edge in the graph.
+  // 0: edge wasn't assigned to an SCC.
+  // 1: edge was in the largest SCC.
+  // 2+: edge was not in the largest SCC.
+  CHECK_S(edge_to_isolated_scc->empty());
+  edge_to_isolated_scc->assign(g.edges.size(), false);
 
-  // CHECK_S(0);
+  for (const auto& comp : g.large_components) {
+    FullGraphThinGraph tg(g, comp);
+    TarjanSCC tarjan(tg);
+    tarjan.DFS(TarjanSCC::Iterative);
+    const std::vector<TarjanSCC::SCC>& sccs = tarjan.GetSCCs();
+
+    size_t max_size = 0;
+    for (const TarjanSCC::SCC& scc : sccs) {
+      max_size = std::max(max_size, scc.nodes.size());
+    }
+
+    for (const TarjanSCC::SCC& scc : sccs) {
+      bool isolated = (scc.nodes.size() == max_size) ? false : true;
+      for (uint32_t k : scc.nodes) {
+        // k is the internal node idx of TarjanSCC, so convert it.
+        edge_to_isolated_scc->at(tg.tarjan_node_to_gedge_idx(k)) = isolated;
+      }
+    }
+  }
 }

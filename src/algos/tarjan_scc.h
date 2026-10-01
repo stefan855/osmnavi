@@ -31,7 +31,11 @@ struct ThinGraph {
   //   from_node and to_node values seen.
   //
   //   2) Edges need to be added in non-decreasing order by from_node.
-  void AddEdge(uint32_t from_node, uint32_t to_node) {
+  void AddEdge(uint32_t from_node, uint32_t to_node, bool verbose = false) {
+    if (verbose) {
+      LOG_S(INFO) << "\nAdd Tarjan edge\n" + DebugStr(from_node) + "\n" +
+                         DebugStr(to_node);
+    }
     // Check ordering.
     CHECK_GE_S(from_node + 1, starts.size());
     // Add missing start entries.
@@ -43,7 +47,11 @@ struct ThinGraph {
   }
 
   // Call this after the last call to AddEdge().
-  void AddSentinel() { starts.push_back(targets.size()); }
+  void AddSentinel() {
+    while (starts.size() < num_nodes + 1) {
+      starts.push_back(targets.size());
+    }
+  }
 
   virtual std::string DebugStr(uint32_t node_idx) const {
     return std::to_string(node_idx);
@@ -51,8 +59,6 @@ struct ThinGraph {
 };
 
 // Find strongly connected components (SCCs) in a directed graph.
-// See the nice description at
-// https://www.baeldung.com/cs/scc-tarjans-algorithm.
 class TarjanSCC {
  public:
   enum RecursiveMode { Recursive, Iterative };
@@ -66,7 +72,7 @@ class TarjanSCC {
         num_(g_.num_nodes, 0),
         lownum_(g_.num_nodes, 0),
         visited_(g_.num_nodes, false),
-        done_(g_.num_nodes, false),
+        is_pending_(g_.num_nodes, false),
         cur_num_(1),
         scc_no_(0) {}
 
@@ -96,7 +102,7 @@ class TarjanSCC {
   std::vector<uint32_t> num_;
   std::vector<uint32_t> lownum_;
   std::vector<bool> visited_;  // bit packed.
-  std::vector<bool> done_;     // bit packed.
+  std::vector<bool> is_pending_;  // bit packed.
   // Nodes visited but not yet processed, used like a stack.
   std::vector<uint32_t> pending_;
   std::vector<SCC> sccs_;
@@ -112,15 +118,15 @@ class TarjanSCC {
     uint32_t k;
     do {
       k = pending_.back();
-      sccs_.back().nodes.push_back(k);
-      /*
-      LOG_S(INFO) << "Component:" << sccs_.back().scc_no
-                  << " node:" << g_.DebugStr(k);
-      */
       pending_.pop_back();
+      is_pending_.at(k) = false;
+      sccs_.back().nodes.push_back(k);
     } while (k != v);
     LOG_S(INFO) << "Component:" << sccs_.back().scc_no
                 << " #nodes:" << sccs_.back().nodes.size();
+    for (size_t i = 0; i < std::min(4lu, sccs_.back().nodes.size()); ++i) {
+      LOG_S(INFO) << "  " << i << ": " << g_.DebugStr(sccs_.back().nodes.at(i));
+    }
   }
 
   void DFSRecursive(uint32_t v) {
@@ -133,27 +139,34 @@ class TarjanSCC {
     cur_num_++;
     visited_.at(v) = true;
     pending_.push_back(v);
+    is_pending_.at(v) = true;
+    LOG_S(INFO) << "Enter node " << v;
 
     // Setup target looping.
     for (uint32_t target_idx = g_.starts.at(v);
          target_idx < g_.starts.at(v + 1); ++target_idx) {
+      LOG_S(INFO) << absl::StrFormat("Loop   node %u num=%u lownum=%u", v,
+                                     num_.at(v), lownum_.at(v));
       // Loop Next target (2).
       uint32_t target = g_.targets.at(target_idx);
+
       if (!visited_.at(target)) {
         // Enter recursion.
         DFSRecursive(target);
         // Returned from recursion (3).
         lownum_.at(v) = std::min(lownum_.at(v), lownum_.at(target));
-      } else if (!done_.at(target)) {
+      } else if (is_pending_.at(target)) {
         lownum_.at(v) = std::min(lownum_.at(v), num_.at(target));
       }
     }
+
     // Finalize node. (4)
-    done_.at(v) = true;
     if (lownum_.at(v) == num_.at(v)) {
       AddSCC(v);
     }
     // Return from recursion.
+    LOG_S(INFO) << absl::StrFormat("Return node %u num=%u lownum=%u", v,
+                                   num_.at(v), lownum_.at(v));
   }
 
   // Iterative version of the recursive function above, allows running on much
@@ -192,6 +205,7 @@ class TarjanSCC {
           cur_num_++;
           visited_.at(f.v) = true;
           pending_.push_back(f.v);
+          is_pending_.at(f.v) = true;
           // Setup target looping.
           f.target_idx = g_.starts.at(f.v);
           /* FALL THROUGH */
@@ -206,7 +220,7 @@ class TarjanSCC {
               stack.push_back({.v = target, .target_idx = MAXU32});
               action = EnterRecursion;
             } else {
-              if (!done_.at(target)) {
+              if (is_pending_.at(target)) {
                 lownum_.at(f.v) = std::min(lownum_.at(f.v), num_.at(target));
               }
               f.target_idx++;
@@ -224,7 +238,6 @@ class TarjanSCC {
           break;
         }
         case FinalizeNode: {
-          done_.at(f.v) = true;
           if (lownum_.at(f.v) == num_.at(f.v)) {
             AddSCC(f.v);
           }
@@ -240,124 +253,4 @@ class TarjanSCC {
       }
     }
   }
-
-#if 0
-  // Done by Lumo 2.0 Max.
-  void DFSIterative2(uint32_t start_v) {
-    // Stack stores (vertex, current_edge_index) - mirrors call frames
-    std::stack<std::pair<uint32_t, uint32_t>> stk;
-
-    // Track whether we've initialized each node (first visit vs. resumption
-    // after child returns)
-    std::vector<bool> init_done(num_.size(), false);
-
-    // Push starting vertex with initial edge index
-    stk.push({start_v, g_.starts.at(start_v)});
-
-    while (!stk.empty()) {
-      auto& [v, edge_idx] = stk.top();
-
-      // Entry point (1): First time visiting this node - do initialization
-      if (!init_done[v]) {
-        num_.at(v) = cur_num_;
-        lownum_.at(v) = cur_num_;
-        cur_num_++;
-        visited_.at(v) = true;
-        pending_.push_back(v);
-        init_done[v] = true;
-      }
-
-      // Entry point (2): Process edges
-      bool pushed_child = false;
-      while (edge_idx < g_.starts.at(v + 1)) {
-        uint32_t target = g_.targets.at(edge_idx);
-        edge_idx++;  // Advance for next iteration
-
-        if (!visited_.at(target)) {
-          // Unvisited target - push it and pause current node (will resume
-          // after child returns)
-          stk.push({target, g_.starts.at(target)});
-          pushed_child = true;
-          break;  // Exit inner loop, continue outer loop with child on top
-        } else if (!done_.at(target)) {
-          // Back-edge to active node - update lownum_
-          lownum_.at(v) = std::min(lownum_.at(v), num_.at(target));
-        }
-        // else: cross-edge to completed node - ignore
-      }
-
-      if (!pushed_child) {
-        // Entry point (4): All neighbors processed - finalize node
-        done_.at(v) = true;
-        if (lownum_.at(v) == num_.at(v)) {
-          AddSCC(v);
-        }
-        stk.pop();
-
-        // Entry point (3): Return from recursion - update parent's lownum_
-        // This mirrors: lownum_.at(v) = std::min(lownum_.at(v),
-        // lownum_.at(target)); But now we update PARENT with CHILD's lownum
-        if (!stk.empty()) {
-          auto& [parent, parent_edge_idx] = stk.top();
-          lownum_.at(parent) = std::min(lownum_.at(parent), lownum_.at(v));
-        }
-      }
-    }
-  }
-
-  // Done by Claude Sonnet 5.
-  void DFSIterative3(uint32_t start_v) {
-    struct Frame {
-      uint32_t v;
-      uint32_t target_idx;
-    };
-    std::vector<Frame> stack;
-
-    // Helper for "have entered new recursion" — used both for start_v and
-    // for every "enter recursion" call site below.
-    auto enter = [&](uint32_t v) {
-      // Have entered new recursion (1).
-      num_.at(v) = cur_num_;
-      lownum_.at(v) = cur_num_;
-      cur_num_++;
-      visited_.at(v) = true;
-      pending_.push_back(v);
-      stack.push_back({v, g_.starts.at(v)});
-    };
-
-    enter(start_v);
-
-    while (!stack.empty()) {
-      uint32_t idx = static_cast<uint32_t>(stack.size() - 1);
-      uint32_t v = stack[idx].v;
-
-      if (stack[idx].target_idx < g_.starts.at(v + 1)) {
-        // Loop Next target (2).
-        uint32_t target_idx = stack[idx].target_idx;
-        stack[idx].target_idx =
-            target_idx + 1;  // advance BEFORE any push_back below
-        uint32_t target = g_.targets.at(target_idx);
-        if (!visited_.at(target)) {
-          // Enter recursion.
-          enter(target);
-        } else if (!done_.at(target)) {
-          lownum_.at(v) = std::min(lownum_.at(v), num_.at(target));
-        }
-      } else {
-        // Finalize node (4).
-        done_.at(v) = true;
-        if (lownum_.at(v) == num_.at(v)) {
-          AddSCC(v);
-        }
-        // Return from recursion.
-        stack.pop_back();
-        if (!stack.empty()) {
-          // Returned from recursion (3).
-          uint32_t parent = stack.back().v;
-          lownum_.at(parent) = std::min(lownum_.at(parent), lownum_.at(v));
-        }
-      }
-    }
-  }
-#endif
 };

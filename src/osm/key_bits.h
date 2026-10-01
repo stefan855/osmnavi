@@ -254,6 +254,8 @@ inline std::string KeySetToSymbolicString(KeySet ks) {
   return res;
 }
 
+constexpr KeySet BITSET_VERY_BROAD({KEY_BIT_SERVICE});
+
 constexpr KeySet BITSET_VEHICLES({KEY_BIT_MOTORCAR, KEY_BIT_MOTORCYCLE,
                                   KEY_BIT_MOPED, KEY_BIT_HORSE, KEY_BIT_FOOT,
                                   KEY_BIT_BUS, KEY_BIT_HGV, KEY_BIT_BICYCLE});

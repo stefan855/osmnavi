@@ -224,13 +224,13 @@ inline void ExecuteLouvain(int n_threads, Graph* graph) {
   // lookup in btrees is more cpu-cache friendly than binary search in a vector.
 
   for (const Graph::Component& comp : graph->large_components) {
-    LOG_S(INFO) << "Cluster component with " << comp.nodes.size() << " entries";
+    LOG_S(INFO) << "Cluster component with " << comp.nodes_sorted.size() << " entries";
     GNodeToLouvainIdx gidx_to_louvain_pos;
     // Iterate over all nodes in the component and update the node for
     // eligble nodes.
     // for (uint32_t gnode_idx = 0; gnode_idx < comp.nodes.size(); ++gnode_idx)
     // {
-    for (uint32_t gnode_idx : comp.nodes) {
+    for (uint32_t gnode_idx : comp.nodes_sorted) {
       const GNode& n = graph->nodes.at(gnode_idx);
       if (EligibleNodeForLouvain(n)) {
         for (const GEdge& e : gnode_all_edges(*graph, gnode_idx)) {

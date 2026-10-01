@@ -150,6 +150,11 @@
         attribution: my_attribution
       });
 
+      var isolated_scc = L.tileLayer('/tiles/isolated_scc/{z}/{x}/{y}.png', {
+        maxZoom: 21,
+        attribution: my_attribution
+      });
+
       var last_route = L.tileLayer('/tiles/last_route/{z}/{x}/{y}.png', {
         maxZoom: 21,
         attribution: my_attribution,
@@ -219,6 +224,7 @@
         "Graph Bicycles": graph_bicycle,
         "Clusters*": clusters,
         "Restricted Edges*": restricted_edges,
+        "Isolated SCCs*": isolated_scc,
         "Last Route*": last_route,
         "Cross-Country Edges": cross_country_edges,
         "PB Route Dijkstra Forward": pb_dijks_forward,

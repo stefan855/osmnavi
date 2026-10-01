@@ -81,7 +81,7 @@ inline LabelEdgesResult LabelCarEdges(std::uint32_t start_idx,
       if (e.car_label == follow_label) {
         res.all_dead_end = res.all_dead_end && (e.dead_end || e.bridge);
         if (set_strange) {
-          LOG_S(INFO) << "Strange edge:" << debug_str(*g, e);
+          LOG_S(INFO) << "Strange edge:" << debug_str(*g, e, node_idx);
         }
         e.car_label = set_label;
         e.car_label_strange = set_strange;

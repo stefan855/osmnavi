@@ -67,7 +67,7 @@ class Tarjan {
     std::int32_t time = 0;
 
     std::vector<StackEntry> stack;
-    stack.emplace_back(/*parent=*/-1, /*node=*/comp.nodes.front(),
+    stack.emplace_back(/*parent=*/-1, /*node=*/comp.nodes_sorted.front(),
                        /*next_edge_offset=*/0);
 
     while (!stack.empty()) {
@@ -103,8 +103,8 @@ class Tarjan {
             // The edge "parent <=> node" is a bridge.
             if (bridges != nullptr) {
               // Arrange such that the tree below 'to_node_idx' is smaller.
-              if (e.tree_size < comp.nodes.size() / 2) {
-                CHECK_LE_S(e.tree_size, comp.nodes.size());
+              if (e.tree_size < comp.nodes_sorted.size() / 2) {
+                CHECK_LE_S(e.tree_size, comp.nodes_sorted.size());
                 bridges->push_back({.from_node_idx = e.parent,
                                     .to_node_idx = e.node,
                                     .subtree_size = e.tree_size});
@@ -114,7 +114,7 @@ class Tarjan {
                     {.from_node_idx = e.node,
                      .to_node_idx = e.parent,
                      .subtree_size =
-                         (uint32_t)comp.nodes.size() - e.tree_size});
+                         (uint32_t)comp.nodes_sorted.size() - e.tree_size});
               }
             }
           }
@@ -131,11 +131,11 @@ class Tarjan {
                             std::vector<BridgeInfo>* bridges = nullptr) {
     std::vector<std::int32_t> visno(g_.nodes.size(), -1);
     std::vector<std::int32_t> low(g_.nodes.size(), -1);
-    CHECK_GT_S(comp.nodes.size(), 0u);
+    CHECK_GT_S(comp.nodes_sorted.size(), 0u);
     LOG_S(INFO) << absl::StrFormat(
         "Tarjan.FindBridges() Component start node %lld (idx:%u) size %u",
-        GetGNodeIdSafe(g_, comp.nodes.front()), comp.nodes.front(),
-        comp.nodes.size());
+        GetGNodeIdSafe(g_, comp.nodes_sorted.front()), comp.nodes_sorted.front(),
+        comp.nodes_sorted.size());
     DFSIterative(comp, &visno, &low, bridges);
     return 0;
   }

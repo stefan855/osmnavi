@@ -91,6 +91,7 @@ struct TmpClusterInfo {
   // Dim #edges
   std::vector<uint64_t> mm_edges;  // Type MMEdge.
   std::vector<uint32_t> mm_edge_to_distance;
+  std::vector<uint8_t> mm_edge_to_isolated_scc;
   std::vector<uint8_t> mm_edge_to_speed_fraction_idx;
   std::vector<uint32_t> mm_edge_to_way;
 
@@ -193,6 +194,7 @@ void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
   tci->cedge_to_gedge_offset.reserve(expected_num_edges);
   tci->cedge_to_gway_idx.reserve(expected_num_edges);
   tci->mm_edge_to_distance.reserve(expected_num_edges);
+  tci->mm_edge_to_isolated_scc.reserve(expected_num_edges);
   tci->mm_edge_to_speed_fraction_idx.reserve(expected_num_edges);
   for (uint32_t c_pos = 0; c_pos < tci->cb.cnode_to_gnode.size(); ++c_pos) {
     uint32_t gn_idx = tci->cb.cnode_to_gnode.at(c_pos);
@@ -226,6 +228,8 @@ void FillTmpClusterEdges(const Graph& g, TmpClusterInfo* tci) {
 
         ++edge_start_idx;
         tci->mm_edge_to_distance.push_back(e.distance.cm());
+        tci->mm_edge_to_isolated_scc.push_back(
+            g.edge_to_isolated_scc.at(gnode_edge_idx(g, e)));
         tci->mm_edge_to_speed_fraction_idx.push_back(e.speed_fraction_idx);
         tci->cedge_to_gedge_offset.push_back(gnode_edge_offset(g, gn_idx, e));
         tci->cedge_to_gway_idx.push_back(e.way_idx);
@@ -972,6 +976,8 @@ void CheckMMCluster(const Graph& g, const MMGraph& mg, const MMCluster& mc,
 
   compare_check_vectors<MEdgeIdx>("edge_to_distance", mc.edge_to_distance,
                                   tci.mm_edge_to_distance);
+  compare_check_vectors<MEdgeIdx>("edge_to_isolated_scc", mc.edge_to_isolated_scc,
+                                  tci.mm_edge_to_isolated_scc);
   compare_check_vectors<MEdgeIdx>("edge_to_speed_fraction_idx",
                                   mc.edge_to_speed_fraction_idx,
                                   tci.mm_edge_to_speed_fraction_idx);
@@ -1176,6 +1182,11 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
       global_object_offset + offsetof(MMCluster, edge_to_distance), fd,
       tci.mm_edge_to_distance);
 
+  mmcluster->edge_to_isolated_scc.WriteDataBlob(
+      "edge_to_isolated_scc",
+      global_object_offset + offsetof(MMCluster, edge_to_isolated_scc), fd,
+      tci.mm_edge_to_isolated_scc);
+
   mmcluster->edge_to_speed_fraction_idx.WriteDataBlob(
       "edge_to_speed_fraction_idx",
       global_object_offset + offsetof(MMCluster, edge_to_speed_fraction_idx),
@@ -1296,8 +1307,8 @@ void WriteMMClusterExpandedPart(const TmpClusterInfo& tci, MMCluster* mmcluster,
           tci.mm_node_to_osm_id.at(ctr.first_node_idx.v()), ctr.first_leg_pos,
           ctr.num_legs, ctr.forbidden);
       legs.insert(legs.end(), x.path.begin(), x.path.end());
-      LOG_S(INFO) << absl::StrFormat("CC1 Add %llu legs new size %llu",
-                                     x.path.size(), legs.size());
+      // LOG_S(INFO) << absl::StrFormat("CC1 Add %llu legs new size %llu",
+      //                                x.path.size(), legs.size());
     }
     mmcluster->complex_turn_restrictions.WriteDataBlob(
         "complex_trs",

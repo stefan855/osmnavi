@@ -233,10 +233,10 @@ inline void SetBarrierRestrictions(VEHICLE vt, const ParsedTagInfo& pti,
 
   AccessPerDirection apd;
   if (vt == VH_MOTORCAR) {
-    apd = CarAccess(pti.tagh(), node_id, pti.tags(),
+    apd = CarAccess(pti.tagh(), HW_UNCLASSIFIED, node_id, pti.tags(),
                     {.acc_forw = access, .acc_backw = access});
   } else if (vt == VH_BICYCLE) {
-    apd = BicycleAccess(pti.tagh(), node_id, pti.tags(),
+    apd = BicycleAccess(pti.tagh(), HW_UNCLASSIFIED, node_id, pti.tags(),
                         {.acc_forw = access, .acc_backw = access});
   } else {
     ABORT_S() << "vehicle type not (yet) supported:" << (int)vt;

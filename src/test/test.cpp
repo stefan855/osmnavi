@@ -358,9 +358,9 @@ void TestCarMaxspeed() {
 
 namespace {
 void CheckCarAccess(ACCESS dflt, std::string_view tag_string,
-                    ACCESS exp_access_forw, ACCESS exp_access_backw) {
+                    ACCESS exp_access_forw, ACCESS exp_access_backw, HIGHWAY_LABEL hw = HW_TERTIARY) {
   OsmWayWrapper w = FillWayData(tag_string);
-  AccessPerDirection apd = CarAccess(*w.tagh, /*way_id=*/1, w.ptags,
+  AccessPerDirection apd = CarAccess(*w.tagh, hw, /*way_id=*/1, w.ptags,
                                      {.acc_forw = dflt, .acc_backw = dflt});
   CHECK_EQ_S(apd.acc_forw, exp_access_forw) << tag_string;
   CHECK_EQ_S(apd.acc_backw, exp_access_backw) << tag_string;
@@ -375,6 +375,9 @@ void TestCarAccess() {
   // "access=yes" is considered weak, it does not change the default.
   CheckCarAccess(ACC_NO, "access=yes", ACC_NO, ACC_NO);
   CheckCarAccess(ACC_YES, "access=yes", ACC_YES, ACC_YES);
+  // Check that items separated with ; are ignored if not understood.
+  CheckCarAccess(ACC_NO, "access:motorcar=yes;agricultural", ACC_YES, ACC_YES);
+  CheckCarAccess(ACC_YES, "access:motorcar=yes;agricultural", ACC_YES, ACC_YES);
 
   CheckCarAccess(ACC_NO, "access:bicycle=yes", ACC_NO, ACC_NO);
   CheckCarAccess(ACC_NO, "bicycle=yes", ACC_NO, ACC_NO);
@@ -391,6 +394,11 @@ void TestCarAccess() {
   CheckCarAccess(ACC_YES, "access:lanes:backward=no|no", ACC_YES, ACC_NO);
   CheckCarAccess(ACC_YES, "agricultural=yes", ACC_YES, ACC_YES);
   CheckCarAccess(ACC_YES, "agricultural=no", ACC_YES, ACC_YES);
+
+  CheckCarAccess(ACC_NO, "service=driveway", ACC_NO, ACC_NO, HW_SERVICE);
+  CheckCarAccess(ACC_YES, "service=driveway", ACC_DESTINATION, ACC_DESTINATION, HW_SERVICE);
+  CheckCarAccess(ACC_NO, "service=driveway", ACC_NO, ACC_NO);
+  CheckCarAccess(ACC_YES, "service=driveway", ACC_YES, ACC_YES);
 }
 
 namespace {

@@ -507,6 +507,7 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   }
 
   const GEdge& edge0 = n3p.edge0(g);
+  const GEdge& edge1 = n3p.edge1(g);
   const GWay& way0 = g.ways.at(edge0.way_idx);
 
   // TODO: Is it clear that TRUNK and higher should have no automatic u-turns?
@@ -516,14 +517,14 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   }
 
   // Special case: Way is an area and both edges are on this way.
-  if (way0.area && edge0.way_idx == n3p.edge1(g).way_idx) {
+  if (way0.area && edge0.way_idx == edge1.way_idx) {
     // LOG_S(INFO) << "TT2 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
 
   // Special case, vehicle is blocked at node and returns on the same way.
   if (VehicleBlockedAtNode(g, vt, node_tags, n3p) &&
-      edge0.way_idx == n3p.edge1(g).way_idx) {
+      edge0.way_idx == edge1.way_idx) {
     // LOG_S(INFO) << "TT3 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
@@ -531,10 +532,13 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
   // Now check which kind of continuation edges there are.
   bool found_continuation = false;
   bool found_free_continuation = false;
+  bool found_free_bridge = false;
   for (const GEdge& out : gnode_forward_edges(g, edge0.target_idx)) {
     if (out.target_idx != n3p.node0_idx && out.target_idx != edge0.target_idx) {
+      // 'out' doesn't return to the beginning and isn't a self-link.
       found_continuation = true;
       found_free_continuation |= (out.car_label == GEdge::LABEL_FREE);
+      found_free_bridge |= (out.bridge && out.car_label == GEdge::LABEL_FREE);
     }
   }
 
@@ -549,7 +553,26 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
     // LOG_S(INFO) << "TT5 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
-  // LOG_S(INFO) << "TT5b not allowed UTurn " << n3p.DebugStr(g);
+
+  // If at the entrance of a dead end, then almost always u-turn is possible, by
+  // entering the dead end and leaving it when coming back. Currently, we
+  // simulate this by allowing the u-turn at the entrance, but see the TODOs
+  // below.
+  //
+  // TODO 1: The time that is needed to perform the "dead end u-turn" has to be
+  // computed using a shortest path algorithm. For simple scenarios and when
+  // there are no turn restrictions involved, a much simpler approach should be
+  // good enough.
+  //
+  // TODO 2: There might be a (complex) turn restriction that forbids returning.
+  // This should be obeyed, unless parts of the graph become unreachable because
+  // of it.
+  if (found_free_bridge && !edge0.dead_end && !edge1.dead_end) {
+    // LOG_S(INFO) << "TT5b Allowed UTurn " << n3p.DebugStr(g);
+    return true;
+  }
+
+  // LOG_S(INFO) << "TT5c not allowed UTurn " << n3p.DebugStr(g);
   return false;
 }
 

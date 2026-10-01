@@ -563,7 +563,7 @@ inline void ComputeCarWayRoutingData(const OSMTagHelper& tagh,
   {
     // Set access.
     const AccessPerDirection apd =
-        CarAccess(tagh, wc.way.id, wc.pti.tags(),
+        CarAccess(tagh, wc.way.highway_label, wc.way.id, wc.pti.tags(),
                   {.acc_forw = ra_forw.access, .acc_backw = ra_backw.access});
     ra_forw.access = apd.acc_forw;
     ra_backw.access = apd.acc_backw;
@@ -622,7 +622,7 @@ inline void ComputeBicycleWayRoutingData(const OSMTagHelper& tagh,
   {
     // Set access.
     const AccessPerDirection apd = BicycleAccess(
-        tagh, wc.way.id, wc.pti.tags(),
+        tagh, wc.way.highway_label, wc.way.id, wc.pti.tags(),
         {.acc_forw = ra_forw.access, .acc_backw = ra_backw.access});
     ra_forw.access = apd.acc_forw;
     ra_backw.access = apd.acc_backw;
@@ -835,7 +835,8 @@ void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
   FUNC_TIMER();
   // Node ids touched by ways that we are interested in.
   HugeBitset touched_nodes_ids;
-  // Read ways and remember the touched nodes in 'touched_nodes_ids'.
+  // Read ways with 'highway=*' and remember the touched nodes in
+  // 'touched_nodes_ids'.
   reader->ReadWays([&touched_nodes_ids, meta](const OSMTagHelper& tagh,
                                               const OSMPBF::Way& way,
                                               int thread_idx, std::mutex& mut) {
@@ -843,7 +844,8 @@ void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
                                    &meta->Stats(thread_idx));
   });
 
-  // Read all the node coordinates for nodes in 'touched_nodes_ids'.
+  // Read all the node coordinates and attributes for nodes in
+  // 'touched_nodes_ids'.
   reader->ReadBlobs(
       OsmPbfReader::ContentNodes,
       [vt, &touched_nodes_ids, node_table, meta](
@@ -854,7 +856,7 @@ void LoadNodeCoordsAndAttrributes(VEHICLE vt, OsmPbfReader* reader,
       });
   // Make node table searchable, so we can look up lat/lon by node_id.
   node_table->Sort();
-  // Sort the node tags.
+  // Sort the node tags, so we can use FindNodeTags().
   std::sort(meta->graph.node_tags_sorted.begin(),
             meta->graph.node_tags_sorted.end(),
             [](const auto& a, const auto& b) { return a.node_id < b.node_id; });
@@ -948,7 +950,24 @@ void LoadGWayWorker(const OSMTagHelper& tagh, const OSMPBF::Way& osm_way,
     ABORT_S() << "Invalid vehicle type " << meta->opt.vt;
   }
 
-  if (!WSAVehicleAnyRoutable(wsa, meta->opt.vt)) return;
+  // Find node tags that are connected by this way and record the fact that
+  // there exists a connection through this way.
+  for (uint32_t pos = 0; pos < way_nodes.size(); ++pos) {
+    const ExtractedWayNode& wn = way_nodes.at(pos);
+    if (wn.dup_earlier) {
+      continue;  // We have already seen the node in this list.
+    }
+    NodeTags* nt = meta->graph.FindNodeTags(wn.id);
+    if (nt != nullptr) {
+      nt->num_connected_ways++;
+      // A middle pos splits the way in two pieces.
+      nt->num_connected_ways += (pos > 0 && pos + 1 < way_nodes.size());
+    }
+  }
+
+  if (!WSAVehicleAnyRoutable(wsa, meta->opt.vt)) {
+    return;
+  }
 
   WriteBuff node_ids_wb;
   EncodeNodeIds(way_nodes, &node_ids_wb);
@@ -1026,6 +1045,16 @@ void LoadGWays(OsmPbfReader* reader, GraphMetaData* meta) {
         (100.0 * streetname_deduper.num_unique()) /
             std::max(1u, streetname_deduper.num_added()),
         (double)bytes / streetname_deduper.num_added());
+  }
+
+  // Print some stats about node tags
+  {
+    for (const NodeTags& nt : meta->graph.node_tags_sorted) {
+      if (nt.barrier_type == BARRIER_MAX) continue;
+      LOG_S(INFO) << absl::StrFormat(
+          "NodeTag %ld barrier:%s #conn:%u", nt.node_id,
+          BarrierToString(nt.barrier_type), nt.num_connected_ways);
+    }
   }
 }
 
@@ -1259,8 +1288,8 @@ double ComputeSpeedOnShapes(const PopulateEdgeArraysWayData& wd,
     if (dist_inc == DistanceType(0u)) {
       // Ignore curves with overall length 0, but log them for inspection.
       // Can happen because we divide OSM coords by 10 and again by 2 here.
-      // Probably still a data error (the nodes are very close together), so log
-      // them here.
+      // Probably still a data error (the nodes are very close together), so
+      // log them here.
       LOG_S(INFO) << absl::StrFormat("Shape curve has distance 0: %lu->%lu",
                                      wd.ids.at(k - 1), wd.ids.at(k));
     } else {
@@ -1623,16 +1652,6 @@ void ClusterGraph(const BuildGraphOptions& opt, GraphMetaData* meta) {
 
   // build_clusters::StoreClusterInformation(gvec, &meta->graph);
   build_clusters::AssignClusterColors(&(meta->graph));
-
-  /*
-  ComputeShortestPathsInAllClusters(meta);
-  ComputeShortestEdgePathsInAllClusters(meta);
-  if (meta->opt.check_shortest_cluster_paths) {
-    // Check if astar and dijkstra find the same shortest paths.
-    build_clusters::CheckShortestClusterPaths(meta->graph,
-  meta->opt.n_threads);
-  }
-  */
 }
 
 void ComputeClusterPaths(const BuildGraphOptions& opt, GraphMetaData* meta) {
@@ -1883,7 +1902,7 @@ void PrintStats(const GraphMetaData& meta, const BuildGraphStats& stats) {
                                  stats.max_turn_restriction_via_ways);
   LOG_S(INFO) << absl::StrFormat("Num t-restr errors conn:%8lld",
                                  stats.num_turn_restriction_error_connection);
-  LOG_S(INFO) << absl::StrFormat("Num node attrs:      %11lld",
+  LOG_S(INFO) << absl::StrFormat("Num nodes with tags: %11lld",
                                  g.node_tags_sorted.size());
   LOG_S(INFO) << absl::StrFormat("Num node barrier free:%10lld",
                                  stats.num_node_barrier_free);
@@ -2109,7 +2128,7 @@ void PrintWayTagStats(const Graph& g, const FrequencyTable& ft) {
 }
 }  // namespace
 
-void MarkCrossingNodes(GraphMetaData* meta) {
+void MarkPedestrianCrossingNodes(GraphMetaData* meta) {
   FUNC_TIMER();
 
   const Graph& g = meta->graph;
@@ -2456,14 +2475,16 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   ApplyTarjan(&(meta.graph));
   LabelAllCarEdges(&meta.graph, Verbosity::Brief);
 
-  MarkCrossingNodes(&meta);
+  MarkPedestrianCrossingNodes(&meta);
   LabelEdgesFromNodeTags(&meta);
   ClusterGraph(meta.opt, &meta);
 
   ComputeAllTurnCosts(&meta);
   ComputeClusterPaths(meta.opt, &meta);
+
   // Experimental
-  ComputeClusterGraphSCCs(meta.graph);
+  ComputeFullGraphSCCs(meta.graph, &meta.graph.edge_to_isolated_scc);
+
   build_clusters::PrintClusterInformation(meta.graph);
 
   // Add up all the per thread stats.

@@ -440,7 +440,7 @@ inline void EncodeComponent(const Graph::Component& c, WriteBuff* buff) {
   EncodeUInt(c.nodes.front(), buff);
   EncodeUInt(c.nodes.size(), buff);
   */
-  EncodeVector(c.nodes, buff);
+  EncodeVector(c.nodes_sorted, buff);
 }
 
 inline uint32_t DecodeComponent(const std::uint8_t* ptr, Graph::Component* c) {
@@ -452,7 +452,7 @@ inline uint32_t DecodeComponent(const std::uint8_t* ptr, Graph::Component* c) {
   cnt += DecodeUInt(ptr + cnt, &size);
   return cnt;
   */
-  return DecodeVector(ptr, &c->nodes);
+  return DecodeVector(ptr, &c->nodes_sorted);
 }
 
 constexpr uint64_t NumElementsPerBlock = 500'000;

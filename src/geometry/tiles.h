@@ -14,18 +14,18 @@
 #include "geometry/line_clipping.h"
 
 enum TileColor : int {
+  BLACK,
+  GREY,
   RED,
   GREEN,
   BLUE,
   YELLOW,
-  BLACK,
   VIOLET,
   OLIVE,
   LBLUE,
   DGREEN,
   DRED,
   BROWN,
-  GREY,
   GBLUE,
   ORANGE,
   LGREEN,
@@ -148,18 +148,18 @@ struct PNGContext {
     gdImageSetThickness(im, thickness);
     // LOG_S(INFO) << "zoom:" << zoom << " thickness:" << thickness;
 
+    colors[BLACK] = gdImageColorAllocate(im, 0, 0, 0);
+    colors[GREY] = gdImageColorAllocate(im, 128, 128, 128);
     colors[RED] = gdImageColorAllocate(im, 255, 0, 0);
     colors[GREEN] = gdImageColorAllocate(im, 0, 255, 0);
     colors[BLUE] = gdImageColorAllocate(im, 0, 0, 255);
     colors[YELLOW] = gdImageColorAllocate(im, 255, 213, 0);
-    colors[BLACK] = gdImageColorAllocate(im, 0, 0, 0);
     colors[VIOLET] = gdImageColorAllocate(im, 138, 43, 226);
     colors[OLIVE] = gdImageColorAllocate(im, 186, 184, 108);
     colors[LBLUE] = gdImageColorAllocate(im, 173, 216, 230);
     colors[DGREEN] = gdImageColorAllocate(im, 2, 100, 64);
     colors[DRED] = gdImageColorAllocate(im, 165, 0, 0);
     colors[BROWN] = gdImageColorAllocate(im, 139, 69, 19);
-    colors[GREY] = gdImageColorAllocate(im, 128, 128, 128);
     colors[GBLUE] = gdImageColorAllocate(im, 0, 255, 255);
     colors[ORANGE] = gdImageColorAllocate(im, 255, 165, 0);
     colors[LGREEN] = gdImageColorAllocate(im, 0, 179, 0);
@@ -306,6 +306,12 @@ std::string CreateMMGraphPNG(const MMGraphTileData& d, std::string what,
                                  return mc.color_no % NUM_COLORS;
                                }
                              });
+  } else if (what == "isolated_scc") {
+    return CreatePNGInternal(
+        d, zoom, tile_x, tile_y,
+        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int { return MAGENTA; },
+        [](const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx, int zoom)
+            -> bool { return mc.edge_to_isolated_scc.at(edge_idx) != 0; });
   } else if (what == "restricted") {
     return CreatePNGInternal(
         d, zoom, tile_x, tile_y,
@@ -393,7 +399,7 @@ std::string CreatePNGForHybridRouting(const MMGraph& mg,
         MMHybridRouter::out_edge_from_hybrid_key(mg, key);
     const MMCluster& mc = mg.mc(out_edge.from_cluster_id);
     const TileColor color = hvis.done ? BLACK : GREY;
-        // hvis.done ? (TileColor)(mc.color_no % NUM_COLORS) : GREY;
+    // hvis.done ? (TileColor)(mc.color_no % NUM_COLORS) : GREY;
     const LatLon latlon0 = mc.node_to_latlon(out_edge.from_node_idx);
     const LatLon latlon1 = mc.node_to_latlon(out_edge.to_node_idx);
     DrawLineInternal(pd, latlon0, latlon1, MAGENTA);

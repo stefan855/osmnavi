@@ -83,6 +83,13 @@ struct NodeTags {
   ACCESS barrier_acc_forw = ACC_YES;
   ACCESS barrier_acc_backw = ACC_YES;
 
+  // Stats about ways with highway=* tag that contain this node.
+  uint32_t num_connected_ways : 5 = 0;
+  // If there is a way with the same access as the barrier above.
+  uint32_t connected_way_same_access : 1 = 0;
+  // "Smallest" highway type seen in connected ways.
+  HIGHWAY_LABEL lowest_connected_hw = HW_MAX;
+
   constexpr bool empty() const {
     return node_id == 0 && !bit_crossing && !bit_crossing_markings &&
            !bit_crossing_traffic_signals && !bit_give_way &&
@@ -222,7 +229,7 @@ struct GNode {
   std::uint32_t num_forward_edges : NUM_EDGES_OUT_BITS;
   // This node is in a dead end, i.e. in a small subgraph that is connected
   // through a bridge edge to the rest of the graph. All routes to a
-  // node outside of this dead end have to pass through the bridge edge.
+  // node outside of this dead end have to pass through the bridge.
   // Dead end subgraphs are small (<10k nodes or so) and help routing algorithms
   // because subgraphs behind bridges can be ignored unless from/to node are in
   // the dead end.
@@ -406,14 +413,14 @@ struct GCluster {
   // Sorted vector containing the border node indexes (pointing into
   // Graph::nodes).
   std::vector<std::uint32_t> border_nodes;
-  // For each border node, list distances to all other border nodes.
-  // Distance INFU32 indicates that a node can't be reached.
 
   // Incoming edges from the border node of another cluster. Sorted
   std::vector<EdgeDescriptor> border_in_edges;
   // Outgoing edges to a border node of another cluster.
   std::vector<EdgeDescriptor> border_out_edges;
 
+  // For each border node/edge, list distances to all other border node/edge.
+  // Distance INFU32 indicates that a node/edge can't be reached.
   std::vector<std::vector<std::uint32_t>> distances;
   std::vector<std::vector<std::uint32_t>> edge_distances;
   // Color number for drawing clusters. Avoids neighbouring clusters having the
@@ -448,6 +455,9 @@ struct GCluster {
     return distances.at(bn_pos);
   }
 
+  // Note that this is indexed by edge index, not by incoming edge pos!
+  // When you have the incoming edge pos, then directly access
+  // edge_distances.at(in.pos).
   const std::vector<std::uint32_t>& GetEdgeOutDistances(
       uint32_t edge_idx) const {
     const uint32_t pos = FindIncomingEdgePos(edge_idx);
@@ -463,9 +473,10 @@ inline int64_t GetGWayIdSafe(const Graph& g, uint32_t way_idx);
 struct Graph {
   struct Component {
     // Node indexes of all nodes in the component.
-    std::vector<uint32_t> nodes;
+    std::vector<uint32_t> nodes_sorted;
   };
 
+  // Node tags sorted by node_id. See FindNodeTags().
   std::vector<NodeTags> node_tags_sorted;
   std::vector<WaySharedAttrs> way_shared_attrs;
   std::vector<std::string> streetnames;
@@ -473,6 +484,7 @@ struct Graph {
   std::vector<GWay> ways;
   std::vector<GNode> nodes;
   std::vector<GEdge> edges;
+  std::vector<bool> edge_to_isolated_scc;
 
   // Table with average speed fractions [0..1] seen for every edge speed
   // fraction bucket.
@@ -548,10 +560,49 @@ struct Graph {
     }
   }
 
+  // Get the start node of an edge.
+  //
+  // Note: This uses binary search on the range of all nodes, i.e. it is slowish
+  // O(log #nodes). Should be used for things like debug printing.
+  uint32_t FindStartIdxByEdgeIdxSlowish(uint32_t edge_idx) const {
+    auto it = std::lower_bound(nodes.begin(), nodes.end(), edge_idx,
+                               [](const GNode& n, uint32_t edge_idx) {
+                                 return n.edges_start_pos < edge_idx;
+                               });
+    // 'it' points to the first node with n.edges_start_pos >= edge_idx.
+    if (it == nodes.end()) {
+      if (edge_idx < edges.size()) {
+        return nodes.size() - 1;  // last node.
+      }
+      return nodes.size();  // not found.
+    } else {
+      uint32_t node_idx = it - nodes.begin();
+      if (it->edges_start_pos == edge_idx) {
+        return node_idx;
+      }
+      CHECK_GT_S(node_idx, 0);
+      return node_idx - 1;
+    }
+  }
+
   // Find the stored node attribute for a given node_id. Returns the found
   // record or nullptr if it doesn't exist.
   const NodeTags* FindNodeTags(int64_t node_id) const {
     // CHECK_S(!node_tags_sorted.empty());
+    auto it =
+        std::lower_bound(node_tags_sorted.begin(), node_tags_sorted.end(),
+                         node_id, [](const NodeTags& s, std::int64_t value) {
+                           return s.node_id < value;
+                         });
+    if (it == node_tags_sorted.end() || it->node_id != node_id) {
+      return nullptr;
+    } else {
+      return &(*it);
+    }
+  }
+
+  // Same as above, but without const.
+  NodeTags* FindNodeTags(int64_t node_id) {
     auto it =
         std::lower_bound(node_tags_sorted.begin(), node_tags_sorted.end(),
                          node_id, [](const NodeTags& s, std::int64_t value) {
@@ -746,15 +797,19 @@ inline std::string debug_str(const GNode& n) {
                          n.is_pedestrian_crossing);
 }
 
-inline std::string debug_str(const Graph& g, const GEdge& e) {
+// Debug string for an edge. If the start node is known then pass it in
+// 'start_node_idx' or find it using FindStartIdxByEdgeIdxSlowish();
+inline std::string debug_str(const Graph& g, const GEdge& e,
+                             uint32_t start_node_idx = MAXU32) {
   return absl::StrFormat(
-      "Edge to %lld w:%lld di:%u ut:%u tb:%u cw:%u cc:%u iv:%u bd:%u cl:%u "
+      "Edge %lld->%lld w:%lld di:%u ut:%u tb:%u cw:%u cc:%u iv:%u bd:%u cl:%u "
       "ctrt:%u ss:%u ts:%u rp:%u br:%u cbe:%u de:%u",
-      GetGNodeIdSafe(g, e.target_idx), GetGWayIdSafe(g, e.way_idx),
-      e.distance.cm(), e.unique_target, e.to_bridge, e.contra_way,
-      e.cross_country, e.inverted, e.both_directions, e.car_label,
-      e.complex_turn_restriction_trigger, e.stop_sign, e.traffic_signal,
-      e.road_priority, e.bridge, e.cross_cluster_edge, e.dead_end);
+      GetGNodeIdSafe(g, start_node_idx), GetGNodeIdSafe(g, e.target_idx),
+      GetGWayIdSafe(g, e.way_idx), e.distance.cm(), e.unique_target,
+      e.to_bridge, e.contra_way, e.cross_country, e.inverted, e.both_directions,
+      e.car_label, e.complex_turn_restriction_trigger, e.stop_sign,
+      e.traffic_signal, e.road_priority, e.bridge, e.cross_cluster_edge,
+      e.dead_end);
 }
 
 inline size_t gnode_edges_start(const Graph& g, uint32_t node_idx) {
@@ -962,7 +1017,8 @@ inline RoutingAttrs GetRAFromWay(const Graph& g, const GWay& way, VEHICLE vt,
 }
 
 // This can be PRIVATE or CUSTOMERS. Using private opens private streets for
-// routing, but it might have strange results, such as the possibility to leave highways through a private route. So it is turned off for now.
+// routing, but it might have strange results, such as the possibility to
+// leave highways through a private route. So it is turned off for now.
 constexpr ACCESS g_routable_access_low_end = ACC_CUSTOMERS;
 
 inline bool RoutableAccess(ACCESS acc) {
