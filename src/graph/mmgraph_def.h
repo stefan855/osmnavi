@@ -222,7 +222,7 @@ struct MMCluster {
   MMShapeCoords edge_shape_coords;
 
   // Debugging data.
-  MMCompressedUIntVecTmpl<uint8_t, MEdgeIdx> edge_to_isolated_scc;
+  MMBitset<MEdgeIdx> edge_to_isolated_scc;
 
   // Helper functions.
   uint32_t get_path_metric(uint32_t in_edge_pos, uint32_t out_edge_pos) const {

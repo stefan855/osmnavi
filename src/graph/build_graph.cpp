@@ -2477,14 +2477,13 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
 
   MarkPedestrianCrossingNodes(&meta);
   LabelEdgesFromNodeTags(&meta);
-  ClusterGraph(meta.opt, &meta);
-
   ComputeAllTurnCosts(&meta);
-  ComputeClusterPaths(meta.opt, &meta);
 
-  // Experimental
+  // Experimental: Strongly Connected Components.
   ComputeFullGraphSCCs(meta.graph, &meta.graph.edge_to_isolated_scc);
 
+  ClusterGraph(meta.opt, &meta);
+  ComputeClusterPaths(meta.opt, &meta);
   build_clusters::PrintClusterInformation(meta.graph);
 
   // Add up all the per thread stats.

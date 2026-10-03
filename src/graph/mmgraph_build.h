@@ -91,7 +91,7 @@ struct TmpClusterInfo {
   // Dim #edges
   std::vector<uint64_t> mm_edges;  // Type MMEdge.
   std::vector<uint32_t> mm_edge_to_distance;
-  std::vector<uint8_t> mm_edge_to_isolated_scc;
+  std::vector<bool> mm_edge_to_isolated_scc;
   std::vector<uint8_t> mm_edge_to_speed_fraction_idx;
   std::vector<uint32_t> mm_edge_to_way;
 
@@ -976,7 +976,8 @@ void CheckMMCluster(const Graph& g, const MMGraph& mg, const MMCluster& mc,
 
   compare_check_vectors<MEdgeIdx>("edge_to_distance", mc.edge_to_distance,
                                   tci.mm_edge_to_distance);
-  compare_check_vectors<MEdgeIdx>("edge_to_isolated_scc", mc.edge_to_isolated_scc,
+  compare_check_vectors<MEdgeIdx>("edge_to_isolated_scc",
+                                  mc.edge_to_isolated_scc,
                                   tci.mm_edge_to_isolated_scc);
   compare_check_vectors<MEdgeIdx>("edge_to_speed_fraction_idx",
                                   mc.edge_to_speed_fraction_idx,

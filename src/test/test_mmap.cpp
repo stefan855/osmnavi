@@ -194,7 +194,7 @@ void TestMMBitset() {
   FUNC_TIMER();
   struct MM {
     uint64_t magic = 12345;
-    MMBitset v;
+    MMBitset<> v;
   };
 
   std::vector<bool> inp;
@@ -210,7 +210,7 @@ void TestMMBitset() {
     AppendData("mm-struct", fd, (const uint8_t*)&mm, sizeof(mm));
     mm.v.WriteDataBlob("mmbitset", offsetof(MM, v), fd, inp);
     CHECK_EQ_S(inp.size(), mm.v.size());
-    CHECK_EQ_S(mm.v.relative_blob_offset__, sizeof(MMBitset));
+    CHECK_EQ_S(mm.v.relative_blob_offset__, sizeof(MMBitset<>));
     WriteDataTo(fd, 0, (const uint8_t*)&mm, sizeof(mm));
   }
 

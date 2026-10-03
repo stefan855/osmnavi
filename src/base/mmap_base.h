@@ -140,10 +140,19 @@ class MMVec64 {
 };
 CHECK_IS_MM_OK(MMVec64<char>);
 
+template <typename TPos = uint64_t>
 class MMBitset {
  public:
   // Access to a single element, check-fails when pos is out of bounds.
-  bool at(size_t pos) const {
+  bool at(TPos pos_typed) const {
+    uint64_t pos;
+    if constexpr (std::is_unsigned_v<TPos>) {
+      pos = pos_typed;
+    } else {
+      // Works for IndexType defined in index_type.h
+      pos = pos_typed.v();
+    }
+
     CHECK_LT_S(pos, num__);
     const uint64_t* data =
         (uint64_t*)ABS_BLOB_PTR(this, relative_blob_offset__);
@@ -191,7 +200,7 @@ class MMBitset {
     return abs_blob_offset;
   }
 };
-CHECK_IS_MM_OK(MMBitset);
+CHECK_IS_MM_OK(MMBitset<>);
 
 namespace {
 // Returns the bits needed to store the maximum value in data.

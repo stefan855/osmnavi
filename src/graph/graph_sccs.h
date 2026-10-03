@@ -36,17 +36,22 @@ struct FullGraphThinGraph : ThinGraph {
       uint32_t t_idx1 = FindInMapOrFail(gidx_to_tarjan_, gedge_idx1);
       const GEdge& e1 = g_.edges.at(gedge_idx1);
       const GNode& target = g_.nodes.at(e1.target_idx);
+
       // Now iterate the forward edges at the target node and check turn costs
       // if the can be accessed.
+      const TurnCostData& turn_costs = g.turn_costs.at(e1.turn_cost_idx);
+      CHECK_EQ_S(turn_costs.turn_costs.size(), target.num_forward_edges);
       for (uint32_t off = 0; off < target.num_forward_edges; ++off) {
         uint32_t gedge_idx2 = target.edges_start_pos + off;
         const GEdge& e2 = g_.edges.at(gedge_idx2);
         if (!e2.unique_target || e2.target_idx == e1.target_idx) {
           continue;
         }
-        // TODO: turn costs, this way all u-turns are enabled.
-        uint32_t t_idx2 = FindInMapOrFail(gidx_to_tarjan_, gedge_idx2);
-        AddEdge(t_idx1, t_idx2, /*verbose=*/false);
+        // TODO: determine allowed turns, this way all turns are enabled.
+        if (turn_costs.turn_costs.at(off) != TURN_COST_INFINITY_COMPRESSED) {
+          uint32_t t_idx2 = FindInMapOrFail(gidx_to_tarjan_, gedge_idx2);
+          AddEdge(t_idx1, t_idx2, /*verbose=*/false);
+        }
       }
     }
     AddSentinel();

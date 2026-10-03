@@ -140,7 +140,8 @@ class DeDuperWithIds {
       const Entry& e = res.entries_[i];
       objects->push_back(res.objs_[e.id]);
       // We're not allowed to use a pointer into 'objects' here, because this is
-      // a vector and might reallocate.
+      // a vector and might reallocate. So we use a pointer into 'res', which
+      // does not change.
       lookup[&(res.objs_[e.id])] = i;
     }
 

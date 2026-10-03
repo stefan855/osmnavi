@@ -136,6 +136,11 @@ struct PNGContext {
   int offx;
   int offy;
 
+  void SetDefaultThickness(int zoom) {
+    int thickness = zoom < 9 ? 1 : (zoom < 15 ? 3 : 4);
+    gdImageSetThickness(im, thickness);
+  }
+
   PNGContext(int zoom, int tile_x, int tile_y)
       : im(gdImageCreateTrueColor(256, 256)), zoom(zoom) {
     gdImageSaveAlpha(im, 1);
@@ -144,8 +149,9 @@ struct PNGContext {
     gdImageSetThickness(im, 0);
     gdImageRectangle(im, 0, 0, 255, 255,
                      gdImageColorAllocateAlpha(im, 0, 0, 0, 100));
-    int thickness = zoom < 9 ? 1 : (zoom < 15 ? 3 : 4);
-    gdImageSetThickness(im, thickness);
+    SetDefaultThickness(zoom);
+    // int thickness = zoom < 9 ? 1 : (zoom < 15 ? 3 : 4);
+    // gdImageSetThickness(im, thickness);
     // LOG_S(INFO) << "zoom:" << zoom << " thickness:" << thickness;
 
     colors[BLACK] = gdImageColorAllocate(im, 0, 0, 0);
@@ -204,6 +210,29 @@ bool edge_select_for_zoom(const MMCluster& mc, MNodeIdx from_idx,
   return (zoom > 5 && hw <= HW_TERTIARY) || (hw <= HW_PRIMARY);
 }
 
+// For a directed line p0->p1, calculate two points h1 and h2 that together with
+// p1 describe an arrow head.
+void CalculateArrowhead(PixelPoint p0, PixelPoint p1, PixelPoint* h1,
+                        PixelPoint* h2) {
+  constexpr int hd_len = 15;
+  constexpr int hd_angle_deg = 20;
+
+  // Calculate the angle of the line
+  double dx = p1.x - p0.x;
+  double dy = p1.y - p0.y;
+  double line_angle = atan2(dy, dx);
+
+  h1->x = p1.x -
+          std::lround(hd_len * cos(line_angle - hd_angle_deg * M_PI / 180.0));
+  h1->y = p1.y -
+          std::lround(hd_len * sin(line_angle - hd_angle_deg * M_PI / 180.0));
+
+  h2->x = p1.x -
+          std::lround(hd_len * cos(line_angle + hd_angle_deg * M_PI / 180.0));
+  h2->y = p1.y -
+          std::lround(hd_len * sin(line_angle + hd_angle_deg * M_PI / 180.0));
+}
+
 std::string CreatePNGInternal(
     const MMGraphTileData& d, int zoom, int tile_x, int tile_y,
     EdgeColorFunc edge_color_func,
@@ -231,6 +260,7 @@ std::string CreatePNGInternal(
         const LatLon latlon0 = mc.node_to_latlon(node_idx);
         const WorldPoint wp0 = LatLonToPixelMercator(latlon0.lat.AsDouble(),
                                                      latlon0.lon.AsDouble());
+        const double wp_margin = (15.0 / (1 << zoom));
         for (uint32_t idx : mc.edge_indices(node_idx)) {
           const MEdgeIdx edge_idx(idx);
           if (!edge_select_func(mc, node_idx, edge_idx, zoom)) {
@@ -252,6 +282,33 @@ std::string CreatePNGInternal(
             // if (p0.x == p1.x && p0.y == p1.y) continue;
             gdImageLine(pd.im, p0.x - pd.offx, p0.y - pd.offy, p1.x - pd.offx,
                         p1.y - pd.offy, color);
+          }
+          // Arrow head.
+          if (zoom > 15) {
+            const WorldPoint wptarget = wp1;
+            // Now we draw two lines to form the arrow head.
+            if (wptarget.x + wp_margin >= pd.viewport.x0 &&
+                wptarget.x - wp_margin <= pd.viewport.x1 &&
+                wptarget.y + wp_margin >= pd.viewport.y0 &&
+                wptarget.y - wp_margin <= pd.viewport.y1) {
+              PixelPoint pt = ZoomPoint({wptarget.x, wptarget.y}, zoom);
+              const WorldPoint wpstart = wp0;
+              PixelPoint ps = ZoomPoint({wpstart.x, wpstart.y}, zoom);
+              int32_t dx = pt.x - ps.x;
+              int32_t dy = pt.y - ps.y;
+              // Only display arrow head if the line is long enough.
+              if (dx * dx + dy * dy > 1000) {
+                PixelPoint h0, h1;
+                CalculateArrowhead(ps, pt, &h0, &h1);
+                int color = pd.colors[edge_color_func(mc, edge_idx)];
+                gdImageSetThickness(pd.im, 2);
+                gdImageLine(pd.im, h0.x - pd.offx, h0.y - pd.offy,
+                            pt.x - pd.offx, pt.y - pd.offy, color);
+                gdImageLine(pd.im, h1.x - pd.offx, h1.y - pd.offy,
+                            pt.x - pd.offx, pt.y - pd.offy, color);
+                pd.SetDefaultThickness(zoom);
+              }
+            }
           }
         }
       }
