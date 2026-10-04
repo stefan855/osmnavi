@@ -23,7 +23,7 @@ struct FullGraphThinGraph : ThinGraph {
     // Run through all nodes in component and fill mapping data.
     for (uint32_t gnode_idx : comp.nodes_sorted) {
       for (const GEdge& e : gnode_forward_edges(g_, gnode_idx)) {
-        if (!e.unique_target || e.target_idx == gnode_idx) {
+        if (e.target_idx == gnode_idx) {
           continue;
         }
         if (remove_restricted && e.car_label != GEdge::LABEL_FREE) {
@@ -55,7 +55,7 @@ struct FullGraphThinGraph : ThinGraph {
         if (remove_restricted && e2.car_label != GEdge::LABEL_FREE) {
           continue;
         }
-        if (!e2.unique_target || e2.target_idx == e1.target_idx) {
+        if (e2.target_idx == e1.target_idx) {
           continue;
         }
         // TODO: determine allowed turns, this way all turns are enabled.
