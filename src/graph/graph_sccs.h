@@ -17,11 +17,16 @@ struct FullGraphThinGraph : ThinGraph {
   absl::flat_hash_map<uint32_t, uint32_t> gidx_to_tarjan_;
 
  public:
-  FullGraphThinGraph(const Graph& g, const Graph::Component& comp) : g_(g) {
+  FullGraphThinGraph(const Graph& g, const Graph::Component& comp,
+                     bool remove_restricted)
+      : g_(g) {
     // Run through all nodes in component and fill mapping data.
     for (uint32_t gnode_idx : comp.nodes_sorted) {
       for (const GEdge& e : gnode_forward_edges(g_, gnode_idx)) {
         if (!e.unique_target || e.target_idx == gnode_idx) {
+          continue;
+        }
+        if (remove_restricted && e.car_label != GEdge::LABEL_FREE) {
           continue;
         }
         uint32_t gedge_idx = gnode_edge_idx(g_, e);
@@ -35,6 +40,9 @@ struct FullGraphThinGraph : ThinGraph {
       uint32_t gedge_idx1 = tarjan_nodes_.at(t_idx);
       uint32_t t_idx1 = FindInMapOrFail(gidx_to_tarjan_, gedge_idx1);
       const GEdge& e1 = g_.edges.at(gedge_idx1);
+      if (remove_restricted && e1.car_label != GEdge::LABEL_FREE) {
+        continue;
+      }
       const GNode& target = g_.nodes.at(e1.target_idx);
 
       // Now iterate the forward edges at the target node and check turn costs
@@ -44,6 +52,9 @@ struct FullGraphThinGraph : ThinGraph {
       for (uint32_t off = 0; off < target.num_forward_edges; ++off) {
         uint32_t gedge_idx2 = target.edges_start_pos + off;
         const GEdge& e2 = g_.edges.at(gedge_idx2);
+        if (remove_restricted && e2.car_label != GEdge::LABEL_FREE) {
+          continue;
+        }
         if (!e2.unique_target || e2.target_idx == e1.target_idx) {
           continue;
         }
@@ -75,26 +86,24 @@ struct FullGraphThinGraph : ThinGraph {
   }
 };
 
-}  // namespace
-
 // TODO: Experimental, doesn't do anything reasonable yet.
 //
 // Determine the strongly connected components in the cluster level graph. Every
 // incoming/outgoing edge in the cluster graph is assigned a unique component
 // number (scc_no) in this process.
-void ComputeFullGraphSCCs(const Graph& g,
-                          std::vector<bool>* edge_to_isolated_scc) {
+void ComputeFullGraphSCCsInternal(const Graph& g, bool remove_restricted,
+                                  std::vector<bool>* isolated_bits) {
   FUNC_TIMER();
 
   // 'edge_colors' assigns a color to each edge in the graph.
   // 0: edge wasn't assigned to an SCC.
   // 1: edge was in the largest SCC.
   // 2+: edge was not in the largest SCC.
-  CHECK_S(edge_to_isolated_scc->empty());
-  edge_to_isolated_scc->assign(g.edges.size(), false);
+  CHECK_S(isolated_bits->empty());
+  isolated_bits->assign(g.edges.size(), false);
 
   for (const auto& comp : g.large_components) {
-    FullGraphThinGraph tg(g, comp);
+    FullGraphThinGraph tg(g, comp, remove_restricted);
     TarjanSCC tarjan(tg);
     tarjan.DFS(TarjanSCC::Iterative);
     const std::vector<TarjanSCC::SCC>& sccs = tarjan.GetSCCs();
@@ -108,8 +117,16 @@ void ComputeFullGraphSCCs(const Graph& g,
       bool isolated = (scc.nodes.size() == max_size) ? false : true;
       for (uint32_t k : scc.nodes) {
         // k is the internal node idx of TarjanSCC, so convert it.
-        edge_to_isolated_scc->at(tg.tarjan_node_to_gedge_idx(k)) = isolated;
+        isolated_bits->at(tg.tarjan_node_to_gedge_idx(k)) = isolated;
       }
     }
   }
+}
+}  // namespace
+
+void ComputeFullGraphSCCs(Graph* g) {
+  ComputeFullGraphSCCsInternal(*g, /*remove_restricted=*/false,
+                               &g->edge_to_isolated_scc);
+  ComputeFullGraphSCCsInternal(*g, /*remove_restricted=*/true,
+                               &g->edge_to_isolated_scc_rm_restricted);
 }

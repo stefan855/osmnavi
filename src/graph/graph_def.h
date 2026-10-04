@@ -485,6 +485,7 @@ struct Graph {
   std::vector<GNode> nodes;
   std::vector<GEdge> edges;
   std::vector<bool> edge_to_isolated_scc;
+  std::vector<bool> edge_to_isolated_scc_rm_restricted;
 
   // Table with average speed fractions [0..1] seen for every edge speed
   // fraction bucket.

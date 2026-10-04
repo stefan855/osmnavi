@@ -2480,7 +2480,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   ComputeAllTurnCosts(&meta);
 
   // Experimental: Strongly Connected Components.
-  ComputeFullGraphSCCs(meta.graph, &meta.graph.edge_to_isolated_scc);
+  ComputeFullGraphSCCs(&meta.graph);
 
   ClusterGraph(meta.opt, &meta);
   ComputeClusterPaths(meta.opt, &meta);

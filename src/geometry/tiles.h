@@ -369,6 +369,14 @@ std::string CreateMMGraphPNG(const MMGraphTileData& d, std::string what,
         [](const MMCluster& mc, MEdgeIdx edge_idx) -> int { return MAGENTA; },
         [](const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx, int zoom)
             -> bool { return mc.edge_to_isolated_scc.at(edge_idx) != 0; });
+  } else if (what == "isolated_scc_rm_restricted") {
+    return CreatePNGInternal(
+        d, zoom, tile_x, tile_y,
+        [](const MMCluster& mc, MEdgeIdx edge_idx) -> int { return BLACK; },
+        [](const MMCluster& mc, MNodeIdx from_idx, MEdgeIdx edge_idx,
+           int zoom) -> bool {
+          return mc.edge_to_isolated_scc_rm_restricted.at(edge_idx) != 0;
+        });
   } else if (what == "restricted") {
     return CreatePNGInternal(
         d, zoom, tile_x, tile_y,
