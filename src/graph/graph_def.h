@@ -930,6 +930,37 @@ inline uint32_t gnode_find_forward_edge_offset(const Graph& g,
       g.ways.at(way_idx).id);
 }
 
+enum EdgeRestriction { EdgeRestrAll, EdgeRestrFree, EdgeRestrRestricted };
+
+// Return true iff at least one edge from_idx -> target_idx exists with
+// restriction 'restr'.
+inline bool gedge_exist(const Graph& g, uint32_t from_idx, uint32_t target_idx,
+                        EdgeRestriction restr) {
+  for (const GEdge& e : gnode_forward_edges(g, from_idx)) {
+    if (e.target_idx == target_idx &&
+        (restr == EdgeRestrAll ||
+         (restr == EdgeRestrFree) == (e.car_label == GEdge::LABEL_FREE))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Count the forward edges that satisfy 'restr' and have target_idx !=
+// ignore_idx.
+// Note that self-links are ignored.
+uint32_t gnode_count_forward_edges(const Graph& g, uint32_t node_ix,
+                                   EdgeRestriction restr,
+                                   uint32_t ignore_idx = INFU32) {
+  uint32_t num = 0;
+  for (const GEdge& e : gnode_forward_edges(g, from_idx)) {
+    num += (restr == EdgeRestrAll ||
+            (restr == EdgeRestrFree) == (e.car_label == GEdge::LABEL_FREE)) &&
+           (e.target_idx != ignore_idx) && (e.target_idx != node_ix);
+  }
+  return num;
+}
+
 inline uint32_t gnode_find_edge_idx(const Graph& g, uint32_t from_node_idx,
                                     uint32_t to_node_idx, uint32_t way_idx) {
   uint32_t e_start = gnode_edges_start(g, from_node_idx);

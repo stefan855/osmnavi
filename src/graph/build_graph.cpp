@@ -2473,7 +2473,7 @@ GraphMetaData BuildGraph(const BuildGraphOptions& opt) {
   LoadTurnRestrictionsFromRelations(&reader, &meta, &meta.Stats());
   DetermineComponents(&meta.graph);
   ApplyTarjan(&(meta.graph));
-  LabelAllCarEdges(&meta.graph, Verbosity::Brief);
+  LabelAllCarEdges(&meta.graph, Verbosity::Brief);  // Needs dead-end.
 
   MarkPedestrianCrossingNodes(&meta);
   LabelEdgesFromNodeTags(&meta);

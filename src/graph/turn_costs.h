@@ -492,6 +492,9 @@ bool VehicleBlockedAtNode(const Graph& g, VEHICLE vt, const NodeTags* node_tags,
 
 // Is the U-Turn represented by 'n3p' allowed?
 //
+// This doesn't handle positive or negative simple turn restriction (do it
+// before).
+//
 // The code checks for various situations, including when a vehicle would be
 // trapped at the target node with no way to continue the travel, which is true
 // at the end of a street or when facing a restricted access area.
@@ -529,6 +532,20 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
     return true;
   }
 
+  if (gnode_count_forward_edges(g, n3p.node1_idx, EdgeRestrAll,
+                                /*ignore_idx=*/n3p.node0_idx) == 0) {
+    // There is no continuation (only the u-turn).
+    return true;
+  }
+
+  if (edge0.car_label == GEdge::LABEL_FREE &&
+      gnode_count_forward_edges(g, n3p.node1_idx, EdgeRestrFree,
+                                /*ignore_idx=*/n3p.node0_idx) == 0) {
+    // Coming from a free edge, there is no free continuation, so allow uturn.
+    // We ignore the rare cases when the uturn-edge is restricted.
+    return true;
+  }
+
   // Now check which kind of continuation edges there are.
   bool found_continuation = false;
   bool found_free_continuation = false;
@@ -542,12 +559,12 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
     }
   }
 
-  // Vehicle can't continue except for returning.
+  // Vehicle can't continue except for returning, so allow uturn.
   if (!found_continuation) {
     // LOG_S(INFO) << "TT4 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
-  // when arriving through a free edge, it is allowed to do a u-turn if there
+  // When arriving through a free edge, it is allowed to do a u-turn if there
   // are only restricted edges to continue on.
   if (edge0.car_label == GEdge::LABEL_FREE && !found_free_continuation) {
     // LOG_S(INFO) << "TT5 Allowed UTurn " << n3p.DebugStr(g);
@@ -732,8 +749,10 @@ inline DurationMS ComputeTurnCostForN3Path(
   }
 
   // Is this a u-turn that is forbidden, given the type of crossing at the
-  // middle node? Note that a positive turn restriction from above always
-  // allows a u-turn.
+  // middle node?
+  // Note that a positive turn restriction from above always allows a u-turn.
+  // Also note that a negative u-turn from above always blocks, it returns
+  // before we get here.
 
   // Note that node_tags might be a nullptr!
   const NodeTags* node_tags = g.FindNodeTags(n3p.node1(g).node_id);
@@ -773,7 +792,7 @@ inline DurationMS ComputeTurnCostForN3Path(
 
   // So far we know we can do the turn and it is not a u-turn.
   //
-  // Compute three time losses and use the maximum:
+  // Compute several time losses and use the maximum:
   // 1) Time loss because of curve.
   // 2) Time loss because of node (stop sign, signals, etc.)
   // 3) Crossing cost because of other cars crossing my way.
