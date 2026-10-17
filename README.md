@@ -1,3 +1,7 @@
+# Moved to [codeberg.org](https://codeberg.org/stefanchr/osm-router), this version is abandoned
+
+#
+
 # OpenStreetMap Routing Engine
 
 ## Project
