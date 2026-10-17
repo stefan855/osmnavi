@@ -546,19 +546,27 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
     return true;
   }
 
+  // Find out if this is a bothway edge that leads into a oneway edge.
+  // For this case, we want to allow a uturn, otherwise one would be forced to
+  // enter the oneway edge and the reverse edge on the bothway would be
+  // unreachable.
+  if (gedge_exists(g, n3p.node1_idx, n3p.node0_idx, EdgeRestrAll)) {
+  }
+
   // Now check which kind of continuation edges there are.
-  bool found_continuation = false;
+  // bool found_continuation = false;
   bool found_free_continuation = false;
   bool found_free_bridge = false;
   for (const GEdge& out : gnode_forward_edges(g, edge0.target_idx)) {
     if (out.target_idx != n3p.node0_idx && out.target_idx != edge0.target_idx) {
       // 'out' doesn't return to the beginning and isn't a self-link.
-      found_continuation = true;
+      // found_continuation = true;
       found_free_continuation |= (out.car_label == GEdge::LABEL_FREE);
       found_free_bridge |= (out.bridge && out.car_label == GEdge::LABEL_FREE);
     }
   }
 
+#if 0
   // Vehicle can't continue except for returning, so allow uturn.
   if (!found_continuation) {
     // LOG_S(INFO) << "TT4 Allowed UTurn " << n3p.DebugStr(g);
@@ -570,6 +578,7 @@ inline bool IsUTurnAllowed(const Graph& g, VEHICLE vt,
     // LOG_S(INFO) << "TT5 Allowed UTurn " << n3p.DebugStr(g);
     return true;
   }
+#endif
 
   // If at the entrance of a dead end, then almost always u-turn is possible, by
   // entering the dead end and leaving it when coming back. Currently, we
