@@ -1,4 +1,4 @@
-# Moved to [codeberg.org](https://codeberg.org/stefanchr/osm-router), this version is abandoned
+# Moved to [codeberg.org](https://codeberg.org/stefanchr/osm-router), this version is no longer maintained.
 
 #
 
